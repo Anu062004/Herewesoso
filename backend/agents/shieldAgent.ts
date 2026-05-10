@@ -350,6 +350,7 @@ async function runShieldAgent(): Promise<ShieldAgentResult> {
     }
 
     if (riskSnapshots.length > 0) {
+      memoryStore.pushPositionRisks(riskSnapshots);
       await safeInsert('position_risks', riskSnapshots);
     }
 

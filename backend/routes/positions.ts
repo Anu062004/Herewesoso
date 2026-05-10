@@ -4,6 +4,7 @@ import type { PositionRiskSnapshot } from '../types/domain';
 import express from 'express';
 import sodex = require('../services/sodex');
 import supabaseService = require('../services/supabase');
+import memoryStore = require('../services/memoryStore');
 import errorUtils = require('../utils/error');
 
 const { safeSelect } = supabaseService;
@@ -91,13 +92,13 @@ router.get('/', async (req: Request, res: Response) => {
       return nextQuery;
     });
 
-    if (error) {
-      return res.status(500).json({ error: error.message, live, history: [] });
-    }
+    const historyData = (!error && history && history.length > 0)
+      ? history
+      : memoryStore.getPositionRisks();
 
     return res.json({
       live,
-      history: history || [],
+      history: historyData,
       updatedAt: new Date().toISOString()
     });
   } catch (error) {

@@ -31,9 +31,25 @@ export interface SignalEntry {
   created_at: string;
 }
 
+export interface PositionRiskEntry {
+  wallet_address?: string | null;
+  symbol: string;
+  entry_price: number;
+  mark_price: number;
+  liquidation_price: number;
+  leverage: number;
+  position_size: number;
+  distance_to_liquidation_pct: number;
+  risk_score: number;
+  risk_level: string;
+  macro_threats?: Record<string, unknown> | null;
+  created_at: string;
+}
+
 const memos: MemoEntry[] = [];
 const alerts: AlertEntry[] = [];
 const signals: SignalEntry[] = [];
+const positionRisks: PositionRiskEntry[] = [];
 
 function now() { return new Date().toISOString(); }
 
@@ -52,6 +68,13 @@ export function pushSignals(entries: Omit<SignalEntry, 'created_at'>[]) {
   signals.splice(0, signals.length, ...stamped);
 }
 
+export function pushPositionRisks(entries: Omit<PositionRiskEntry, 'created_at'>[]) {
+  const stamped = entries.map(e => ({ ...e, created_at: now() }));
+  positionRisks.unshift(...stamped);
+  positionRisks.splice(20);
+}
+
 export function getMemos(): MemoEntry[] { return memos; }
 export function getAlerts(): AlertEntry[] { return alerts; }
 export function getSignals(): SignalEntry[] { return signals; }
+export function getPositionRisks(): PositionRiskEntry[] { return positionRisks; }
