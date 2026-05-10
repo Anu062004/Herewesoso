@@ -69,9 +69,9 @@ function shouldSendDailySummary(now: Date): boolean {
   return withinWindow && lastDailySummaryKey !== key;
 }
 
-async function runDailySummary() {
+async function runDailySummary(force = false) {
   const now = new Date();
-  if (!shouldSendDailySummary(now)) {
+  if (!force && !shouldSendDailySummary(now)) {
     return { skipped: true };
   }
 
