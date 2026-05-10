@@ -65,7 +65,10 @@ async function runNarrativeAgent(): Promise<NarrativeAgentResult> {
         score_macro: macroScore,
         combined_score: combined,
         signal,
-        top_headlines: headlines.slice(0, 3).map((headline) => String(headline.title || 'Untitled headline'))
+        top_headlines: headlines
+          .filter((h) => h.title && String(h.title).trim().length > 5)
+          .slice(0, 3)
+          .map((headline) => String(headline.title))
       };
     });
 

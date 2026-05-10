@@ -3,8 +3,11 @@ import type { RiskLevel } from '../types/domain';
 type RiskLevelActions = Record<RiskLevel, string>;
 
 const riskCalculator = {
-  calculateLiquidationDistance(markPrice: number, liquidationPrice: number, side: string): number {
+  calculateLiquidationDistance(markPrice: number, liquidationPrice: number, side: string, leverage?: number): number {
     if (!liquidationPrice || Number(liquidationPrice) === 0 || !markPrice) {
+      // Testnet often returns liquidationPrice=0. Estimate distance from leverage:
+      // cross-margin liquidation ≈ 1/leverage of notional, so distance ≈ 100/leverage %
+      if (leverage && leverage > 0) return Math.min(100 / leverage, 100);
       return 100;
     }
 

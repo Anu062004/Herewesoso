@@ -1,6 +1,7 @@
 import type { Request, Response } from 'express';
 
 import express from 'express';
+import sodexTrader = require('../services/sodexTrader');
 
 type DashboardAction = 'QUEUE_ACTION' | 'REDUCE_LEVERAGE' | 'CLOSE_POSITION';
 
@@ -17,18 +18,42 @@ router.post('/', async (req: Request, res: Response) => {
   const currentLeverage = typeof payload.currentLeverage === 'number' ? payload.currentLeverage : null;
   const targetLeverage = typeof payload.targetLeverage === 'number' ? payload.targetLeverage : null;
 
-  const baseMessage =
-    action === 'REDUCE_LEVERAGE' && currentLeverage && targetLeverage
-      ? `Action queued - this will reduce your ${symbol} position from ${currentLeverage}x to ${targetLeverage}x. EIP-712 execution coming in Wave 2.`
-      : action === 'CLOSE_POSITION'
-        ? `Action queued - ${symbol} close request acknowledged. EIP-712 execution coming in Wave 2.`
-        : 'Action queued - EIP-712 execution coming in Wave 2.';
+  if (!sodexTrader.hasKey()) {
+    return res.json({
+      queued: false,
+      action,
+      symbol,
+      message: 'No private key configured. Use /setkey in Telegram to add your wallet key before executing trades.'
+    });
+  }
+
+  if (action === 'CLOSE_POSITION') {
+    const result = await sodexTrader.closePosition(symbol, '0');
+    return res.json({
+      queued: result.success,
+      action,
+      symbol,
+      message: result.message
+    });
+  }
+
+  if (action === 'REDUCE_LEVERAGE' && targetLeverage) {
+    const result = await sodexTrader.reduceLeverage(symbol, targetLeverage);
+    return res.json({
+      queued: result.success,
+      action,
+      symbol,
+      message: result.success
+        ? `Leverage reduced to ${targetLeverage}x for ${symbol}`
+        : result.message
+    });
+  }
 
   return res.json({
     queued: true,
     action,
     symbol,
-    message: baseMessage
+    message: 'Action queued.'
   });
 });
 

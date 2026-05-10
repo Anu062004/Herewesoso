@@ -198,7 +198,8 @@ async function runShieldAgent(): Promise<ShieldAgentResult> {
       const distancePct = riskCalculator.calculateLiquidationDistance(
         parsedMarkPrice,
         parsedLiquidationPrice,
-        positionSide
+        positionSide,
+        parsedLeverage
       );
       const positionRisk = riskCalculator.distanceToRiskScore(distancePct);
       const macroThreatScore = nearestEvent
