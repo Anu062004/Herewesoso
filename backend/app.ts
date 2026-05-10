@@ -11,6 +11,7 @@ import triggerRoute = require('./routes/trigger');
 import dailySummaryRoute = require('./routes/dailySummary');
 import testTelegramRoute = require('./routes/testTelegram');
 import actionsRoute = require('./routes/actions');
+import analyzeRoute = require('./routes/analyze');
 import sodexRoute = require('./routes/sodex');
 
 const app = express();
@@ -29,6 +30,7 @@ app.use('/api/trigger', triggerRoute);
 app.use('/api/daily-summary', dailySummaryRoute);
 app.use('/api/test-telegram', testTelegramRoute);
 app.use('/api/actions', actionsRoute);
+app.use('/api/analyze', analyzeRoute);
 app.use('/api/sodex', sodexRoute);
 
 export default app;

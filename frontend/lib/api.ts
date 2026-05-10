@@ -104,3 +104,34 @@ export async function sendTelegramTest() {
     { method: 'POST' }
   );
 }
+
+export interface AnalysisSector {
+  sector: string;
+  score_narrative: number;
+  score_etf_flow: number;
+  score_macro: number;
+  combined_score: number;
+  signal: string;
+  top_headlines: string[];
+  reasoning: string | null;
+}
+
+export interface AnalysisResult {
+  success: boolean;
+  duration_ms: number;
+  summary: string;
+  sectors: AnalysisSector[];
+  news_count: number;
+  etf_net_flow: number;
+  macro_events_count: number;
+  analyzed_at: string;
+  message?: string;
+}
+
+export async function runAnalysis(): Promise<AnalysisResult> {
+  return fetchJson<AnalysisResult>(
+    '/api/analyze',
+    { success: false, duration_ms: 0, summary: '', sectors: [], news_count: 0, etf_net_flow: 0, macro_events_count: 0, analyzed_at: new Date().toISOString(), message: 'Analysis unavailable.' },
+    { method: 'POST' }
+  );
+}

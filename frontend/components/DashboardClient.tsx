@@ -15,9 +15,12 @@ import {
   fetchPositions,
   fetchSignals,
   queueDashboardAction,
+  runAnalysis,
   sendTelegramTest,
-  triggerCycle
+  triggerCycle,
+  type AnalysisResult
 } from '@/lib/api';
+import AnalysisModal from '@/components/AnalysisModal';
 import type { DashboardData, LivePosition, MemoRow, PositionSnapshot } from '@/lib/types';
 
 type PendingAction =
@@ -87,6 +90,9 @@ export default function DashboardClient({ initialData }: { initialData: Dashboar
   const [macro, setMacro] = useState(initialData.macro);
   const [lastUpdated, setLastUpdated] = useState(initialData.positions.updatedAt || new Date().toISOString());
   const [isRunning, setIsRunning] = useState(false);
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [analysisResult, setAnalysisResult] = useState<AnalysisResult | null>(null);
+  const [showAnalysis, setShowAnalysis] = useState(false);
   const [pendingAction, setPendingAction] = useState<PendingAction>(null);
   const [isSubmittingAction, setIsSubmittingAction] = useState(false);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
@@ -150,6 +156,17 @@ export default function DashboardClient({ initialData }: { initialData: Dashboar
     setStatusMessage(result.message);
   }
 
+  async function handleRunAnalysis() {
+    setIsAnalyzing(true);
+    setShowAnalysis(true);
+    setAnalysisResult(null);
+    const result = await runAnalysis();
+    setAnalysisResult(result);
+    setIsAnalyzing(false);
+    // Refresh signals from the fresh analysis
+    setSignals(await fetchSignals());
+  }
+
   async function handleConfirmAction() {
     if (!pendingAction) return;
 
@@ -173,7 +190,9 @@ export default function DashboardClient({ initialData }: { initialData: Dashboar
           lastUpdated={timeAgo(lastUpdated)}
           onRunNow={handleRunNow}
           onTestTelegram={handleTestTelegram}
+          onRunAnalysis={handleRunAnalysis}
           isRunning={isRunning}
+          isAnalyzing={isAnalyzing}
         />
 
         {statusMessage ? (
@@ -231,6 +250,13 @@ export default function DashboardClient({ initialData }: { initialData: Dashboar
           <AlertFeed alerts={alerts} />
         </section>
       </main>
+
+      <AnalysisModal
+        open={showAnalysis}
+        loading={isAnalyzing}
+        result={analysisResult}
+        onClose={() => setShowAnalysis(false)}
+      />
 
       <ExecuteModal
         open={Boolean(pendingAction)}

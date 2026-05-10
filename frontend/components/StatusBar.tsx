@@ -5,7 +5,9 @@ interface StatusBarProps {
   lastUpdated: string;
   onRunNow: () => void;
   onTestTelegram: () => void;
+  onRunAnalysis: () => void;
   isRunning: boolean;
+  isAnalyzing: boolean;
 }
 
 function truncateWallet(wallet: string) {
@@ -19,7 +21,9 @@ export default function StatusBar({
   lastUpdated,
   onRunNow,
   onTestTelegram,
-  isRunning
+  onRunAnalysis,
+  isRunning,
+  isAnalyzing
 }: StatusBarProps) {
   return (
     <section className="panel rounded-[1.75rem] px-6 py-5 sm:px-8">
@@ -42,6 +46,14 @@ export default function StatusBar({
         </div>
 
         <div className="flex flex-wrap gap-3">
+          <button
+            type="button"
+            onClick={onRunAnalysis}
+            disabled={isAnalyzing}
+            className="rounded-full border border-blue-500/40 bg-blue-500/15 px-4 py-2 font-mono text-sm font-semibold text-blue-300 transition hover:bg-blue-500/25 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {isAnalyzing ? '⏳ Analyzing...' : '🔍 Run Analysis'}
+          </button>
           <button
             type="button"
             onClick={onRunNow}

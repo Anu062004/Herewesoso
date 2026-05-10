@@ -52,11 +52,32 @@ async function runNarrativeAgent(): Promise<NarrativeAgentResult> {
     );
     const upcoming = (Array.isArray(macroEvents?.data) ? macroEvents.data : []) as MacroEvent[];
 
+    const SECTOR_KEYS: Record<string, string[]> = {
+      DeFi: ['defi','yield','liquidity','amm','tvl','lending','swap','dex'],
+      AI:   ['ai','artificial intelligence','agent','llm','machine learning','gpt','openai'],
+      RWA:  ['rwa','real world asset','tokenized','treasury','bond','real estate'],
+      L1:   ['layer 1','bitcoin','ethereum','solana','avalanche','consensus','validator'],
+      L2:   ['layer 2','rollup','optimism','arbitrum','base','scaling','zk','polygon'],
+      GameFi:['gaming','gamefi','play to earn','nft game','metaverse','game'],
+      DePIN: ['depin','physical infrastructure','helium','render','iot','mining'],
+      Meme:  ['meme','doge','shib','pepe','community','viral','pump']
+    };
+
+    function sectorHeadlines(hl: Headline[], sector: string): Headline[] {
+      const keys = SECTOR_KEYS[sector] || [sector.toLowerCase()];
+      const rel = hl.filter(h => {
+        const t = [h?.title,h?.summary].filter(Boolean).join(' ').toLowerCase();
+        return keys.some(k => t.includes(k));
+      });
+      return [...rel, ...hl.filter(h => !rel.includes(h))].slice(0, 5);
+    }
+
     const sectorScores: NarrativeScoreRow[] = SECTORS.map((sector) => {
       const narrativeScore = narrativeScorer.scoreNarrativeLayer(headlines, sector);
       const etfScore = narrativeScorer.scoreETFLayer(etfNetFlow);
       const macroScore = narrativeScorer.scoreMacroLayer(upcoming);
       const { combined, signal } = narrativeScorer.generateSignal(narrativeScore, etfScore, macroScore);
+      const relevant = sectorHeadlines(headlines, sector);
 
       return {
         sector,
@@ -65,10 +86,10 @@ async function runNarrativeAgent(): Promise<NarrativeAgentResult> {
         score_macro: macroScore,
         combined_score: combined,
         signal,
-        top_headlines: headlines
-          .filter((h) => h.title && String(h.title).trim().length > 5)
+        top_headlines: relevant
+          .map(h => String(h.title || '').trim())
+          .filter(t => t.length > 5)
           .slice(0, 3)
-          .map((headline) => String(headline.title))
       };
     });
 
@@ -76,20 +97,27 @@ async function runNarrativeAgent(): Promise<NarrativeAgentResult> {
       .filter((score) => score.signal === 'STRONG_BUY' || score.signal === 'BUY')
       .sort((left, right) => right.combined_score - left.combined_score);
 
-    let topSignal: NarrativeScoreRow | null = null;
-    if (strongSignals.length > 0) {
-      topSignal = strongSignals[0];
-      const reasoning = await claude.generateNarrativeMemo({
-        sector: topSignal.sector,
-        headlines,
-        etfFlow: etfNetFlow,
-        macroEvents: upcoming,
-        scores: {
-          combined: topSignal.combined_score,
-          signal: topSignal.signal
-        }
-      });
+    // Generate reasoning for top signal + any BUY signals (up to 3)
+    const signalsToReason = strongSignals.slice(0, 3);
+    const reasoningMap = new Map<string, string>();
 
+    for (const sig of signalsToReason) {
+      try {
+        const reasoning = await claude.generateNarrativeMemo({
+          sector: sig.sector,
+          headlines: sectorHeadlines(headlines, sig.sector),
+          etfFlow: etfNetFlow,
+          macroEvents: upcoming,
+          scores: { combined: sig.combined_score, signal: sig.signal }
+        });
+        reasoningMap.set(sig.sector, reasoning);
+        await delay(300);
+      } catch { /* use fallback */ }
+    }
+
+    let topSignal: NarrativeScoreRow | null = strongSignals[0] || null;
+    if (topSignal) {
+      const reasoning = reasoningMap.get(topSignal.sector) || '';
       topSignal.reasoning = reasoning;
 
       memoryStore.pushMemo({
@@ -144,20 +172,13 @@ async function runNarrativeAgent(): Promise<NarrativeAgentResult> {
       });
     }
 
-    memoryStore.pushSignals(
-      sectorScores.map((score) => ({
-        ...score,
-        reasoning: score.sector === topSignal?.sector ? (topSignal?.reasoning || null) : null
-      }))
-    );
+    const scoresToStore = sectorScores.map((score) => ({
+      ...score,
+      reasoning: reasoningMap.get(score.sector) || null
+    }));
 
-    await safeInsert(
-      'narrative_scores',
-      sectorScores.map((score) => ({
-        ...score,
-        reasoning: score.sector === topSignal?.sector ? topSignal?.reasoning || null : null
-      }))
-    );
+    memoryStore.pushSignals(scoresToStore);
+    await safeInsert('narrative_scores', scoresToStore);
 
     const duration = Date.now() - startTime;
     await completeAgentRun(runRecord?.id, {
