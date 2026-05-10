@@ -1,5 +1,5 @@
 const sosovalue = require('../services/sosovalue');
-const claude = require('../services/claude');
+const claude = require('../services/ai');
 const telegram = require('../services/telegram');
 const narrativeScorer = require('../utils/narrativeScorer');
 const { delay } = require('../utils/delay');

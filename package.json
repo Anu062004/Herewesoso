@@ -3,15 +3,17 @@
   "version": "1.0.0",
   "private": true,
   "scripts": {
-    "start": "node backend/server.js",
-    "dev": "nodemon backend/server.js",
-    "test": "node backend/tests/run.js",
+    "start": "tsx backend/server.ts",
+    "dev": "tsx watch backend/server.ts",
+    "test": "tsx --test backend/tests/run.ts",
+    "typecheck": "tsc -p backend/tsconfig.json --noEmit",
     "frontend:dev": "npm --prefix frontend run dev",
     "frontend:build": "npm --prefix frontend run build",
     "frontend:start": "npm --prefix frontend run start"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.24.3",
+    "@google/generative-ai": "^0.24.1",
     "@supabase/supabase-js": "^2.39.0",
     "axios": "^1.6.0",
     "cors": "^2.8.5",

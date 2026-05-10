@@ -1,6 +1,6 @@
 const sodex = require('../services/sodex');
 const sosovalue = require('../services/sosovalue');
-const claude = require('../services/claude');
+const claude = require('../services/ai');
 const telegram = require('../services/telegram');
 const riskCalculator = require('../utils/riskCalculator');
 const {
