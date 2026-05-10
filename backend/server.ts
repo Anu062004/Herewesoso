@@ -1,41 +1,19 @@
 import 'dotenv/config';
-import express from 'express';
-import cors from 'cors';
-import healthRoute = require('./routes/health');
-import signalsRoute = require('./routes/signals');
-import positionsRoute = require('./routes/positions');
-import alertsRoute = require('./routes/alerts');
-import memosRoute = require('./routes/memos');
-import macroRoute = require('./routes/macro');
-import risksRoute = require('./routes/risks');
-import triggerRoute = require('./routes/trigger');
-import testTelegramRoute = require('./routes/testTelegram');
-import actionsRoute = require('./routes/actions');
-import sodexRoute = require('./routes/sodex');
+import app from './app';
 import orchestrator = require('./agents/orchestrator');
+import telegramBot = require('./services/telegramBot');
 
 const { startScheduler } = orchestrator;
-
-const app = express();
-
-app.use(cors());
-app.use(express.json());
-
-app.use('/health', healthRoute);
-app.use('/api/signals', signalsRoute);
-app.use('/api/positions', positionsRoute);
-app.use('/api/alerts', alertsRoute);
-app.use('/api/memos', memosRoute);
-app.use('/api/macro', macroRoute);
-app.use('/api/risks', risksRoute);
-app.use('/api/trigger', triggerRoute);
-app.use('/api/test-telegram', testTelegramRoute);
-app.use('/api/actions', actionsRoute);
-app.use('/api/sodex', sodexRoute);
+const { startBot } = telegramBot;
 
 const PORT = Number.parseInt(process.env.PORT || '3001', 10);
+const shouldRunScheduler =
+  process.env.VERCEL !== '1' && process.env.ENABLE_BACKGROUND_SCHEDULER !== 'false';
 
 app.listen(PORT, () => {
   console.log(`[Server] Running on port ${PORT}`);
-  startScheduler();
+  if (shouldRunScheduler) {
+    startScheduler();
+    startBot();
+  }
 });
