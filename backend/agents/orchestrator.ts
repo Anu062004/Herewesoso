@@ -2,7 +2,7 @@ import type { NarrativeScoreRow, PositionRiskSnapshot } from '../types/domain';
 
 import narrativeAgent = require('./narrativeAgent');
 import shieldAgent = require('./shieldAgent');
-import claude = require('../services/claude');
+import claude = require('../services/ai');
 import telegram = require('../services/telegram');
 import supabaseService = require('../services/supabase');
 import errorUtils = require('../utils/error');

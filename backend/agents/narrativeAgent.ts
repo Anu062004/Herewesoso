@@ -1,7 +1,7 @@
 import type { Headline, MacroEvent, NarrativeScoreRow } from '../types/domain';
 
 import sosovalue = require('../services/sosovalue');
-import claude = require('../services/claude');
+import claude = require('../services/ai');
 import telegram = require('../services/telegram');
 import narrativeScorer = require('../utils/narrativeScorer');
 import delayUtils = require('../utils/delay');

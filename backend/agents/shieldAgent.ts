@@ -2,7 +2,7 @@ import type { MacroEvent, PositionRiskSnapshot, ShieldState } from '../types/dom
 
 import sodex = require('../services/sodex');
 import sosovalue = require('../services/sosovalue');
-import claude = require('../services/claude');
+import claude = require('../services/ai');
 import telegram = require('../services/telegram');
 import riskCalculator = require('../utils/riskCalculator');
 import supabaseService = require('../services/supabase');
