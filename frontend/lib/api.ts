@@ -8,11 +8,17 @@ import type {
   SignalRow
 } from '@/lib/types';
 
-const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:3001';
+// Server: call EC2 directly. Client (browser): use Next.js proxy to avoid mixed-content blocks.
+const isServer = typeof window === 'undefined';
+const API_BASE = isServer
+  ? (process.env.API_BASE_URL || process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:3001')
+  : '/api/proxy';
 
 async function fetchJson<T>(path: string, fallback: T, init?: RequestInit): Promise<T> {
+  // Strip leading /api so we don't double-prefix when using the proxy
+  const normalised = isServer ? path : path.replace(/^\/api/, '');
   try {
-    const response = await fetch(`${API_BASE}${path}`, {
+    const response = await fetch(`${API_BASE}${normalised}`, {
       cache: 'no-store',
       ...init
     });
