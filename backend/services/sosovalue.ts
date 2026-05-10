@@ -118,35 +118,40 @@ async function getWithFallback<T = unknown>(
   throw lastError || new Error(`${options.name || 'request'} failed without a response.`);
 }
 
-function normalizeNewsResponse(response: SosoResponse<unknown>): SosoResponse<unknown[]> {
-  const responseData = response?.data as
-    | { list?: unknown[]; page?: number; page_size?: number; total?: number }
-    | unknown[]
-    | undefined;
+const NEWS_ARRAY_KEYS = ['list', 'items', 'articles', 'records', 'news', 'data', 'results', 'feeds'];
 
-  if (responseData && !Array.isArray(responseData) && Array.isArray(responseData.list)) {
-    return {
-      ...response,
-      data: responseData.list,
-      meta: {
-        page: responseData.page ?? null,
-        pageSize: responseData.page_size ?? null,
-        total: responseData.total ?? null
-      }
-    };
+function extractNewsArray(obj: Record<string, unknown>): unknown[] | null {
+  for (const key of NEWS_ARRAY_KEYS) {
+    if (Array.isArray(obj[key])) return obj[key] as unknown[];
   }
+  return null;
+}
+
+function normalizeNewsResponse(response: SosoResponse<unknown>): SosoResponse<unknown[]> {
+  const responseData = response?.data;
 
   if (Array.isArray(responseData)) {
-    return {
-      ...response,
-      data: responseData
-    };
+    return { ...response, data: responseData };
   }
 
-  return {
-    ...response,
-    data: []
-  };
+  if (responseData && typeof responseData === 'object' && !Array.isArray(responseData)) {
+    const arr = extractNewsArray(responseData as Record<string, unknown>);
+    if (arr) {
+      const rd = responseData as Record<string, unknown>;
+      return {
+        ...response,
+        data: arr,
+        meta: {
+          page: rd.page ?? null,
+          pageSize: rd.page_size ?? null,
+          total: rd.total ?? null
+        }
+      };
+    }
+  }
+
+  console.warn('[SoSoValue] Unrecognized news response structure:', JSON.stringify(response).slice(0, 300));
+  return { ...response, data: [] };
 }
 
 function normalizeEtfSummaryResponse(
@@ -169,7 +174,7 @@ function normalizeEtfSummaryResponse(
   };
 }
 
-const newsPaths = [process.env.SOSOVALUE_NEWS_PATH, '/news', '/feeds'];
+const newsPaths = [process.env.SOSOVALUE_NEWS_PATH, '/news', '/feeds', '/news/list', '/feeds/news'];
 const etfListPaths = [
   process.env.SOSOVALUE_ETF_LIST_PATH,
   '/etf/list',
@@ -220,7 +225,11 @@ function resolveCurrencyParams(input: CurrencyIdentifier): Record<string, string
 
 const sosovalue = {
   async getNews(limit = 20): Promise<SosoResponse<unknown[]>> {
-    const response = await getWithFallback<SosoResponse<unknown>>(newsPaths, { limit }, { name: 'news' });
+    const response = await getWithFallback<SosoResponse<unknown>>(
+      newsPaths,
+      { limit, page_size: limit, count: limit },
+      { name: 'news', allowUnavailable: true, unavailableMessage: 'News endpoint is unavailable.', defaultData: [] }
+    );
     return normalizeNewsResponse(response);
   },
 
