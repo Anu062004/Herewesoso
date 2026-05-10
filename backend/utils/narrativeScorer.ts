@@ -1,4 +1,6 @@
-const SECTOR_KEYWORDS = {
+import type { Headline, MacroEvent, ScoreBucket, SignalType } from '../types/domain';
+
+const SECTOR_KEYWORDS: Record<string, string[]> = {
   DeFi: ['defi', 'yield', 'liquidity', 'amm', 'protocol', 'tvl'],
   AI: ['ai', 'artificial intelligence', 'agent', 'llm', 'machine learning'],
   RWA: ['rwa', 'real world asset', 'tokenized', 'treasury', 'bond'],
@@ -9,10 +11,10 @@ const SECTOR_KEYWORDS = {
   Meme: ['meme', 'dog', 'community', 'viral', 'pump']
 };
 
-const HIGH_IMPACT_EVENTS = ['CPI', 'FOMC', 'Fed Rate', 'GDP', 'Jobs', 'NFP'];
+const HIGH_IMPACT_EVENTS = ['CPI', 'FOMC', 'Fed Rate', 'GDP', 'Jobs', 'NFP'] as const;
 
 const narrativeScorer = {
-  scoreNarrativeLayer(headlines, sector) {
+  scoreNarrativeLayer(headlines: Headline[], sector: string): number {
     if (!Array.isArray(headlines) || headlines.length === 0) {
       return 0;
     }
@@ -31,7 +33,7 @@ const narrativeScorer = {
     return Math.round(frequency);
   },
 
-  scoreETFLayer(netInflow7Day) {
+  scoreETFLayer(netInflow7Day: number): number {
     if (netInflow7Day > 500000000) return 95;
     if (netInflow7Day > 100000000) return 80;
     if (netInflow7Day > 10000000) return 65;
@@ -41,7 +43,7 @@ const narrativeScorer = {
     return 5;
   },
 
-  scoreMacroLayer(upcomingEvents) {
+  scoreMacroLayer(upcomingEvents: MacroEvent[]): number {
     const dangerousEvents = (upcomingEvents || []).filter((event) =>
       HIGH_IMPACT_EVENTS.some((marker) => event?.name?.includes(marker))
     );
@@ -51,10 +53,10 @@ const narrativeScorer = {
     return 20;
   },
 
-  generateSignal(narrativeScore, etfScore, macroScore) {
-    const combined = (narrativeScore * 0.35) + (etfScore * 0.35) + (macroScore * 0.30);
+  generateSignal(narrativeScore: number, etfScore: number, macroScore: number): ScoreBucket {
+    const combined = narrativeScore * 0.35 + etfScore * 0.35 + macroScore * 0.3;
 
-    let signal = 'AVOID';
+    let signal: SignalType = 'AVOID';
     if (combined >= 75) signal = 'STRONG_BUY';
     else if (combined >= 60) signal = 'BUY';
     else if (combined >= 45) signal = 'WATCH';
@@ -64,4 +66,4 @@ const narrativeScorer = {
   }
 };
 
-module.exports = narrativeScorer;
+export = narrativeScorer;

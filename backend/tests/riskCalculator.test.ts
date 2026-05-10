@@ -1,7 +1,6 @@
-const test = require('node:test');
-const assert = require('node:assert/strict');
-
-const riskCalculator = require('../utils/riskCalculator');
+import test = require('node:test');
+import assert = require('node:assert/strict');
+import riskCalculator = require('../utils/riskCalculator');
 
 test('calculateLiquidationDistance handles long positions', () => {
   const distance = riskCalculator.calculateLiquidationDistance(100, 85, 'LONG');
@@ -28,3 +27,5 @@ test('calculateCombinedRisk applies macro and ETF penalties', () => {
   assert.equal(score, 64);
   assert.equal(riskCalculator.scoreToRiskLevel(score), 'DANGER');
 });
+
+export {};

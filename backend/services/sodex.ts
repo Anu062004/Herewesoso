@@ -1,4 +1,9 @@
-const axios = require('axios');
+import type { AccountState, EnrichedPosition, ShieldState } from '../types/domain';
+
+import axios from 'axios';
+
+type QueryParams = Record<string, string | number> | undefined;
+type RawRecord = Record<string, any>;
 
 const DEFAULT_PERPS = 'https://testnet-gw.sodex.dev/api/v1/perps';
 const DEFAULT_SPOT = 'https://testnet-gw.sodex.dev/api/v1/spot';
@@ -10,25 +15,29 @@ const client = axios.create({
   }
 });
 
-function perpsBaseUrl() {
+function perpsBaseUrl(): string {
   return process.env.SODEX_TESTNET_PERPS || DEFAULT_PERPS;
 }
 
-function spotBaseUrl() {
+function spotBaseUrl(): string {
   return process.env.SODEX_TESTNET_SPOT || DEFAULT_SPOT;
 }
 
-async function get(baseUrl, path, params) {
-  const response = await client.get(`${baseUrl}${path}`, { params });
+async function get<T = unknown>(baseUrl: string, path: string, params?: QueryParams): Promise<T> {
+  const response = await client.get<T>(`${baseUrl}${path}`, { params });
   return response.data;
 }
 
-function normalizeAccountState(raw) {
+function parseNumber(value: string | number | null | undefined): number {
+  return Number.parseFloat(String(value ?? '0')) || 0;
+}
+
+function normalizeAccountState(raw: RawRecord): AccountState | null {
   const data = raw?.data;
 
   if (!data) return null;
 
-  const positions = (data.P || []).map((position) => ({
+  const positions = ((data.P || []) as RawRecord[]).map((position) => ({
     id: position.i,
     symbol: position.s,
     marginMode: position.m,
@@ -43,7 +52,7 @@ function normalizeAccountState(raw) {
     updatedAt: position.ut
   }));
 
-  const balances = (data.B || []).map((balance) => ({
+  const balances = ((data.B || []) as RawRecord[]).map((balance) => ({
     coin: balance.a,
     walletBalance: balance.wb,
     availableBalance: balance.am,
@@ -53,10 +62,10 @@ function normalizeAccountState(raw) {
   return {
     user: data.user,
     accountId: data.aid,
-    accountValue: parseFloat(data.av || '0'),
-    availableMargin: parseFloat(data.am || '0'),
-    initialMargin: parseFloat(data.im || '0'),
-    crossMargin: parseFloat(data.cm || '0'),
+    accountValue: parseNumber(data.av),
+    availableMargin: parseNumber(data.am),
+    initialMargin: parseNumber(data.im),
+    crossMargin: parseNumber(data.cm),
     walletAddress: data.user,
     positions,
     balances,
@@ -64,31 +73,33 @@ function normalizeAccountState(raw) {
   };
 }
 
-function normalizePositions(raw) {
-  const positions = raw?.data?.positions || raw?.data || [];
+function normalizePositions(raw: RawRecord): EnrichedPosition[] {
+  const positions = (raw?.data?.positions || raw?.data || []) as RawRecord[];
 
   if (!Array.isArray(positions)) return [];
 
-  return positions.filter((position) => position.active !== false).map((position) => ({
-    id: position.id,
-    symbol: position.symbol,
-    marginMode: position.marginMode,
-    positionSide: position.positionSide || 'BOTH',
-    side: position.positionSide === 'SHORT' ? 'SHORT' : 'LONG',
-    positionSize: position.size,
-    entryPrice: position.avgEntryPrice,
-    markPrice: null,
-    liquidationPrice: position.liquidationPrice || position.takeOverPrice || null,
-    leverage: position.leverage,
-    realizedPnL: position.realizedPnL,
-    createdAt: position.createdAt,
-    updatedAt: position.updatedAt,
-    active: position.active
-  }));
+  return positions
+    .filter((position) => position.active !== false)
+    .map((position) => ({
+      id: position.id,
+      symbol: position.symbol,
+      marginMode: position.marginMode,
+      positionSide: position.positionSide || 'BOTH',
+      side: position.positionSide === 'SHORT' ? 'SHORT' : 'LONG',
+      positionSize: position.size,
+      entryPrice: position.avgEntryPrice,
+      markPrice: null,
+      liquidationPrice: position.liquidationPrice || position.takeOverPrice || null,
+      leverage: position.leverage,
+      realizedPnL: position.realizedPnL,
+      createdAt: position.createdAt,
+      updatedAt: position.updatedAt,
+      active: position.active
+    }));
 }
 
 const sodex = {
-  async getPositions(walletAddress) {
+  async getPositions(walletAddress: string) {
     if (!walletAddress) {
       throw new Error('walletAddress is required for getPositions().');
     }
@@ -96,22 +107,22 @@ const sodex = {
     return get(perpsBaseUrl(), `/accounts/${walletAddress}/positions`);
   },
 
-  async getEnrichedPositions(walletAddress) {
+  async getEnrichedPositions(walletAddress: string): Promise<ShieldState> {
     if (!walletAddress) {
       throw new Error('walletAddress is required for getEnrichedPositions().');
     }
 
     const [positionsRaw, stateRaw, markPricesRaw] = await Promise.all([
-      get(perpsBaseUrl(), `/accounts/${walletAddress}/positions`),
-      get(perpsBaseUrl(), `/accounts/${walletAddress}/state`),
-      get(perpsBaseUrl(), '/markets/mark-prices')
+      get<RawRecord>(perpsBaseUrl(), `/accounts/${walletAddress}/positions`),
+      get<RawRecord>(perpsBaseUrl(), `/accounts/${walletAddress}/state`),
+      get<RawRecord>(perpsBaseUrl(), '/markets/mark-prices')
     ]);
 
     const positions = normalizePositions(positionsRaw);
-    const statePositions = stateRaw?.data?.P || [];
-    const markPrices = markPricesRaw?.data || [];
-    const liquidationPriceMap = new Map();
-    const markPriceMap = new Map();
+    const statePositions = (stateRaw?.data?.P || []) as RawRecord[];
+    const markPrices = (markPricesRaw?.data || []) as RawRecord[];
+    const liquidationPriceMap = new Map<string, string | number | null>();
+    const markPriceMap = new Map<string, string | number | null>();
 
     for (const position of statePositions) {
       liquidationPriceMap.set(position.s, position.lp);
@@ -122,7 +133,7 @@ const sodex = {
     }
 
     for (const position of positions) {
-      position.markPrice = markPriceMap.get(position.symbol) || position.markPrice;
+      position.markPrice = markPriceMap.get(position.symbol) || position.markPrice || null;
       position.liquidationPrice =
         position.liquidationPrice || liquidationPriceMap.get(position.symbol) || null;
     }
@@ -133,11 +144,11 @@ const sodex = {
     };
   },
 
-  async getMarkPrices(symbol = null) {
+  async getMarkPrices(symbol: string | null = null) {
     return get(perpsBaseUrl(), '/markets/mark-prices', symbol ? { symbol } : undefined);
   },
 
-  async getBalances(walletAddress) {
+  async getBalances(walletAddress: string) {
     if (!walletAddress) {
       throw new Error('walletAddress is required for getBalances().');
     }
@@ -145,12 +156,12 @@ const sodex = {
     return get(perpsBaseUrl(), `/accounts/${walletAddress}/balances`);
   },
 
-  async getAccountState(walletAddress) {
+  async getAccountState(walletAddress: string): Promise<{ data: AccountState | null; raw: unknown }> {
     if (!walletAddress) {
       throw new Error('walletAddress is required for getAccountState().');
     }
 
-    const raw = await get(perpsBaseUrl(), `/accounts/${walletAddress}/state`);
+    const raw = await get<RawRecord>(perpsBaseUrl(), `/accounts/${walletAddress}/state`);
 
     return {
       data: normalizeAccountState(raw),
@@ -158,7 +169,7 @@ const sodex = {
     };
   },
 
-  async getOrderbook(symbol, limit = 20) {
+  async getOrderbook(symbol: string, limit = 20) {
     if (!symbol) {
       throw new Error('symbol is required for getOrderbook().');
     }
@@ -166,7 +177,7 @@ const sodex = {
     return get(perpsBaseUrl(), `/markets/${symbol}/orderbook`, { limit });
   },
 
-  async getKlines(symbol, interval = '1h', limit = 100) {
+  async getKlines(symbol: string, interval = '1h', limit = 100) {
     if (!symbol) {
       throw new Error('symbol is required for getKlines().');
     }
@@ -174,7 +185,7 @@ const sodex = {
     return get(perpsBaseUrl(), `/markets/${symbol}/klines`, { interval, limit });
   },
 
-  async getFundingHistory(walletAddress, symbol) {
+  async getFundingHistory(walletAddress: string, symbol?: string) {
     if (!walletAddress) {
       throw new Error('walletAddress is required for getFundingHistory().');
     }
@@ -194,4 +205,4 @@ const sodex = {
   normalizePositions
 };
 
-module.exports = sodex;
+export = sodex;

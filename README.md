@@ -13,6 +13,7 @@ Wave 1 rules implemented in this repo:
 - SoSoValue requests use `x-soso-api-key`
 - SoDEX reads use `public testnet GET endpoints`
 - Supabase writes are wrapped so agent failures do not crash the cycle
+- backend source is TypeScript and runs through `tsx`
 
 ## Structure
 
@@ -47,7 +48,13 @@ Wave 1 rules implemented in this repo:
    npm run dev
    ```
 
-5. Start the frontend:
+5. Type-check the backend:
+
+   ```bash
+   npm run typecheck
+   ```
+
+6. Start the frontend:
 
    ```bash
    npm run frontend:dev
@@ -74,6 +81,10 @@ Run the SQL from the build spec for these tables:
 - `GET /api/memos`
 - `GET /api/macro`
 - `GET /api/risks`
+- `GET /api/sodex/account`
+- `GET /api/sodex/markets`
+- `GET /api/sodex/orderbook/:symbol`
+- `GET /api/sodex/klines/:symbol`
 - `POST /api/trigger`
 - `POST /api/test-telegram`
 - `POST /api/actions`

@@ -1,25 +1,69 @@
-const axios = require('axios');
+import type { AlertSeverity, RiskLevel, SignalType, TelegramAlertResult, TelegramPayload } from '../types/domain';
 
-function getApiBase() {
+import axios from 'axios';
+import errorUtils = require('../utils/error');
+
+const { getErrorMessage } = errorUtils;
+
+interface ReplyMarkup {
+  inline_keyboard: Array<Array<{ text: string; url: string }>>;
+}
+
+interface LiquidationAlertInput {
+  symbol: string;
+  leverage: number;
+  riskLevel: RiskLevel;
+  riskScore: number;
+  distancePct: number;
+  macroThreat: string;
+  claudeMemo: string;
+}
+
+interface NarrativeSignalInput {
+  sector: string;
+  signal: SignalType;
+  combinedScore: number;
+  narrativeScore: number;
+  etfScore: number;
+  macroScore: number;
+  topHeadline: string;
+  reasoning: string;
+}
+
+interface MacroWarningInput {
+  eventName: string;
+  hoursUntil: number;
+  historicalAvgMove: number;
+  affectedPositions: Array<{ symbol: string; leverage: string | number | null | undefined }>;
+}
+
+interface DailySummaryInput {
+  topSignal: string;
+  positionsMonitored: number;
+  alertsSent: number;
+  claudeMemo: string;
+}
+
+function getApiBase(): string | null {
   const token = process.env.TELEGRAM_BOT_TOKEN;
   return token ? `https://api.telegram.org/bot${token}` : null;
 }
 
-function getChatId() {
+function getChatId(): string | undefined {
   return process.env.TELEGRAM_CHAT_ID;
 }
 
-function getAppUrl() {
+function getAppUrl(): string {
   return process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
 }
 
-function getSeverityFromSignal(signal) {
+function getSeverityFromSignal(signal: SignalType): AlertSeverity {
   if (signal === 'STRONG_BUY' || signal === 'BUY') return 'INFO';
   if (signal === 'WATCH' || signal === 'NEUTRAL') return 'WARNING';
   return 'DANGER';
 }
 
-function timestamp() {
+function timestamp(): string {
   return new Date().toLocaleString('en-US', {
     month: 'short',
     day: 'numeric',
@@ -29,7 +73,7 @@ function timestamp() {
 }
 
 const telegram = {
-  async sendMessage(text, replyMarkup = null) {
+  async sendMessage(text: string, replyMarkup: ReplyMarkup | null = null): Promise<boolean> {
     const apiBase = getApiBase();
     const chatId = getChatId();
 
@@ -38,7 +82,7 @@ const telegram = {
       return false;
     }
 
-    const body = {
+    const body: Record<string, unknown> = {
       chat_id: chatId,
       text,
       parse_mode: 'Markdown',
@@ -53,19 +97,21 @@ const telegram = {
       await axios.post(`${apiBase}/sendMessage`, body);
       return true;
     } catch (error) {
-      console.error(`[Telegram] Failed to send: ${error.message}`);
+      console.error(`[Telegram] Failed to send: ${getErrorMessage(error)}`);
       return false;
     }
   },
 
-  dashboardButton(path = '/dashboard') {
+  dashboardButton(path = '/dashboard'): ReplyMarkup {
     return {
-      inline_keyboard: [[
-        {
-          text: 'Open Dashboard to Act',
-          url: `${getAppUrl()}${path}`
-        }
-      ]]
+      inline_keyboard: [
+        [
+          {
+            text: 'Open Dashboard to Act',
+            url: `${getAppUrl()}${path}`
+          }
+        ]
+      ]
     };
   },
 
@@ -77,7 +123,7 @@ const telegram = {
     distancePct,
     macroThreat,
     claudeMemo
-  }) {
+  }: LiquidationAlertInput): TelegramAlertResult {
     return {
       alertType: 'LIQUIDATION_RISK',
       severity: riskLevel === 'CRITICAL' ? 'CRITICAL' : riskLevel === 'DANGER' ? 'DANGER' : 'WARNING',
@@ -101,7 +147,7 @@ const telegram = {
     };
   },
 
-  async sendLiquidationAlert(input) {
+  async sendLiquidationAlert(input: LiquidationAlertInput): Promise<TelegramAlertResult> {
     const payload = this.buildLiquidationAlert(input);
     const telegramSent = await this.sendMessage(payload.message, this.dashboardButton('/dashboard'));
     return { ...payload, telegramSent };
@@ -116,7 +162,7 @@ const telegram = {
     macroScore,
     topHeadline,
     reasoning
-  }) {
+  }: NarrativeSignalInput): TelegramAlertResult {
     return {
       alertType: 'NARRATIVE_SIGNAL',
       severity: getSeverityFromSignal(signal),
@@ -143,16 +189,24 @@ const telegram = {
     };
   },
 
-  async sendNarrativeSignal(input) {
+  async sendNarrativeSignal(input: NarrativeSignalInput): Promise<TelegramAlertResult> {
     const payload = this.buildNarrativeSignal(input);
     const telegramSent = await this.sendMessage(payload.message, this.dashboardButton('/dashboard'));
     return { ...payload, telegramSent };
   },
 
-  buildMacroWarning({ eventName, hoursUntil, historicalAvgMove, affectedPositions }) {
-    const positionsLine = affectedPositions.length > 0
-      ? affectedPositions.map((position) => `- ${position.symbol} @ ${position.leverage}x`).join('\n')
-      : 'None currently open';
+  buildMacroWarning({
+    eventName,
+    hoursUntil,
+    historicalAvgMove,
+    affectedPositions
+  }: MacroWarningInput): TelegramAlertResult {
+    const positionsLine =
+      affectedPositions.length > 0
+        ? affectedPositions
+            .map((position) => `- ${position.symbol} @ ${Number(position.leverage || 0)}x`)
+            .join('\n')
+        : 'None currently open';
 
     return {
       alertType: 'MACRO_EVENT',
@@ -175,13 +229,18 @@ const telegram = {
     };
   },
 
-  async sendMacroWarning(input) {
+  async sendMacroWarning(input: MacroWarningInput): Promise<TelegramAlertResult> {
     const payload = this.buildMacroWarning(input);
     const telegramSent = await this.sendMessage(payload.message, this.dashboardButton('/dashboard'));
     return { ...payload, telegramSent };
   },
 
-  buildDailySummary({ topSignal, positionsMonitored, alertsSent, claudeMemo }) {
+  buildDailySummary({
+    topSignal,
+    positionsMonitored,
+    alertsSent,
+    claudeMemo
+  }: DailySummaryInput): TelegramPayload {
     return {
       title: 'Sentinel Daily Summary',
       message: [
@@ -204,13 +263,13 @@ const telegram = {
     };
   },
 
-  async sendDailySummary(input) {
+  async sendDailySummary(input: DailySummaryInput): Promise<TelegramPayload & { telegramSent: boolean }> {
     const payload = this.buildDailySummary(input);
     const telegramSent = await this.sendMessage(payload.message, this.dashboardButton('/dashboard'));
     return { ...payload, telegramSent };
   },
 
-  async sendTest() {
+  async sendTest(): Promise<boolean> {
     const message = [
       'Sentinel Finance bot is connected and running.',
       '',
@@ -223,4 +282,4 @@ const telegram = {
   }
 };
 
-module.exports = telegram;
+export = telegram;

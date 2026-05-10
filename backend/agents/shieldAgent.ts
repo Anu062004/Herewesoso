@@ -1,20 +1,32 @@
-const sodex = require('../services/sodex');
-const sosovalue = require('../services/sosovalue');
-const claude = require('../services/ai');
-const telegram = require('../services/telegram');
-const riskCalculator = require('../utils/riskCalculator');
-const {
-  safeInsert,
-  createAgentRun,
-  completeAgentRun,
-  failAgentRun
-} = require('../services/supabase');
+import type { MacroEvent, PositionRiskSnapshot, ShieldState } from '../types/domain';
+
+import sodex = require('../services/sodex');
+import sosovalue = require('../services/sosovalue');
+import claude = require('../services/claude');
+import telegram = require('../services/telegram');
+import riskCalculator = require('../utils/riskCalculator');
+import supabaseService = require('../services/supabase');
+import errorUtils = require('../utils/error');
+
+const { safeInsert, createAgentRun, completeAgentRun, failAgentRun } = supabaseService;
+const { getErrorMessage } = errorUtils;
+
+interface ShieldAgentResult {
+  success: boolean;
+  positionsMonitored?: number;
+  snapshots?: PositionRiskSnapshot[];
+  error?: string;
+}
+
+interface MacroHistoryEntry {
+  priceChangePct?: string | number | null;
+}
 
 const WALLET = process.env.USER_WALLET_ADDRESS;
-const ALERT_THRESHOLD = parseInt(process.env.RISK_ALERT_THRESHOLD || '65', 10);
+const ALERT_THRESHOLD = Number.parseInt(process.env.RISK_ALERT_THRESHOLD || '65', 10);
 const HIGH_IMPACT_EVENTS = ['CPI', 'FOMC', 'Federal Reserve', 'GDP', 'NFP', 'Jobs', 'PCE'];
 
-function buildDemoShieldState(walletAddress) {
+function buildDemoShieldState(walletAddress?: string): ShieldState {
   return {
     positions: [
       {
@@ -30,22 +42,32 @@ function buildDemoShieldState(walletAddress) {
       }
     ],
     accountState: {
-      walletAddress: walletAddress || WALLET,
-      positions: []
+      walletAddress: walletAddress || WALLET || null,
+      accountId: null,
+      accountValue: 0,
+      availableMargin: 0,
+      initialMargin: 0,
+      crossMargin: 0,
+      positions: [],
+      balances: []
     }
   };
 }
 
-function toDateParts(daysFromNow = 0) {
+function toDateParts(daysFromNow = 0): string {
   return new Date(Date.now() + daysFromNow * 86400000).toISOString().split('T')[0];
 }
 
-function getEventTimestamp(event) {
+function getEventTimestamp(event: MacroEvent): string | null {
   return event?.eventTime || event?.releaseDate || event?.date || event?.time || null;
 }
 
-function getNearestDangerousEvent(events) {
-  let nearestEvent = null;
+function getEventName(event: MacroEvent): string {
+  return event.name || 'Unknown event';
+}
+
+function getNearestDangerousEvent(events: MacroEvent[]) {
+  let nearestEvent: MacroEvent | null = null;
   let hoursUntilEvent = Infinity;
 
   for (const event of events) {
@@ -76,7 +98,11 @@ async function fetchShieldInputs() {
   return { todayEvents, tomorrowEvents, etfData };
 }
 
-async function runShieldAgent() {
+function parseNumber(value: unknown): number {
+  return Number.parseFloat(String(value ?? '0')) || 0;
+}
+
+async function runShieldAgent(): Promise<ShieldAgentResult> {
   console.log('[ShieldAgent] Starting cycle...');
   const startTime = Date.now();
   const runRecord = await createAgentRun('shield');
@@ -86,12 +112,12 @@ async function runShieldAgent() {
       throw new Error('USER_WALLET_ADDRESS is not configured.');
     }
 
-    let shieldState;
+    let shieldState: ShieldState;
 
     try {
       shieldState = await sodex.getEnrichedPositions(WALLET);
     } catch (error) {
-      console.warn(`[ShieldAgent] Falling back to demo BTC position: ${error.message}`);
+      console.warn(`[ShieldAgent] Falling back to demo BTC position: ${getErrorMessage(error)}`);
       shieldState = buildDemoShieldState(WALLET);
     }
 
@@ -110,42 +136,46 @@ async function runShieldAgent() {
     console.log(`[ShieldAgent] Monitoring ${positions.length} open positions...`);
 
     const { todayEvents, tomorrowEvents, etfData } = await fetchShieldInputs();
-    const allEvents = [...(todayEvents?.data || []), ...(tomorrowEvents?.data || [])];
+    const allEvents = [
+      ...((todayEvents?.data || []) as MacroEvent[]),
+      ...((tomorrowEvents?.data || []) as MacroEvent[])
+    ];
     const dangerousEvents = allEvents.filter((event) =>
       HIGH_IMPACT_EVENTS.some((marker) => event?.name?.includes(marker))
     );
-    const etfNetFlow = etfData?.data?.netFlow ?? etfData?.data?.netFlow1Day ?? 0;
+    const etfSummary = (etfData?.data || {}) as Record<string, unknown>;
+    const etfNetFlow = parseNumber(etfSummary.netFlow ?? etfSummary.netFlow1Day);
     const etfOutflow = etfNetFlow < -50000000;
-    const historicalImpactCache = new Map();
-    const riskSnapshots = [];
+    const historicalImpactCache = new Map<string, number>();
+    const riskSnapshots: PositionRiskSnapshot[] = [];
     const { nearestEvent, hoursUntilEvent } = getNearestDangerousEvent(dangerousEvents);
 
     let historicalMove = 5;
 
     if (nearestEvent) {
       try {
-        const history = await sosovalue.getMacroEventHistory(nearestEvent.name);
-        const moves = (history?.data || [])
+        const history = await sosovalue.getMacroEventHistory(getEventName(nearestEvent));
+        const moves = ((history?.data || []) as MacroHistoryEntry[])
           .map((entry) => Math.abs(Number(entry.priceChangePct) || 0))
           .filter(Boolean);
 
         if (moves.length > 0) {
           historicalMove = moves.reduce((sum, value) => sum + value, 0) / moves.length;
         }
-      } catch (error) {
+      } catch {
         historicalMove = 5;
       }
 
-      historicalImpactCache.set(nearestEvent.name, historicalMove);
+      historicalImpactCache.set(getEventName(nearestEvent), historicalMove);
     }
 
     for (const position of positions) {
       const symbol = position.symbol;
-      const parsedMarkPrice = parseFloat(position.markPrice || position.entryPrice || 0);
-      const parsedLiquidationPrice = parseFloat(position.liquidationPrice || 0);
-      const parsedLeverage = parseFloat(position.leverage || 0);
-      const parsedPositionSize = parseFloat(position.positionSize || 0);
-      const entryPrice = parseFloat(position.entryPrice || 0);
+      const parsedMarkPrice = parseNumber(position.markPrice || position.entryPrice);
+      const parsedLiquidationPrice = parseNumber(position.liquidationPrice);
+      const parsedLeverage = parseNumber(position.leverage);
+      const parsedPositionSize = parseNumber(position.positionSize);
+      const entryPrice = parseNumber(position.entryPrice);
       const positionSide = position.positionSide || position.side || 'BOTH';
 
       const distancePct = riskCalculator.calculateLiquidationDistance(
@@ -173,7 +203,7 @@ async function runShieldAgent() {
           leverage: parsedLeverage,
           distancePct,
           macroEvents: nearestEvent
-            ? [{ name: nearestEvent.name, hoursUntil: hoursUntilEvent }]
+            ? [{ name: getEventName(nearestEvent), hoursUntil: hoursUntilEvent }]
             : [],
           riskScore: combinedRisk,
           riskLevel
@@ -191,7 +221,7 @@ async function runShieldAgent() {
         });
       }
 
-      const snapshot = {
+      const snapshot: PositionRiskSnapshot = {
         wallet_address: WALLET,
         symbol,
         entry_price: entryPrice,
@@ -204,7 +234,7 @@ async function runShieldAgent() {
         risk_level: riskLevel,
         macro_threats: nearestEvent
           ? {
-              event: nearestEvent.name,
+              event: getEventName(nearestEvent),
               hoursUntil: hoursUntilEvent,
               historicalMove
             }
@@ -221,7 +251,7 @@ async function runShieldAgent() {
           riskScore: combinedRisk,
           distancePct,
           macroThreat: nearestEvent
-            ? `${nearestEvent.name} in ${hoursUntilEvent.toFixed(1)}h`
+            ? `${getEventName(nearestEvent)} in ${hoursUntilEvent.toFixed(1)}h`
             : 'No imminent macro events',
           claudeMemo
         });
@@ -254,15 +284,17 @@ async function runShieldAgent() {
 
     if (imminentEvents.length > 0) {
       const nearestImminent = imminentEvents.sort((left, right) => {
-        const leftTime = new Date(getEventTimestamp(left)).getTime();
-        const rightTime = new Date(getEventTimestamp(right)).getTime();
+        const leftTime = new Date(getEventTimestamp(left) || 0).getTime();
+        const rightTime = new Date(getEventTimestamp(right) || 0).getTime();
         return leftTime - rightTime;
       })[0];
 
-      const hoursUntil = (new Date(getEventTimestamp(nearestImminent)).getTime() - Date.now()) / 3600000;
-      const historicalAvgMove = historicalImpactCache.get(nearestImminent.name) || historicalMove || 5;
+      const hoursUntil =
+        (new Date(getEventTimestamp(nearestImminent) || 0).getTime() - Date.now()) / 3600000;
+      const eventName = getEventName(nearestImminent);
+      const historicalAvgMove = historicalImpactCache.get(eventName) || historicalMove || 5;
       const alertResult = await telegram.sendMacroWarning({
-        eventName: nearestImminent.name,
+        eventName,
         hoursUntil,
         historicalAvgMove,
         affectedPositions: positions.map((position) => ({
@@ -278,7 +310,7 @@ async function runShieldAgent() {
         message: alertResult.message,
         telegram_sent: Boolean(alertResult.telegramSent),
         data: {
-          eventName: nearestImminent.name,
+          eventName,
           hoursUntil
         }
       });
@@ -305,13 +337,13 @@ async function runShieldAgent() {
       snapshots: riskSnapshots
     };
   } catch (error) {
-    await failAgentRun(runRecord?.id, error.message, {
+    await failAgentRun(runRecord?.id, getErrorMessage(error), {
       duration_ms: Date.now() - startTime
     });
 
-    console.error('[ShieldAgent] Error:', error.message);
-    return { success: false, error: error.message };
+    console.error('[ShieldAgent] Error:', getErrorMessage(error));
+    return { success: false, error: getErrorMessage(error) };
   }
 }
 
-module.exports = { runShieldAgent };
+export = { runShieldAgent };

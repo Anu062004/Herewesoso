@@ -1,16 +1,29 @@
-const sosovalue = require('../services/sosovalue');
-const claude = require('../services/ai');
-const telegram = require('../services/telegram');
-const narrativeScorer = require('../utils/narrativeScorer');
-const { delay } = require('../utils/delay');
-const {
-  safeInsert,
-  createAgentRun,
-  completeAgentRun,
-  failAgentRun
-} = require('../services/supabase');
+import type { Headline, MacroEvent, NarrativeScoreRow } from '../types/domain';
 
-const SECTORS = ['DeFi', 'AI', 'RWA', 'L1', 'L2', 'GameFi', 'DePIN', 'Meme'];
+import sosovalue = require('../services/sosovalue');
+import claude = require('../services/claude');
+import telegram = require('../services/telegram');
+import narrativeScorer = require('../utils/narrativeScorer');
+import delayUtils = require('../utils/delay');
+import supabaseService = require('../services/supabase');
+import errorUtils = require('../utils/error');
+
+const { delay } = delayUtils;
+const { safeInsert, createAgentRun, completeAgentRun, failAgentRun } = supabaseService;
+const { getErrorMessage } = errorUtils;
+
+interface NarrativeAgentResult {
+  success: boolean;
+  scores?: NarrativeScoreRow[];
+  strongSignals?: NarrativeScoreRow[];
+  error?: string;
+}
+
+const SECTORS = ['DeFi', 'AI', 'RWA', 'L1', 'L2', 'GameFi', 'DePIN', 'Meme'] as const;
+
+function getNumericValue(value: unknown): number {
+  return typeof value === 'number' ? value : Number(value || 0);
+}
 
 async function fetchNarrativeInputs() {
   const news = await sosovalue.getNews(50);
@@ -22,7 +35,7 @@ async function fetchNarrativeInputs() {
   return { news, etfHistory, macroEvents };
 }
 
-async function runNarrativeAgent() {
+async function runNarrativeAgent(): Promise<NarrativeAgentResult> {
   console.log('[NarrativeAgent] Starting cycle...');
   const startTime = Date.now();
   const runRecord = await createAgentRun('narrative');
@@ -30,11 +43,15 @@ async function runNarrativeAgent() {
   try {
     const { news, etfHistory, macroEvents } = await fetchNarrativeInputs();
 
-    const headlines = news?.data || [];
-    const etfNetFlow = etfHistory?.data?.netFlow7Day ?? etfHistory?.data?.netFlow ?? 0;
-    const upcoming = macroEvents?.data || [];
+    const headlines = (Array.isArray(news?.data) ? news.data : []) as Headline[];
+    const etfSummary = etfHistory?.data || {};
+    const etfNetFlow = getNumericValue(
+      (etfSummary as Record<string, unknown>).netFlow7Day ??
+        (etfSummary as Record<string, unknown>).netFlow
+    );
+    const upcoming = (Array.isArray(macroEvents?.data) ? macroEvents.data : []) as MacroEvent[];
 
-    const sectorScores = SECTORS.map((sector) => {
+    const sectorScores: NarrativeScoreRow[] = SECTORS.map((sector) => {
       const narrativeScore = narrativeScorer.scoreNarrativeLayer(headlines, sector);
       const etfScore = narrativeScorer.scoreETFLayer(etfNetFlow);
       const macroScore = narrativeScorer.scoreMacroLayer(upcoming);
@@ -47,7 +64,7 @@ async function runNarrativeAgent() {
         score_macro: macroScore,
         combined_score: combined,
         signal,
-        top_headlines: headlines.slice(0, 3).map((headline) => headline.title)
+        top_headlines: headlines.slice(0, 3).map((headline) => String(headline.title || 'Untitled headline'))
       };
     });
 
@@ -55,7 +72,7 @@ async function runNarrativeAgent() {
       .filter((score) => score.signal === 'STRONG_BUY' || score.signal === 'BUY')
       .sort((left, right) => right.combined_score - left.combined_score);
 
-    let topSignal = null;
+    let topSignal: NarrativeScoreRow | null = null;
     if (strongSignals.length > 0) {
       topSignal = strongSignals[0];
       const reasoning = await claude.generateNarrativeMemo({
@@ -89,7 +106,7 @@ async function runNarrativeAgent() {
         narrativeScore: topSignal.score_narrative,
         etfScore: topSignal.score_etf_flow,
         macroScore: topSignal.score_macro,
-        topHeadline: headlines[0]?.title || 'No headline available',
+        topHeadline: String(headlines[0]?.title || 'No headline available'),
         reasoning
       });
 
@@ -111,7 +128,7 @@ async function runNarrativeAgent() {
       'narrative_scores',
       sectorScores.map((score) => ({
         ...score,
-        reasoning: score.sector === topSignal?.sector ? topSignal.reasoning : null
+        reasoning: score.sector === topSignal?.sector ? topSignal.reasoning || null : null
       }))
     );
 
@@ -130,13 +147,13 @@ async function runNarrativeAgent() {
 
     return { success: true, scores: sectorScores, strongSignals };
   } catch (error) {
-    await failAgentRun(runRecord?.id, error.message, {
+    await failAgentRun(runRecord?.id, getErrorMessage(error), {
       duration_ms: Date.now() - startTime
     });
 
-    console.error('[NarrativeAgent] Error:', error.message);
-    return { success: false, error: error.message };
+    console.error('[NarrativeAgent] Error:', getErrorMessage(error));
+    return { success: false, error: getErrorMessage(error) };
   }
 }
 
-module.exports = { runNarrativeAgent };
+export = { runNarrativeAgent };

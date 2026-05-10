@@ -5,7 +5,7 @@
   "scripts": {
     "start": "tsx backend/server.ts",
     "dev": "tsx watch backend/server.ts",
-    "test": "tsx --test backend/tests/run.ts",
+    "test": "tsx backend/tests/run.ts",
     "typecheck": "tsc -p backend/tsconfig.json --noEmit",
     "frontend:dev": "npm --prefix frontend run dev",
     "frontend:build": "npm --prefix frontend run build",
@@ -21,6 +21,10 @@
     "express": "^4.18.0"
   },
   "devDependencies": {
-    "nodemon": "^3.0.0"
+    "@types/cors": "^2.8.19",
+    "@types/express": "^5.0.6",
+    "nodemon": "^3.0.0",
+    "tsx": "^4.21.0",
+    "typescript": "^6.0.3"
   }
 }

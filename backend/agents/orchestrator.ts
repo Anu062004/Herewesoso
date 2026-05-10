@@ -1,18 +1,21 @@
-const { runNarrativeAgent } = require('./narrativeAgent');
-const { runShieldAgent } = require('./shieldAgent');
-const claude = require('../services/claude');
-const telegram = require('../services/telegram');
-const {
-  safeSelect,
-  createAgentRun,
-  completeAgentRun,
-  failAgentRun
-} = require('../services/supabase');
+import type { NarrativeScoreRow, PositionRiskSnapshot } from '../types/domain';
 
-const CYCLE_MS = parseInt(process.env.CYCLE_INTERVAL_MS || '1800000', 10);
+import narrativeAgent = require('./narrativeAgent');
+import shieldAgent = require('./shieldAgent');
+import claude = require('../services/claude');
+import telegram = require('../services/telegram');
+import supabaseService = require('../services/supabase');
+import errorUtils = require('../utils/error');
+
+const { runNarrativeAgent } = narrativeAgent;
+const { runShieldAgent } = shieldAgent;
+const { safeSelect, createAgentRun, completeAgentRun, failAgentRun } = supabaseService;
+const { getErrorMessage } = errorUtils;
+
+const CYCLE_MS = Number.parseInt(process.env.CYCLE_INTERVAL_MS || '1800000', 10);
 
 let cycleInFlight = false;
-let lastDailySummaryKey = null;
+let lastDailySummaryKey: string | null = null;
 
 async function runFullCycle() {
   if (cycleInFlight) {
@@ -27,7 +30,6 @@ async function runFullCycle() {
   console.log(`\n[Orchestrator] ===== CYCLE START ${new Date().toISOString()} =====`);
 
   try {
-    // Run sequentially to reduce pressure on rate-limited SoSoValue endpoints.
     const narrativeResult = await runNarrativeAgent();
     const shieldResult = await runShieldAgent();
     const duration = Date.now() - cycleStart;
@@ -50,18 +52,18 @@ async function runFullCycle() {
       shieldResult
     };
   } catch (error) {
-    await failAgentRun(runRecord?.id, error.message, {
+    await failAgentRun(runRecord?.id, getErrorMessage(error), {
       duration_ms: Date.now() - cycleStart
     });
 
-    console.error('[Orchestrator] Fatal cycle error:', error.message);
-    return { success: false, error: error.message };
+    console.error('[Orchestrator] Fatal cycle error:', getErrorMessage(error));
+    return { success: false, error: getErrorMessage(error) };
   } finally {
     cycleInFlight = false;
   }
 }
 
-function shouldSendDailySummary(now) {
+function shouldSendDailySummary(now: Date): boolean {
   const key = now.toISOString().split('T')[0];
   const withinWindow = now.getHours() === 8 && now.getMinutes() <= 5;
   return withinWindow && lastDailySummaryKey !== key;
@@ -77,11 +79,11 @@ async function runDailySummary() {
     const yesterday = new Date(Date.now() - 86400000).toISOString();
 
     const [{ data: scores }, { data: alerts }, { data: positions }] = await Promise.all([
-      safeSelect('narrative_scores', (query) =>
+      safeSelect<NarrativeScoreRow>('narrative_scores', (query: any) =>
         query.gte('created_at', yesterday).order('combined_score', { ascending: false }).limit(3)
       ),
-      safeSelect('alerts', (query) => query.gte('created_at', yesterday)),
-      safeSelect('position_risks', (query) => query.gte('created_at', yesterday))
+      safeSelect('alerts', (query: any) => query.gte('created_at', yesterday)),
+      safeSelect<PositionRiskSnapshot>('position_risks', (query: any) => query.gte('created_at', yesterday))
     ]);
 
     const memo = await claude.generateDailySummary({
@@ -101,16 +103,16 @@ async function runDailySummary() {
     console.log('[Orchestrator] Daily summary sent.');
     return { success: true };
   } catch (error) {
-    console.error('[Orchestrator] Daily summary error:', error.message);
-    return { success: false, error: error.message };
+    console.error('[Orchestrator] Daily summary error:', getErrorMessage(error));
+    return { success: false, error: getErrorMessage(error) };
   }
 }
 
 function startScheduler() {
   console.log(`[Orchestrator] Starting. Cycle interval: ${CYCLE_MS / 60000} minutes`);
-  runFullCycle();
-  setInterval(runFullCycle, CYCLE_MS);
-  setInterval(runDailySummary, 5 * 60 * 1000);
+  void runFullCycle();
+  setInterval(() => void runFullCycle(), CYCLE_MS);
+  setInterval(() => void runDailySummary(), 5 * 60 * 1000);
 }
 
-module.exports = { startScheduler, runFullCycle, runDailySummary };
+export = { startScheduler, runFullCycle, runDailySummary };

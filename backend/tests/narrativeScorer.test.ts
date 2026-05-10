@@ -1,7 +1,6 @@
-const test = require('node:test');
-const assert = require('node:assert/strict');
-
-const narrativeScorer = require('../utils/narrativeScorer');
+import test = require('node:test');
+import assert = require('node:assert/strict');
+import narrativeScorer = require('../utils/narrativeScorer');
 
 test('scoreNarrativeLayer returns zero when there are no headlines', () => {
   assert.equal(narrativeScorer.scoreNarrativeLayer([], 'AI'), 0);
@@ -33,3 +32,5 @@ test('generateSignal returns BUY buckets at the expected thresholds', () => {
   assert.equal(watch.signal, 'WATCH');
   assert.equal(buy.signal, 'BUY');
 });
+
+export {};
