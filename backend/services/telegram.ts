@@ -85,7 +85,6 @@ const telegram = {
     const body: Record<string, unknown> = {
       chat_id: chatId,
       text,
-      parse_mode: 'Markdown',
       disable_web_page_preview: true
     };
 
