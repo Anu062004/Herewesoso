@@ -1,6 +1,7 @@
 import axios from 'axios';
 import sodex = require('./sodex');
 import sosovalue = require('./sosovalue');
+import sodexTrader = require('./sodexTrader');
 import riskCalculator = require('../utils/riskCalculator');
 
 type InlineButton = { text: string; callback_data: string };
@@ -14,115 +15,111 @@ const PORT = process.env.PORT || '3001';
 let offset = 0;
 let polling = false;
 
-// ── Emojis ──────────────────────────────────────────────────────────────────
+// ── Conversation state machine ────────────────────────────────────────────────
+
+type ConvStep =
+  | { type: 'idle' }
+  | { type: 'setkey' }
+  | { type: 'buy_symbol' }
+  | { type: 'buy_side'; symbol: string }
+  | { type: 'buy_size'; symbol: string; side: 'BUY' | 'SELL' }
+  | { type: 'buy_leverage'; symbol: string; side: 'BUY' | 'SELL'; size: string }
+  | { type: 'buy_confirm'; symbol: string; side: 'BUY' | 'SELL'; size: string; leverage: number }
+  | { type: 'close_select' }
+  | { type: 'close_confirm'; symbol: string; size: string }
+  | { type: 'reduce_select' }
+  | { type: 'reduce_leverage'; symbol: string; currentLeverage: number }
+  | { type: 'reduce_confirm'; symbol: string; newLeverage: number };
+
+const conv: Map<string, ConvStep> = new Map();
+function getStep(chatId: string): ConvStep { return conv.get(chatId) || { type: 'idle' }; }
+function setStep(chatId: string, step: ConvStep) { conv.set(chatId, step); }
+function resetStep(chatId: string) { conv.set(chatId, { type: 'idle' }); }
+
+// ── Emojis ────────────────────────────────────────────────────────────────────
 
 const SIGNAL_EMOJI: Record<string, string> = {
   STRONG_BUY: '🚀', BUY: '📈', WATCH: '👀', NEUTRAL: '➖', AVOID: '🚫'
 };
-
 const RISK_EMOJI: Record<string, string> = {
   SAFE: '🟢', CAUTION: '🟡', DANGER: '🟠', CRITICAL: '🔴'
 };
-
-function riskEmoji(level: string): string {
-  return RISK_EMOJI[level] || '⚪';
-}
-
-function signalEmoji(signal: string): string {
-  return SIGNAL_EMOJI[signal] || '➖';
-}
-
-function pnlEmoji(pnl: number): string {
-  return pnl >= 0 ? '🟢' : '🔴';
-}
-
+function riskEmoji(level: string) { return RISK_EMOJI[level] || '⚪'; }
+function signalEmoji(signal: string) { return SIGNAL_EMOJI[signal] || '➖'; }
+function pnlEmoji(pnl: number) { return pnl >= 0 ? '🟢' : '🔴'; }
 const DIV = '─────────────────────';
 
-// ── Low-level API helpers ────────────────────────────────────────────────────
+// ── Low-level API helpers ─────────────────────────────────────────────────────
 
 function apiBase(): string | null {
   const token = process.env.TELEGRAM_BOT_TOKEN;
   return token ? `https://api.telegram.org/bot${token}` : null;
 }
-
-function authorizedChatId(): string | undefined {
-  return process.env.TELEGRAM_CHAT_ID;
-}
+function authorizedChatId() { return process.env.TELEGRAM_CHAT_ID; }
 
 async function sendMessage(
   chatId: string | number,
   text: string,
-  keyboard: InlineKeyboard | null = null
-): Promise<number | null> {
+  keyboard?: InlineKeyboard | null
+): Promise<any> {
   const base = apiBase();
   if (!base) return null;
   const body: Record<string, unknown> = { chat_id: chatId, text, disable_web_page_preview: true };
   if (keyboard) body.reply_markup = keyboard;
   try {
-    const res = await axios.post(`${base}/sendMessage`, body);
-    return res.data?.result?.message_id ?? null;
-  } catch (err: any) {
-    console.error(`[TelegramBot] sendMessage failed: ${err.message}`);
-    return null;
-  }
+    const r = await axios.post(`${base}/sendMessage`, body);
+    return r.data?.result;
+  } catch { return null; }
 }
 
-async function editMessage(
-  chatId: string | number,
-  messageId: number,
-  text: string,
-  keyboard: InlineKeyboard | null = null
-) {
+async function editMessage(chatId: string | number, msgId: number, text: string, keyboard?: InlineKeyboard | null) {
   const base = apiBase();
   if (!base) return;
-  const body: Record<string, unknown> = { chat_id: chatId, message_id: messageId, text, disable_web_page_preview: true };
+  const body: Record<string, unknown> = { chat_id: chatId, message_id: msgId, text, disable_web_page_preview: true };
   if (keyboard) body.reply_markup = keyboard;
-  try {
-    await axios.post(`${base}/editMessageText`, body);
-  } catch (err: any) {
-    if (!err.message?.includes('not modified')) {
-      console.error(`[TelegramBot] editMessage failed: ${err.message}`);
-    }
-  }
+  try { await axios.post(`${base}/editMessageText`, body); } catch {}
 }
 
-async function answerCallback(id: string, text = '') {
+async function deleteMessage(chatId: string | number, msgId: number) {
   const base = apiBase();
   if (!base) return;
-  try {
-    await axios.post(`${base}/answerCallbackQuery`, { callback_query_id: id, text });
-  } catch { /* silent */ }
+  try { await axios.post(`${base}/deleteMessage`, { chat_id: chatId, message_id: msgId }); } catch {}
 }
 
-// ── Keyboards ────────────────────────────────────────────────────────────────
+async function answerCallback(queryId: string, text?: string) {
+  const base = apiBase();
+  if (!base) return;
+  try { await axios.post(`${base}/answerCallbackQuery`, { callback_query_id: queryId, text }); } catch {}
+}
+
+// ── Keyboard builders ─────────────────────────────────────────────────────────
 
 const MAIN_MENU: InlineKeyboard = {
   inline_keyboard: [
-    [{ text: '📊 Positions', callback_data: 'cmd_positions' }, { text: '⚠️ Risk Check', callback_data: 'cmd_risk' }],
-    [{ text: '📡 Signals', callback_data: 'cmd_signals' }, { text: '📅 Macro Events', callback_data: 'cmd_macro' }],
-    [{ text: '🟢 Buy', callback_data: 'cmd_buy' }, { text: '🔴 Sell / Close', callback_data: 'cmd_sell' }],
-    [{ text: '🚨 Panic Mode', callback_data: 'cmd_panic' }, { text: '⚙️ Status', callback_data: 'cmd_status' }],
-    [{ text: '🔄 Refresh Menu', callback_data: 'cmd_menu' }, { text: '❓ Help', callback_data: 'cmd_help' }]
+    [{ text: '📊 Positions',    callback_data: 'cmd_positions' }, { text: '⚠️ Risk Check',  callback_data: 'cmd_risk' }],
+    [{ text: '🟢 Buy / Long',   callback_data: 'cmd_buy' },       { text: '🔴 Sell / Short', callback_data: 'cmd_short' }],
+    [{ text: '❌ Close Position',callback_data: 'cmd_close' },    { text: '📉 Reduce Lev',  callback_data: 'cmd_reduce' }],
+    [{ text: '📡 Signals',      callback_data: 'cmd_signals' },   { text: '📅 Macro',       callback_data: 'cmd_macro' }],
+    [{ text: '🗞 News',          callback_data: 'cmd_news' },     { text: '🤖 AI Brief',    callback_data: 'cmd_summary' }],
+    [{ text: '🚨 Panic Close All',callback_data: 'cmd_panic' },   { text: '🔑 Wallet Key',  callback_data: 'cmd_keyinfo' }],
+    [{ text: '⚙️ Status',       callback_data: 'cmd_status' },    { text: '❓ Help',        callback_data: 'cmd_help' }],
   ]
 };
 
 function navBar(refreshCmd: string): InlineKeyboard {
-  return {
-    inline_keyboard: [
-      [{ text: '🔄 Refresh', callback_data: refreshCmd }, { text: '🏠 Menu', callback_data: 'cmd_menu' }]
-    ]
-  };
+  return { inline_keyboard: [[{ text: '🔄 Refresh', callback_data: refreshCmd }, { text: '🏠 Menu', callback_data: 'cmd_menu' }]] };
+}
+
+function cancelBar(): InlineKeyboard {
+  return { inline_keyboard: [[{ text: '❌ Cancel', callback_data: 'cmd_cancel' }, { text: '🏠 Menu', callback_data: 'cmd_menu' }]] };
+}
+
+function confirmBar(confirmData: string): InlineKeyboard {
+  return { inline_keyboard: [[{ text: '✅ Confirm', callback_data: confirmData }, { text: '❌ Cancel', callback_data: 'cmd_cancel' }]] };
 }
 
 function positionListKeyboard(symbols: string[]): InlineKeyboard {
-  const symbolButtons = symbols.map(s => ({
-    text: `📋 ${s}`,
-    callback_data: `pos_detail_${s.replace(/[^A-Za-z0-9]/g, '_')}`
-  }));
-  const rows: InlineButton[][] = [];
-  for (let i = 0; i < symbolButtons.length; i += 2) {
-    rows.push(symbolButtons.slice(i, i + 2));
-  }
+  const rows = symbols.map(s => [{ text: `📍 ${s}`, callback_data: `pos_detail_${s.replace(/[^A-Za-z0-9]/g, '_')}` }]);
   rows.push([{ text: '🔄 Refresh', callback_data: 'cmd_positions' }, { text: '🏠 Menu', callback_data: 'cmd_menu' }]);
   return { inline_keyboard: rows };
 }
@@ -131,174 +128,148 @@ function positionDetailKeyboard(symbol: string): InlineKeyboard {
   const safe = symbol.replace(/[^A-Za-z0-9]/g, '_');
   return {
     inline_keyboard: [
-      [{ text: '🔴 Close Position', callback_data: `action_close_${safe}` }],
-      [{ text: '📉 Reduce Leverage', callback_data: `action_reduce_${safe}` }, { text: '💰 Add Margin', callback_data: `action_margin_${safe}` }],
+      [{ text: '❌ Close Position', callback_data: `trade_close_${safe}` }],
+      [{ text: '📉 Reduce Leverage', callback_data: `trade_reduce_${safe}` }, { text: '💰 Add Margin', callback_data: `action_margin_${safe}` }],
       [{ text: '🔄 Refresh', callback_data: `pos_detail_${safe}` }, { text: '◀️ All Positions', callback_data: 'cmd_positions' }],
-      [{ text: '🏠 Menu', callback_data: 'cmd_menu' }]
+      [{ text: '🏠 Menu', callback_data: 'cmd_menu' }],
     ]
   };
 }
 
-function riskKeyboard(symbols: string[]): InlineKeyboard {
-  const rows: InlineButton[][] = symbols.map(s => [
-    { text: `⚠️ Act on ${s}`, callback_data: `pos_detail_${s.replace(/[^A-Za-z0-9]/g, '_')}` }
-  ]);
-  rows.push([{ text: '🔄 Refresh', callback_data: 'cmd_risk' }, { text: '🏠 Menu', callback_data: 'cmd_menu' }]);
+function leverageKeyboard(symbol: string, currentLev: number): InlineKeyboard {
+  const safe = symbol.replace(/[^A-Za-z0-9]/g, '_');
+  const options = [1, 2, 3, 5, 10].filter(l => l < currentLev);
+  const rows = options.map(l => [{ text: `${l}x`, callback_data: `set_lev_${safe}_${l}` }]);
+  rows.push([{ text: '❌ Cancel', callback_data: 'cmd_cancel' }]);
   return { inline_keyboard: rows };
 }
 
+function sideKeyboard(symbol: string): InlineKeyboard {
+  const safe = symbol.replace(/[^A-Za-z0-9]/g, '_');
+  return {
+    inline_keyboard: [
+      [{ text: '🟢 Long (BUY)', callback_data: `order_side_${safe}_BUY` }, { text: '🔴 Short (SELL)', callback_data: `order_side_${safe}_SELL` }],
+      [{ text: '❌ Cancel', callback_data: 'cmd_cancel' }],
+    ]
+  };
+}
+
+function leverageSelectKeyboard(symbol: string, side: string): InlineKeyboard {
+  const safe = symbol.replace(/[^A-Za-z0-9]/g, '_');
+  return {
+    inline_keyboard: [
+      [{ text: '1x', callback_data: `order_lev_${safe}_${side}_1` }, { text: '2x', callback_data: `order_lev_${safe}_${side}_2` }, { text: '3x', callback_data: `order_lev_${safe}_${side}_3` }],
+      [{ text: '5x', callback_data: `order_lev_${safe}_${side}_5` }, { text: '10x', callback_data: `order_lev_${safe}_${side}_10` }, { text: '20x', callback_data: `order_lev_${safe}_${side}_20` }],
+      [{ text: '❌ Cancel', callback_data: 'cmd_cancel' }],
+    ]
+  };
+}
+
 function panicKeyboard(symbols: string[]): InlineKeyboard {
-  const rows: InlineButton[][] = symbols.map(s => [
-    { text: `🔴 CLOSE ${s}`, callback_data: `action_close_${s.replace(/[^A-Za-z0-9]/g, '_')}` }
-  ]);
+  const rows = symbols.map(s => [{ text: `🔴 CLOSE ${s}`, callback_data: `trade_close_${s.replace(/[^A-Za-z0-9]/g, '_')}` }]);
   rows.push([{ text: '🔄 Refresh', callback_data: 'cmd_panic' }, { text: '🏠 Menu', callback_data: 'cmd_menu' }]);
   return { inline_keyboard: rows };
 }
 
-// ── Formatters ───────────────────────────────────────────────────────────────
+// ── Helpers ───────────────────────────────────────────────────────────────────
 
-function fmt(n: number, d = 2): string { return n.toFixed(d); }
-
-function fmtNum(n: number): string {
-  return new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 }).format(n);
+function timeAgo(ts: string | number | undefined | null): string {
+  if (!ts) return 'unknown';
+  const diff = Date.now() - new Date(ts).getTime();
+  if (diff < 60000) return `${Math.floor(diff / 1000)}s ago`;
+  if (diff < 3600000) return `${Math.floor(diff / 60000)}m ago`;
+  return `${Math.floor(diff / 3600000)}h ago`;
 }
 
 function riskBar(score: number): string {
   const filled = Math.round(score / 10);
-  return '█'.repeat(filled) + '░'.repeat(10 - filled);
+  return '█'.repeat(filled) + '░'.repeat(10 - filled) + ` ${score}/100`;
 }
 
-function timeAgo(): string {
-  return new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', timeZone: 'UTC' }) + ' UTC';
-}
-
-// ── Data fetchers ─────────────────────────────────────────────────────────────
-
-async function getPositionData() {
-  const { positions, accountState } = await sodex.getEnrichedPositions(WALLET);
-  const macroRaw = await sosovalue.getMacroEvents().catch(() => ({ data: [] }));
-  const macro = (macroRaw?.data || []) as any[];
-  const dangerous = macro.filter(e => HIGH_IMPACT.some(k => String(e?.name || '').includes(k)));
-
-  const enriched = (positions || []).map((pos: any) => {
-    const mark = parseFloat(String(pos.markPrice || pos.entryPrice || 0));
-    const liq = parseFloat(String(pos.liquidationPrice || 0));
-    const entry = parseFloat(String(pos.entryPrice || 0));
-    const leverage = parseFloat(String(pos.leverage || 0));
-    const size = parseFloat(String(pos.positionSize || 0));
-    const side = pos.positionSide || pos.side || 'LONG';
-    const distPct = riskCalculator.calculateLiquidationDistance(mark, liq, side);
-    const posRisk = riskCalculator.distanceToRiskScore(distPct);
-    const pnl = side === 'SHORT' ? (entry - mark) * size : (mark - entry) * size;
-
-    let nearestHours = Infinity;
-    let nearestEvent = '';
-    for (const ev of dangerous) {
-      const ts = ev.eventTime || ev.releaseDate || ev.date;
-      if (!ts) continue;
-      const h = (new Date(ts).getTime() - Date.now()) / 3600000;
-      if (h > 0 && h < nearestHours) { nearestHours = h; nearestEvent = ev.name || ''; }
-    }
-
-    const macroThreat = isFinite(nearestHours) ? riskCalculator.assessMacroThreat(nearestHours, 5) : 0;
-    const combined = riskCalculator.calculateCombinedRisk(posRisk, macroThreat, false);
-    const riskLevel = riskCalculator.scoreToRiskLevel(combined);
-    const action = riskCalculator.suggestAction(riskLevel, leverage, distPct);
-
-    return { ...pos, mark, liq, entry, leverage, size, side, distPct, posRisk, combined, riskLevel, action, pnl, nearestEvent, nearestHours };
-  });
-
-  return { enriched, accountState: accountState as any };
-}
-
-// ── Message builders ──────────────────────────────────────────────────────────
+// ── Screen builders ───────────────────────────────────────────────────────────
 
 async function buildMenuText(): Promise<string> {
-  let accountLine = '';
-  if (WALLET) {
+  const hasWallet = !!WALLET;
+  const keySet = sodexTrader.hasKey();
+  const keyAddr = sodexTrader.getWalletAddress();
+  let accountLine = 'Account: not configured';
+  if (hasWallet) {
     try {
       const { accountState } = await sodex.getEnrichedPositions(WALLET);
-      const acc = accountState as any;
-      if (acc) {
-        accountLine = `\n💼 Account: $${fmtNum(acc.accountValue || 0)}  |  Margin: $${fmtNum(acc.availableMargin || 0)}`;
+      if (accountState) {
+        accountLine = `Account: $${accountState.accountValue.toFixed(2)} | Margin: $${accountState.availableMargin.toFixed(2)}`;
       }
-    } catch { /* skip */ }
+    } catch { accountLine = `Wallet: ${WALLET.slice(0, 8)}...`; }
   }
-  return `🛡️ SENTINEL FINANCE${accountLine}\n${DIV}\nSelect an option below:`;
+  const keyLine = keySet
+    ? `🔑 Key: ${keyAddr?.slice(0, 8)}... (ready to trade)`
+    : '🔑 Key: not set (use /setkey to enable trading)';
+  return `🛡️ SENTINEL FINANCE\n${DIV}\n${accountLine}\n${keyLine}\n${DIV}\nTestnet Mode`;
 }
 
 async function buildPositionsOverview(): Promise<{ text: string; keyboard: InlineKeyboard }> {
   if (!WALLET) return { text: '❌ Wallet not configured.', keyboard: navBar('cmd_positions') };
-
   try {
-    const { enriched, accountState: acc } = await getPositionData();
-
-    if (!enriched.length) {
-      return { text: '📭 No open positions found.\n\nMarket is flat — nothing to monitor.', keyboard: navBar('cmd_positions') };
-    }
+    const { positions, accountState } = await sodex.getEnrichedPositions(WALLET);
+    if (!positions.length) return { text: '✅ No open positions.\n\nYou are flat.', keyboard: navBar('cmd_positions') };
 
     const lines = [
-      '📊 OPEN POSITIONS',
-      DIV,
-      `💼 Account Value : $${fmtNum(acc?.accountValue || 0)}`,
-      `🏦 Avail. Margin : $${fmtNum(acc?.availableMargin || 0)}`,
-      `📋 Positions Open: ${enriched.length}`,
+      `📊 OPEN POSITIONS (${positions.length})`,
+      `Account: $${accountState?.accountValue?.toFixed(2) || '--'}`,
       DIV,
     ];
-
-    for (const p of enriched) {
-      const sideIcon = p.side === 'SHORT' ? '📉' : '📈';
-      lines.push(`${sideIcon} ${p.symbol}  ${p.leverage}x  ${riskEmoji(p.riskLevel)} ${p.riskLevel}`);
-      lines.push(`   PnL: ${pnlEmoji(p.pnl)} ${p.pnl >= 0 ? '+' : ''}$${fmt(p.pnl)}  |  Liq: ${fmt(p.distPct)}% away`);
+    for (const p of positions) {
+      const pnl = parseFloat(String(p.realizedPnL || 0));
+      const mark = parseFloat(String(p.markPrice || p.entryPrice || 0));
+      const entry = parseFloat(String(p.entryPrice || 0));
+      const pnlPct = entry > 0 ? ((mark - entry) / entry * 100 * (p.positionSide === 'SHORT' ? -1 : 1)) : 0;
+      lines.push(`${pnlEmoji(pnlPct)} ${p.symbol} ${p.positionSide || 'BOTH'}`);
+      lines.push(`  Lev: ${p.leverage}x | Size: ${p.positionSize}`);
+      lines.push(`  Entry: $${entry.toFixed(2)} | Mark: $${mark.toFixed(2)}`);
+      lines.push(`  PnL: ${pnlPct >= 0 ? '+' : ''}${pnlPct.toFixed(2)}%`);
     }
-
     lines.push(DIV);
-    lines.push('Tap a position for full details & actions:');
-    lines.push(`Updated: ${timeAgo()}`);
-
-    return {
-      text: lines.join('\n'),
-      keyboard: positionListKeyboard(enriched.map((p: any) => p.symbol))
-    };
+    lines.push('Tap a position for details and actions:');
+    return { text: lines.join('\n'), keyboard: positionListKeyboard(positions.map(p => p.symbol)) };
   } catch (err: any) {
-    return { text: `❌ Failed to fetch positions: ${err.message}`, keyboard: navBar('cmd_positions') };
+    return { text: `❌ Error: ${err.message}`, keyboard: navBar('cmd_positions') };
   }
 }
 
-async function buildPositionDetail(symbolRaw: string): Promise<{ text: string; keyboard: InlineKeyboard }> {
+async function buildPositionDetail(symbol: string): Promise<{ text: string; keyboard: InlineKeyboard }> {
   if (!WALLET) return { text: '❌ Wallet not configured.', keyboard: navBar('cmd_positions') };
-
   try {
-    const { enriched } = await getPositionData();
-    const p = enriched.find((x: any) => x.symbol === symbolRaw);
+    const { positions, accountState } = await sodex.getEnrichedPositions(WALLET);
+    const p = positions.find(x => x.symbol === symbol);
+    if (!p) return { text: `❌ Position not found: ${symbol}`, keyboard: navBar('cmd_positions') };
 
-    if (!p) return { text: `❌ Position ${symbolRaw} not found.`, keyboard: navBar('cmd_positions') };
+    const mark = parseFloat(String(p.markPrice || p.entryPrice || 0));
+    const entry = parseFloat(String(p.entryPrice || 0));
+    const liq = parseFloat(String(p.liquidationPrice || 0));
+    const pnlPct = entry > 0 ? ((mark - entry) / entry * 100 * (p.positionSide === 'SHORT' ? -1 : 1)) : 0;
+    const distPct = liq > 0 && mark > 0 ? Math.abs((mark - liq) / mark * 100) : 0;
+    const riskScore = riskCalculator.distanceToRiskScore(distPct);
+    const riskLvl = riskCalculator.scoreToRiskLevel(riskScore);
 
-    const sideIcon = p.side === 'SHORT' ? '📉 SHORT' : '📈 LONG';
-    const lines = [
-      `📋 ${p.symbol} — DETAILS`,
+    const text = [
+      `📍 ${symbol} — ${riskEmoji(riskLvl)} ${riskLvl}`,
       DIV,
-      `Direction  : ${sideIcon}`,
-      `Leverage   : ${p.leverage}x`,
-      `Size       : ${p.size}`,
+      `Side: ${p.positionSide || 'BOTH'} | Leverage: ${p.leverage}x`,
+      `Size: ${p.positionSize} | Mode: ${p.marginMode || 'CROSS'}`,
       DIV,
-      `Entry Price: $${fmtNum(p.entry)}`,
-      `Mark Price : $${fmtNum(p.mark)}`,
-      `Liq Price  : $${fmtNum(p.liq)}`,
+      `Entry:       $${entry.toFixed(4)}`,
+      `Mark:        $${mark.toFixed(4)}`,
+      `Liquidation: $${liq > 0 ? liq.toFixed(4) : '--'}`,
+      `Distance:    ${distPct > 0 ? distPct.toFixed(2) + '%' : '--'}`,
       DIV,
-      `PnL        : ${pnlEmoji(p.pnl)} ${p.pnl >= 0 ? '+' : ''}$${fmt(p.pnl)}`,
-      `Liq Dist   : ${fmt(p.distPct)}% away`,
+      `PnL: ${pnlPct >= 0 ? '+' : ''}${pnlPct.toFixed(2)}%`,
+      `Risk: ${riskBar(riskScore)}`,
       DIV,
-      `Risk Score : ${riskEmoji(p.riskLevel)} ${p.riskLevel} (${p.combined}/100)`,
-      `Risk Bar   : ${riskBar(p.combined)}`,
-      p.nearestEvent ? `Macro Threat: ${p.nearestEvent} in ${fmt(p.nearestHours, 1)}h` : `Macro Threat: None imminent`,
-      DIV,
-      `Suggestion : ${p.action}`,
-      p.combined >= ALERT_THRESHOLD ? '\n🚨 HIGH RISK — IMMEDIATE ACTION NEEDED' : '',
-      `Updated: ${timeAgo()}`
-    ].filter(Boolean);
+      `Account: $${accountState?.accountValue?.toFixed(2) || '--'}`,
+      `Updated: ${timeAgo(new Date().toISOString())} UTC`,
+    ].join('\n');
 
-    return { text: lines.join('\n'), keyboard: positionDetailKeyboard(p.symbol) };
+    return { text, keyboard: positionDetailKeyboard(symbol) };
   } catch (err: any) {
     return { text: `❌ Error: ${err.message}`, keyboard: navBar('cmd_positions') };
   }
@@ -306,355 +277,602 @@ async function buildPositionDetail(symbolRaw: string): Promise<{ text: string; k
 
 async function buildRiskOverview(): Promise<{ text: string; keyboard: InlineKeyboard }> {
   if (!WALLET) return { text: '❌ Wallet not configured.', keyboard: navBar('cmd_risk') };
-
   try {
-    const { enriched } = await getPositionData();
-
-    if (!enriched.length) return { text: '✅ No open positions — nothing at risk.', keyboard: navBar('cmd_risk') };
+    const { positions } = await sodex.getEnrichedPositions(WALLET);
+    if (!positions.length) return { text: '✅ No open positions — no risk.', keyboard: navBar('cmd_risk') };
 
     const lines = ['⚠️ RISK OVERVIEW', DIV];
-
-    let maxRisk = 0;
-    for (const p of enriched) {
-      if (p.combined > maxRisk) maxRisk = p.combined;
-      lines.push(`${riskEmoji(p.riskLevel)} ${p.symbol}`);
-      lines.push(`   Score  : ${p.combined}/100  ${riskBar(p.combined)}`);
-      lines.push(`   Liq in : ${fmt(p.distPct)}%   Leverage: ${p.leverage}x`);
-      if (p.nearestEvent) lines.push(`   Macro  : ${p.nearestEvent} in ${fmt(p.nearestHours, 1)}h`);
-      lines.push(`   Action : ${p.action}`);
-      if (p.combined >= ALERT_THRESHOLD) lines.push('   🚨 ALERT THRESHOLD EXCEEDED');
-      lines.push('');
+    const rows: InlineButton[][] = [];
+    for (const p of positions) {
+      const mark = parseFloat(String(p.markPrice || p.entryPrice || 0));
+      const liq = parseFloat(String(p.liquidationPrice || 0));
+      const distPct = liq > 0 && mark > 0 ? Math.abs((mark - liq) / mark * 100) : 100;
+      const riskScore = riskCalculator.distanceToRiskScore(distPct);
+      const riskLvl = riskCalculator.scoreToRiskLevel(riskScore);
+      lines.push(`${riskEmoji(riskLvl)} ${p.symbol} @ ${p.leverage}x`);
+      lines.push(`  ${riskBar(riskScore)}`);
+      lines.push(`  Liq dist: ${distPct > 0 ? distPct.toFixed(2) + '%' : '--'}`);
+      rows.push([{ text: `⚡ Act on ${p.symbol}`, callback_data: `pos_detail_${p.symbol.replace(/[^A-Za-z0-9]/g, '_')}` }]);
     }
-
-    lines.push(DIV);
-    if (maxRisk >= ALERT_THRESHOLD) {
-      lines.push('🚨 One or more positions need immediate attention!');
-    } else {
-      lines.push('✅ All positions within acceptable risk range.');
-    }
-    lines.push(`Updated: ${timeAgo()}`);
-
-    return {
-      text: lines.join('\n'),
-      keyboard: riskKeyboard(enriched.map((p: any) => p.symbol))
-    };
+    rows.push([{ text: '🔄 Refresh', callback_data: 'cmd_risk' }, { text: '🏠 Menu', callback_data: 'cmd_menu' }]);
+    return { text: lines.join('\n'), keyboard: { inline_keyboard: rows } };
   } catch (err: any) {
-    return { text: `❌ Failed to assess risk: ${err.message}`, keyboard: navBar('cmd_risk') };
-  }
-}
-
-async function buildSignalsOverview(): Promise<string> {
-  try {
-    const narrativeScorer = require('../utils/narrativeScorer');
-    const SECTORS = ['DeFi', 'AI', 'RWA', 'L1', 'L2', 'GameFi', 'DePIN', 'Meme'];
-    const [newsRaw, etfRaw, macroRaw] = await Promise.all([
-      sosovalue.getNews(50).catch(() => ({ data: [] })),
-      sosovalue.getETFSummaryHistory(7).catch(() => ({ data: {} })),
-      sosovalue.getMacroEvents().catch(() => ({ data: [] }))
-    ]);
-
-    const headlines = (newsRaw?.data || []) as any[];
-    const etf = (etfRaw?.data as any)?.netFlow7Day ?? 0;
-    const upcoming = (macroRaw?.data || []) as any[];
-
-    const scores = SECTORS.map(sector => {
-      const n = narrativeScorer.scoreNarrativeLayer(headlines, sector);
-      const e = narrativeScorer.scoreETFLayer(etf);
-      const m = narrativeScorer.scoreMacroLayer(upcoming);
-      const { combined, signal } = narrativeScorer.generateSignal(n, e, m);
-      return { sector, combined, signal };
-    }).sort((a: any, b: any) => b.combined - a.combined);
-
-    const lines = ['📡 NARRATIVE SIGNALS', DIV];
-
-    for (const s of scores) {
-      const emoji = signalEmoji(s.signal);
-      const bar = riskBar(s.combined);
-      lines.push(`${emoji} ${s.sector.padEnd(8)} ${s.signal.padEnd(12)} ${s.combined}/100`);
-      lines.push(`   ${bar}`);
-    }
-
-    lines.push(DIV);
-    lines.push(`ETF 7d Flow: ${etf >= 0 ? '🟢' : '🔴'} $${fmtNum(Math.abs(etf))} ${etf >= 0 ? 'inflow' : 'outflow'}`);
-    lines.push(`Macro Events: ${upcoming.length} upcoming`);
-    lines.push(`Updated: ${timeAgo()}`);
-
-    return lines.join('\n');
-  } catch (err: any) {
-    return `❌ Failed to load signals: ${err.message}`;
-  }
-}
-
-async function buildMacroOverview(): Promise<string> {
-  try {
-    const raw = await sosovalue.getMacroEvents();
-    const events = (raw?.data || []) as any[];
-
-    if (!events.length) return '📅 No macro events in the next 48 hours.\n\n✅ Clear macro window — good time to trade.';
-
-    const lines = ['📅 MACRO CALENDAR', DIV];
-
-    for (const ev of events.slice(0, 12)) {
-      const ts = ev.eventTime || ev.releaseDate || ev.date || '';
-      const hoursAway = ts ? ((new Date(ts).getTime() - Date.now()) / 3600000) : null;
-      const hoursStr = hoursAway !== null ? `${fmt(hoursAway, 1)}h` : '?';
-      const isHigh = HIGH_IMPACT.some(k => String(ev.name || '').includes(k));
-      const icon = isHigh ? '🚨' : '📌';
-      const urgency = hoursAway !== null && hoursAway < 6 ? ' ⚡ SOON' : '';
-      lines.push(`${icon} ${ev.name || 'Unknown'}`);
-      lines.push(`   In ${hoursStr}${urgency}`);
-    }
-
-    const highCount = events.filter(e => HIGH_IMPACT.some(k => String(e?.name || '').includes(k))).length;
-    lines.push(DIV);
-    lines.push(`🚨 High Impact: ${highCount}  |  📌 Total: ${events.length}`);
-    lines.push(`Updated: ${timeAgo()}`);
-
-    return lines.join('\n');
-  } catch (err: any) {
-    return `❌ Failed to load macro events: ${err.message}`;
+    return { text: `❌ Error: ${err.message}`, keyboard: navBar('cmd_risk') };
   }
 }
 
 async function buildPanicMode(): Promise<{ text: string; keyboard: InlineKeyboard }> {
   if (!WALLET) return { text: '❌ Wallet not configured.', keyboard: navBar('cmd_panic') };
-
   try {
-    const { enriched, accountState: acc } = await getPositionData();
+    const { positions, accountState } = await sodex.getEnrichedPositions(WALLET);
+    if (!positions.length) return { text: '✅ No open positions to close.\n\nYou are flat.', keyboard: navBar('cmd_panic') };
 
-    if (!enriched.length) {
-      return { text: '✅ No open positions to close.\n\nYou are flat.', keyboard: navBar('cmd_panic') };
-    }
-
+    const keySet = sodexTrader.hasKey();
     const lines = [
       '🚨 PANIC MODE',
       DIV,
-      'One-tap close for each position:',
+      `Account: $${accountState?.accountValue?.toFixed(2) || '--'}`,
+      `Open positions: ${positions.length}`,
+      DIV,
+      keySet
+        ? '🔑 Key set — tap to execute close orders:'
+        : '⚠️ No key set — buttons will show instructions.',
       '',
+      'One-tap close for each position:',
     ];
-
-    for (const p of enriched) {
-      lines.push(`${riskEmoji(p.riskLevel)} ${p.symbol}  ${p.leverage}x  ${p.side}`);
-      lines.push(`   PnL: ${p.pnl >= 0 ? '+' : ''}$${fmt(p.pnl)}  |  Risk: ${p.riskLevel}`);
-    }
-
-    lines.push(DIV);
-    lines.push('⚠️ Positions will be queued for closure immediately.');
-    lines.push('Execution via EIP-712 (Wave 2).');
-
     return {
       text: lines.join('\n'),
-      keyboard: panicKeyboard(enriched.map((p: any) => p.symbol))
+      keyboard: panicKeyboard(positions.map(p => p.symbol))
     };
   } catch (err: any) {
     return { text: `❌ Error: ${err.message}`, keyboard: navBar('cmd_panic') };
   }
 }
 
-async function buildStatusOverview(): Promise<string> {
-  const aiService = (process.env.AI_SERVICE || 'groq').toUpperCase();
-  const aiModel = process.env.GROQ_MODEL || process.env.GEMINI_MODEL || process.env.ANTHROPIC_MODEL || 'default';
-  const cycleMin = Math.round(parseInt(process.env.CYCLE_INTERVAL_MS || '1800000') / 60000);
-  const supaOk = process.env.SUPABASE_URL?.startsWith('http');
-
-  return [
-    '⚙️ SYSTEM STATUS',
-    DIV,
-    `🖥️  Server     : Running`,
-    `🤖 AI Service : ${aiService} (${aiModel})`,
-    `⏱️  Scheduler  : Every ${cycleMin} minutes`,
-    `💼 Wallet     : ${WALLET ? WALLET.slice(0, 8) + '...' + WALLET.slice(-4) : '❌ Not set'}`,
-    `🗄️  Supabase   : ${supaOk ? '✅ Connected' : '⚠️ Not configured'}`,
-    `📨 Telegram   : ✅ Active`,
-    `⚡ Auto Trade : ${process.env.AUTO_EXECUTE === 'true' ? '✅ ENABLED' : '❌ Disabled'}`,
-    DIV,
-    `🕐 Time (UTC) : ${new Date().toUTCString()}`,
-  ].join('\n');
-}
-
-function buildHelpText(): string {
-  return [
-    '❓ HELP — SENTINEL FINANCE BOT',
-    DIV,
-    '📊 /positions  — Live positions + P&L',
-    '⚠️  /risk       — Risk score per position',
-    '📡 /signals    — All 8 sector signals',
-    '📅 /macro      — Macro event calendar',
-    '🟢 /buy        — Queue a buy order',
-    '🔴 /sell       — Queue a sell/close',
-    '🚨 /panic      — Emergency close all',
-    '⚙️  /status     — System health',
-    '🏠 /menu       — Main menu',
-    '❓ /help       — This message',
-    DIV,
-    'Auto alerts fire every 30 min when:',
-    '• Risk score exceeds threshold',
-    '• High-impact macro event < 6h away',
-    '• Strong BUY/SELL signal detected',
-  ].join('\n');
-}
-
-function buildBuyText(): string {
-  return [
-    '🟢 BUY ORDER',
-    DIV,
-    'Send a message in this format:',
-    '',
-    'BUY [SYMBOL] [SIZE] [LEVERAGE]x',
-    '',
-    'Examples:',
-    '  BUY BTC-USD 0.01 10x',
-    '  BUY ETH-USD 0.1 5x',
-    '',
-    DIV,
-    '⚠️ Orders are queued for execution.',
-    'EIP-712 signing coming in Wave 2.',
-    'Use /positions to confirm after.',
-  ].join('\n');
-}
-
-function buildSellText(): string {
-  return [
-    '🔴 SELL / CLOSE ORDER',
-    DIV,
-    'Send a message in this format:',
-    '',
-    'SELL [SYMBOL] [SIZE]',
-    '',
-    'Examples:',
-    '  SELL BTC-USD 0.01',
-    '  SELL ETH-USD ALL',
-    '',
-    DIV,
-    'To close a full position instantly,',
-    'use the 🔴 Close button on /positions.',
-    '',
-    '⚠️ Orders are queued for execution.',
-    'EIP-712 signing coming in Wave 2.',
-  ].join('\n');
-}
-
-// ── Action queuer ─────────────────────────────────────────────────────────────
-
-async function queueAction(symbol: string, action: string, extra: Record<string, unknown> = {}): Promise<string> {
+async function buildSignals(): Promise<{ text: string; keyboard: InlineKeyboard }> {
   try {
-    const res = await axios.post(`http://localhost:${PORT}/api/actions`, { action, symbol, ...extra });
-    return res.data?.message || 'Action queued successfully.';
+    const res = await axios.get(`http://localhost:${PORT}/api/signals`);
+    const signals: any[] = res.data || [];
+    if (!signals.length) return { text: '📡 No signals yet. Run a cycle first.', keyboard: navBar('cmd_signals') };
+
+    const sorted = [...signals].sort((a, b) => (b.combined_score ?? b.combined ?? 0) - (a.combined_score ?? a.combined ?? 0));
+    const lines = ['📡 NARRATIVE SIGNALS', DIV];
+    for (const s of sorted) {
+      const score = s.combined_score ?? s.combined ?? 0;
+      const emoji = signalEmoji(s.signal);
+      lines.push(`${emoji} ${s.sector} — ${s.signal} (${score}/100)`);
+    }
+    if (sorted[0]?.reasoning) {
+      lines.push(DIV, '🤖 AI Take:', sorted[0].reasoning);
+    }
+    lines.push(DIV, `Updated: ${timeAgo(sorted[0]?.created_at)} UTC`);
+    return { text: lines.join('\n'), keyboard: navBar('cmd_signals') };
   } catch (err: any) {
-    return `Failed to queue: ${err.message}`;
+    return { text: `❌ Error: ${err.message}`, keyboard: navBar('cmd_signals') };
   }
 }
 
-// ── Command & callback handlers ───────────────────────────────────────────────
+async function buildKeyInfo(): Promise<{ text: string; keyboard: InlineKeyboard }> {
+  const keySet = sodexTrader.hasKey();
+  const addr = sodexTrader.getWalletAddress();
+  const lines = [
+    '🔑 WALLET KEY INFO',
+    DIV,
+    keySet
+      ? `Status: ✅ Key is set\nAddress: ${addr}`
+      : 'Status: ❌ No key set',
+    DIV,
+    'To set your key, send:\n/setkey <your_private_key>',
+    '',
+    'Your message will be deleted immediately.',
+    'Key stored on server — testnet use only.',
+    DIV,
+    keySet ? 'To remove key, send: /removekey' : '',
+  ];
+  const kb: InlineKeyboard = {
+    inline_keyboard: [
+      ...(keySet ? [[{ text: '🗑 Remove Key', callback_data: 'cmd_removekey' }]] : []),
+      [{ text: '🏠 Menu', callback_data: 'cmd_menu' }],
+    ]
+  };
+  return { text: lines.join('\n'), keyboard: kb };
+}
 
-async function handleCommand(chatId: string | number, command: string) {
+// ── Trade execution handlers ──────────────────────────────────────────────────
+
+async function executeClose(chatId: string | number, symbol: string): Promise<void> {
+  if (!sodexTrader.hasKey()) {
+    await sendMessage(chatId,
+      `🔑 No private key set.\n\nTo enable trading, send:\n/setkey <your_private_key>\n\nTestnet use only.`,
+      cancelBar()
+    );
+    return;
+  }
+  await sendMessage(chatId, `⏳ Closing ${symbol}...`);
+  try {
+    const { positions } = await sodex.getEnrichedPositions(WALLET);
+    const pos = positions.find(p => p.symbol === symbol);
+    const size = pos ? String(pos.positionSize) : '0';
+    const result = await sodexTrader.closePosition(symbol, size);
+    await sendMessage(chatId,
+      result.success
+        ? `✅ CLOSE ORDER SENT\n${DIV}\n${result.message}\n\nOrder ID: ${result.orderId || 'pending'}\n\nUse /positions to verify.`
+        : `❌ CLOSE FAILED\n${DIV}\n${result.message}\n\nNote: SoDEX testnet may require manual close at sodex.dev`,
+      navBar('cmd_positions')
+    );
+  } catch (err: any) {
+    await sendMessage(chatId, `❌ Error: ${err.message}`, navBar('cmd_positions'));
+  }
+}
+
+async function executeOrder(chatId: string | number, symbol: string, side: 'BUY' | 'SELL', size: string, leverage: number): Promise<void> {
+  if (!sodexTrader.hasKey()) {
+    await sendMessage(chatId,
+      `🔑 No private key set.\n\nTo enable trading, send:\n/setkey <your_private_key>`,
+      cancelBar()
+    );
+    return;
+  }
+  await sendMessage(chatId, `⏳ Placing ${side} order for ${symbol}...`);
+  const result = await sodexTrader.placeOrder({ symbol, side, type: 'MARKET', quantity: size, leverage });
+  await sendMessage(chatId,
+    result.success
+      ? `✅ ORDER SENT\n${DIV}\n${side} ${size} ${symbol} @ ${leverage}x\n\nOrder ID: ${result.orderId || 'pending'}\n\nUse /positions to monitor.`
+      : `❌ ORDER FAILED\n${DIV}\n${result.message}\n\nNote: SoDEX testnet may not expose a public order API.\nTrade manually at sodex.dev`,
+    navBar('cmd_positions')
+  );
+}
+
+// ── Command handlers ──────────────────────────────────────────────────────────
+
+async function handleCommand(chatId: string | number, command: string, args: string[] = []) {
+  const cid = String(chatId);
   switch (command) {
+
     case '/start':
     case '/menu': {
+      resetStep(cid);
       const text = await buildMenuText().catch(() => '🛡️ SENTINEL FINANCE\n\nSelect an option:');
       await sendMessage(chatId, text, MAIN_MENU);
       break;
     }
+
     case '/positions': {
       const loading = await sendMessage(chatId, '⏳ Fetching positions...');
       const { text, keyboard } = await buildPositionsOverview();
       await sendMessage(chatId, text, keyboard);
       break;
     }
+
     case '/risk': {
       await sendMessage(chatId, '⏳ Calculating risk...');
       const { text, keyboard } = await buildRiskOverview();
       await sendMessage(chatId, text, keyboard);
       break;
     }
-    case '/signals': {
-      await sendMessage(chatId, '⏳ Loading signals...');
-      const text = await buildSignalsOverview();
-      await sendMessage(chatId, text, navBar('cmd_signals'));
-      break;
-    }
-    case '/macro': {
-      await sendMessage(chatId, '⏳ Loading macro calendar...');
-      const text = await buildMacroOverview();
-      await sendMessage(chatId, text, navBar('cmd_macro'));
-      break;
-    }
+
     case '/panic': {
       await sendMessage(chatId, '⏳ Loading positions...');
       const { text, keyboard } = await buildPanicMode();
       await sendMessage(chatId, text, keyboard);
       break;
     }
-    case '/buy':
-      await sendMessage(chatId, buildBuyText(), navBar('cmd_menu'));
-      break;
-    case '/sell':
-      await sendMessage(chatId, buildSellText(), navBar('cmd_menu'));
-      break;
-    case '/status': {
-      const text = await buildStatusOverview();
-      await sendMessage(chatId, text, navBar('cmd_status'));
+
+    case '/signals': {
+      await sendMessage(chatId, '⏳ Fetching signals...');
+      const { text, keyboard } = await buildSignals();
+      await sendMessage(chatId, text, keyboard);
       break;
     }
-    case '/help':
-      await sendMessage(chatId, buildHelpText(), navBar('cmd_menu'));
+
+    // ── Trading commands ───────────────────────────────────────────────────────
+
+    case '/buy':
+    case '/trade': {
+      resetStep(cid);
+      setStep(cid, { type: 'buy_symbol' });
+      await sendMessage(chatId,
+        `🟢 BUY / LONG ORDER\n${DIV}\nEnter the symbol to trade.\n\nExamples: BTC-USD, ETH-USD, SOL-USD\n\nOr type /cancel to abort.`,
+        cancelBar()
+      );
       break;
-    default:
-      await sendMessage(chatId, '❓ Unknown command.\n\nSend /menu to see all options.', navBar('cmd_menu'));
+    }
+
+    case '/short':
+    case '/sell': {
+      resetStep(cid);
+      setStep(cid, { type: 'buy_symbol' });
+      await sendMessage(chatId,
+        `🔴 SELL / SHORT ORDER\n${DIV}\nEnter the symbol to trade.\n\nExamples: BTC-USD, ETH-USD, SOL-USD\n\nOr type /cancel to abort.`,
+        cancelBar()
+      );
+      break;
+    }
+
+    case '/close': {
+      resetStep(cid);
+      if (args[0]) {
+        await executeClose(chatId, args[0].toUpperCase());
+      } else {
+        setStep(cid, { type: 'close_select' });
+        await sendMessage(chatId, '⏳ Loading positions...');
+        const { text, keyboard } = await buildPositionsOverview();
+        await sendMessage(chatId, `❌ SELECT POSITION TO CLOSE\n${DIV}\n${text}`, keyboard);
+      }
+      break;
+    }
+
+    case '/reduce': {
+      resetStep(cid);
+      setStep(cid, { type: 'reduce_select' });
+      await sendMessage(chatId, '⏳ Loading positions...');
+      const { text, keyboard } = await buildPositionsOverview();
+      await sendMessage(chatId, `📉 SELECT POSITION TO REDUCE LEVERAGE\n${DIV}\n${text}`, keyboard);
+      break;
+    }
+
+    // ── Key management ─────────────────────────────────────────────────────────
+
+    case '/setkey': {
+      if (args[0]) {
+        try {
+          sodexTrader.saveKey(args[0]);
+          const addr = sodexTrader.getWalletAddress();
+          await sendMessage(chatId,
+            `✅ PRIVATE KEY SET\n${DIV}\nWallet: ${addr}\n\nReady to execute trades on SoDEX testnet.\n\n⚠️ Testnet use only. Never share this key.`,
+            navBar('cmd_menu')
+          );
+        } catch (err: any) {
+          await sendMessage(chatId, `❌ Invalid private key: ${err.message}`, cancelBar());
+        }
+      } else {
+        resetStep(cid);
+        setStep(cid, { type: 'setkey' });
+        await sendMessage(chatId,
+          `🔑 SET PRIVATE KEY\n${DIV}\nSend your private key as the next message.\n\nIt will be stored on the EC2 server and deleted from chat immediately.\n\n⚠️ TESTNET USE ONLY. Never use your main wallet.\n\n/cancel to abort.`,
+          cancelBar()
+        );
+      }
+      break;
+    }
+
+    case '/removekey': {
+      sodexTrader.removeKey();
+      await sendMessage(chatId, `🗑 Private key removed.\n\nSend /setkey to add a new one.`, navBar('cmd_menu'));
+      break;
+    }
+
+    case '/keyinfo': {
+      const { text, keyboard } = await buildKeyInfo();
+      await sendMessage(chatId, text, keyboard);
+      break;
+    }
+
+    case '/cancel': {
+      resetStep(cid);
+      await sendMessage(chatId, '❌ Cancelled.', MAIN_MENU);
+      break;
+    }
+
+    case '/status': {
+      const keySet = sodexTrader.hasKey();
+      const addr = sodexTrader.getWalletAddress();
+      const lines = [
+        '⚙️ SYSTEM STATUS',
+        DIV,
+        `Backend: ✅ Running`,
+        `Wallet: ${WALLET ? WALLET.slice(0, 10) + '...' : '❌ Not set'}`,
+        `Trading Key: ${keySet ? '✅ ' + addr?.slice(0, 10) + '...' : '❌ Not set'}`,
+        `Network: SoDEX Testnet`,
+        `Alert threshold: ${ALERT_THRESHOLD}/100`,
+        DIV,
+        `Use /setkey to enable trade execution`,
+      ];
+      await sendMessage(chatId, lines.join('\n'), navBar('cmd_status'));
+      break;
+    }
+
+    case '/news': {
+      await sendMessage(chatId, '⏳ Fetching news...');
+      try {
+        const news = await sosovalue.getNews(6);
+        const items: any[] = news?.data?.list || news?.data || [];
+        if (!items.length) { await sendMessage(chatId, '📰 No news available.', navBar('cmd_news')); break; }
+        const lines = ['🗞 LATEST CRYPTO NEWS', DIV];
+        items.slice(0, 6).forEach((n: any, i: number) => {
+          if (n.title || n.content) {
+            lines.push(`${i + 1}. ${(n.title || n.content || '').replace(/<[^>]+>/g, '').slice(0, 120)}`);
+          }
+        });
+        await sendMessage(chatId, lines.join('\n'), navBar('cmd_news'));
+      } catch (err: any) {
+        await sendMessage(chatId, `❌ Error: ${err.message}`, navBar('cmd_news'));
+      }
+      break;
+    }
+
+    case '/macro': {
+      await sendMessage(chatId, '⏳ Fetching macro events...');
+      try {
+        const events = await sosovalue.getMacroEvents();
+        const items: any[] = events?.data || [];
+        if (!items.length) { await sendMessage(chatId, '📅 No macro events found.', navBar('cmd_macro')); break; }
+        const lines = ['📅 MACRO EVENTS', DIV];
+        const filtered = items.filter((e: any) => HIGH_IMPACT.some(k => e.name?.includes(k))).slice(0, 8);
+        if (!filtered.length) items.slice(0, 8).forEach((e: any) => lines.push(`• ${e.name || 'Unknown'}`));
+        else filtered.forEach((e: any) => lines.push(`⚡ ${e.name} — ${e.eventTime || e.date || 'TBD'}`));
+        await sendMessage(chatId, lines.join('\n'), navBar('cmd_macro'));
+      } catch (err: any) {
+        await sendMessage(chatId, `❌ Error: ${err.message}`, navBar('cmd_macro'));
+      }
+      break;
+    }
+
+    case '/summary': {
+      await sendMessage(chatId, '⏳ Fetching AI summary...');
+      try {
+        const res = await axios.get(`http://localhost:${PORT}/api/memos`);
+        const memos: any[] = res.data || [];
+        const lines = ['🤖 AI MARKET BRIEFS', DIV];
+        if (!memos.length) { lines.push('No memos yet. Run a cycle first.'); }
+        else memos.slice(0, 3).forEach(m => {
+          lines.push(`[${m.memo_type} — ${m.related_symbol || 'general'}]`);
+          lines.push(m.content || '');
+          lines.push('');
+        });
+        await sendMessage(chatId, lines.join('\n'), navBar('cmd_summary'));
+      } catch (err: any) {
+        await sendMessage(chatId, `❌ Error: ${err.message}`, navBar('cmd_summary'));
+      }
+      break;
+    }
+
+    case '/help': {
+      const keySet = sodexTrader.hasKey();
+      const lines = [
+        '❓ SENTINEL BOT COMMANDS',
+        DIV,
+        '📊 PORTFOLIO',
+        '/positions  — View all open positions',
+        '/risk       — Risk overview with scores',
+        '/panic      — Emergency close all',
+        '',
+        '💹 TRADING (SoDEX Testnet)',
+        '/buy        — Place long/buy order',
+        '/sell       — Place short/sell order',
+        '/close [sym]— Close a position',
+        '/reduce     — Reduce leverage',
+        '',
+        '🔑 KEY MANAGEMENT',
+        '/setkey     — Add private key for trading',
+        '/removekey  — Remove stored key',
+        '/keyinfo    — Key status',
+        '',
+        '📡 INTEL',
+        '/signals    — AI sector signals',
+        '/news       — Latest crypto news',
+        '/macro      — High-impact events',
+        '/summary    — AI market brief',
+        '',
+        '⚙️ SYSTEM',
+        '/status     — System status',
+        '/menu       — Main menu',
+        '',
+        DIV,
+        `Key status: ${keySet ? '✅ Set and ready' : '❌ Not set — /setkey to enable trading'}`,
+      ];
+      await sendMessage(chatId, lines.join('\n'), navBar('cmd_help'));
+      break;
+    }
+
+    default: {
+      await sendMessage(chatId, `Unknown command. Send /help for a list of commands.`, MAIN_MENU);
+    }
   }
 }
 
-async function handleCallbackQuery(queryId: string, chatId: string | number, msgId: number, data: string) {
-  await answerCallback(queryId, '⏳ Loading...');
+// ── Conversation step handler (text messages) ─────────────────────────────────
 
-  // Menu
-  if (data === 'cmd_menu') {
-    const text = await buildMenuText().catch(() => '🛡️ SENTINEL FINANCE\n\nSelect an option:');
-    await editMessage(chatId, msgId, text, MAIN_MENU);
+async function handleConversationStep(chatId: string, text: string, msgId: number) {
+  const step = getStep(chatId);
+
+  if (step.type === 'setkey') {
+    // Delete the message immediately for security
+    await deleteMessage(chatId, msgId);
+    resetStep(chatId);
+    const key = text.trim();
+    try {
+      sodexTrader.saveKey(key);
+      const addr = sodexTrader.getWalletAddress();
+      await sendMessage(chatId,
+        `✅ PRIVATE KEY SET\n${DIV}\nWallet: ${addr}\n\n⚠️ Message deleted. Key stored securely.\n\nReady to execute trades on SoDEX testnet.`,
+        navBar('cmd_menu')
+      );
+    } catch (err: any) {
+      await sendMessage(chatId, `❌ Invalid key: ${err.message}\n\nSend /setkey to try again.`, MAIN_MENU);
+    }
     return;
   }
 
-  // Position detail
+  if (step.type === 'buy_symbol') {
+    const symbol = text.trim().toUpperCase().replace('/', '-');
+    setStep(chatId, { type: 'buy_side', symbol });
+    await sendMessage(chatId,
+      `${symbol}\n${DIV}\nChoose direction:`,
+      sideKeyboard(symbol)
+    );
+    return;
+  }
+
+  if (step.type === 'buy_size') {
+    const size = parseFloat(text.trim());
+    if (isNaN(size) || size <= 0) {
+      await sendMessage(chatId, '❌ Invalid size. Enter a positive number.\n\nExamples: 0.01, 100, 1000', cancelBar());
+      return;
+    }
+    setStep(chatId, { type: 'buy_leverage', symbol: step.symbol, side: step.side, size: String(size) });
+    await sendMessage(chatId,
+      `${step.side} ${size} ${step.symbol}\n${DIV}\nChoose leverage:`,
+      leverageSelectKeyboard(step.symbol, step.side)
+    );
+    return;
+  }
+
+  if (step.type === 'reduce_leverage') {
+    const lev = parseInt(text.trim(), 10);
+    if (isNaN(lev) || lev < 1 || lev >= step.currentLeverage) {
+      await sendMessage(chatId, `❌ Enter a leverage less than current (${step.currentLeverage}x). Example: 5`, cancelBar());
+      return;
+    }
+    setStep(chatId, { type: 'reduce_confirm', symbol: step.symbol, newLeverage: lev });
+    await sendMessage(chatId,
+      `📉 CONFIRM REDUCE LEVERAGE\n${DIV}\nSymbol: ${step.symbol}\nCurrent: ${step.currentLeverage}x → New: ${lev}x\n\nConfirm?`,
+      confirmBar(`confirm_reduce_${step.symbol.replace(/[^A-Za-z0-9]/g, '_')}_${lev}`)
+    );
+    return;
+  }
+}
+
+// ── Callback query handler ────────────────────────────────────────────────────
+
+async function handleCallbackQuery(queryId: string, chatId: string | number, msgId: number, data: string) {
+  await answerCallback(queryId);
+  const cid = String(chatId);
+
+  // pos_detail_SYMBOL
   if (data.startsWith('pos_detail_')) {
     const symbol = data.replace('pos_detail_', '').replace(/_/g, '-');
+    await sendMessage(chatId, '⏳ Loading...');
     const { text, keyboard } = await buildPositionDetail(symbol);
     await sendMessage(chatId, text, keyboard);
     return;
   }
 
-  // Actions
-  if (data.startsWith('action_close_')) {
-    const symbol = data.replace('action_close_', '').replace(/_/g, '-');
-    await answerCallback(queryId, '🔴 Closing...');
-    const result = await queueAction(symbol, 'CLOSE_POSITION');
+  // trade_close_SYMBOL — execute or prompt for key
+  if (data.startsWith('trade_close_')) {
+    const symbol = data.replace('trade_close_', '').replace(/_/g, '-');
+    await executeClose(chatId, symbol);
+    return;
+  }
+
+  // trade_reduce_SYMBOL — start reduce leverage flow
+  if (data.startsWith('trade_reduce_')) {
+    const symbol = data.replace('trade_reduce_', '').replace(/_/g, '-');
+    try {
+      const { positions } = await sodex.getEnrichedPositions(WALLET);
+      const pos = positions.find(p => p.symbol === symbol);
+      const currentLev = parseFloat(String(pos?.leverage || 1));
+      setStep(cid, { type: 'reduce_leverage', symbol, currentLeverage: currentLev });
+      await sendMessage(chatId,
+        `📉 REDUCE LEVERAGE — ${symbol}\n${DIV}\nCurrent: ${currentLev}x\n\nTap a new leverage or type a number:`,
+        leverageKeyboard(symbol, currentLev)
+      );
+    } catch (err: any) {
+      await sendMessage(chatId, `❌ Error: ${err.message}`, navBar('cmd_positions'));
+    }
+    return;
+  }
+
+  // set_lev_SYMBOL_N — leverage button selected
+  if (data.startsWith('set_lev_')) {
+    const parts = data.replace('set_lev_', '').split('_');
+    const lev = parseInt(parts[parts.length - 1], 10);
+    const symbol = parts.slice(0, -1).join('-');
+    resetStep(cid);
+    await sendMessage(chatId, `⏳ Reducing leverage to ${lev}x on ${symbol}...`);
+    const result = await sodexTrader.reduceLeverage(symbol, lev);
     await sendMessage(chatId,
-      `🔴 CLOSE QUEUED — ${symbol}\n${DIV}\n${result}\n\nUse /positions to verify.`,
+      result.success
+        ? `✅ LEVERAGE CHANGED\n${DIV}\n${result.message}`
+        : `❌ FAILED\n${DIV}\n${result.message}`,
       navBar('cmd_positions')
     );
     return;
   }
 
-  if (data.startsWith('action_reduce_')) {
-    const symbol = data.replace('action_reduce_', '').replace(/_/g, '-');
-    await answerCallback(queryId, '📉 Queuing...');
-    const result = await queueAction(symbol, 'REDUCE_LEVERAGE');
+  // order_side_SYMBOL_SIDE — direction chosen in buy flow
+  if (data.startsWith('order_side_')) {
+    const parts = data.replace('order_side_', '').split('_');
+    const side = parts[parts.length - 1] as 'BUY' | 'SELL';
+    const symbol = parts.slice(0, -1).join('-');
+    setStep(cid, { type: 'buy_size', symbol, side });
     await sendMessage(chatId,
-      `📉 REDUCE LEVERAGE QUEUED — ${symbol}\n${DIV}\n${result}\n\nUse /risk to monitor.`,
-      navBar('cmd_risk')
+      `${side === 'BUY' ? '🟢 LONG' : '🔴 SHORT'} ${symbol}\n${DIV}\nEnter position size:\n\nExamples:\n  0.01 (for BTC)\n  100 (for smaller coins)`,
+      cancelBar()
     );
     return;
   }
 
+  // order_lev_SYMBOL_SIDE_LEV — leverage chosen
+  if (data.startsWith('order_lev_')) {
+    const parts = data.replace('order_lev_', '').split('_');
+    const lev = parseInt(parts[parts.length - 1], 10);
+    const side = parts[parts.length - 2] as 'BUY' | 'SELL';
+    const symbol = parts.slice(0, -2).join('-');
+    const step = getStep(cid);
+    const size = step.type === 'buy_leverage' ? step.size : '0';
+    setStep(cid, { type: 'buy_confirm', symbol, side, size, leverage: lev });
+    await sendMessage(chatId,
+      `📋 CONFIRM ORDER\n${DIV}\nSymbol: ${symbol}\nSide: ${side === 'BUY' ? '🟢 LONG' : '🔴 SHORT'}\nSize: ${size}\nLeverage: ${lev}x\nType: MARKET\n${DIV}\nConfirm?`,
+      confirmBar(`confirm_order_${symbol.replace(/[^A-Za-z0-9]/g, '_')}_${side}_${size.replace('.', 'p')}_${lev}`)
+    );
+    return;
+  }
+
+  // confirm_order_SYMBOL_SIDE_SIZE_LEV
+  if (data.startsWith('confirm_order_')) {
+    const payload = data.replace('confirm_order_', '');
+    const parts = payload.split('_');
+    const lev = parseInt(parts[parts.length - 1], 10);
+    const size = parts[parts.length - 2].replace('p', '.');
+    const side = parts[parts.length - 3] as 'BUY' | 'SELL';
+    const symbol = parts.slice(0, -3).join('-');
+    resetStep(cid);
+    await executeOrder(chatId, symbol, side, size, lev);
+    return;
+  }
+
+  // confirm_reduce_SYMBOL_LEV
+  if (data.startsWith('confirm_reduce_')) {
+    const payload = data.replace('confirm_reduce_', '');
+    const parts = payload.split('_');
+    const lev = parseInt(parts[parts.length - 1], 10);
+    const symbol = parts.slice(0, -1).join('-');
+    resetStep(cid);
+    await sendMessage(chatId, `⏳ Reducing leverage to ${lev}x on ${symbol}...`);
+    const result = await sodexTrader.reduceLeverage(symbol, lev);
+    await sendMessage(chatId,
+      result.success ? `✅ ${result.message}` : `❌ ${result.message}`,
+      navBar('cmd_positions')
+    );
+    return;
+  }
+
+  // action_margin_SYMBOL
   if (data.startsWith('action_margin_')) {
     const symbol = data.replace('action_margin_', '').replace(/_/g, '-');
     await sendMessage(chatId,
-      `💰 ADD MARGIN — ${symbol}\n${DIV}\nTo add margin, transfer funds to your cross-margin account on SoDEX.\n\nThis increases your buffer and reduces liquidation risk.\n\nUse /risk to re-check after deposit.`,
+      `💰 ADD MARGIN — ${symbol}\n${DIV}\nTo add margin on SoDEX testnet:\n1. Go to sodex.dev\n2. Open your ${symbol} position\n3. Click "Add Margin"\n\nMargin is added from your vUSDC balance.`,
       navBar('cmd_risk')
     );
     return;
   }
 
-  // Generic cmd_ → route to command handler
+  // cmd_removekey
+  if (data === 'cmd_removekey') {
+    sodexTrader.removeKey();
+    await sendMessage(chatId, `🗑 Private key removed.`, navBar('cmd_menu'));
+    return;
+  }
+
+  // cmd_cancel
+  if (data === 'cmd_cancel') {
+    resetStep(cid);
+    await sendMessage(chatId, '❌ Cancelled.', MAIN_MENU);
+    return;
+  }
+
+  // Generic cmd_ → command router
   if (data.startsWith('cmd_')) {
     const cmd = '/' + data.replace('cmd_', '');
     await handleCommand(chatId, cmd);
@@ -671,11 +889,16 @@ async function handleUpdate(update: any) {
     const msg = update.message;
     const chatId = String(msg.chat?.id);
     const text: string = msg.text || '';
+    const msgId: number = msg.message_id;
     if (authorizedId && chatId !== authorizedId) return;
 
     if (text.startsWith('/')) {
-      const command = text.split(' ')[0].toLowerCase().split('@')[0];
-      await handleCommand(chatId, command);
+      const parts = text.split(' ');
+      const command = parts[0].toLowerCase().split('@')[0];
+      const args = parts.slice(1);
+      await handleCommand(chatId, command, args);
+    } else if (text.trim()) {
+      await handleConversationStep(chatId, text, msgId);
     }
   }
 
@@ -691,39 +914,41 @@ async function handleUpdate(update: any) {
 
 async function poll() {
   const base = apiBase();
-  if (!base) return;
-
+  if (!base || polling) return;
+  polling = true;
   try {
     const res = await axios.get(`${base}/getUpdates`, {
       params: { offset, timeout: 25, allowed_updates: ['message', 'callback_query'] },
       timeout: 30000
     });
     const updates: any[] = res.data?.result || [];
-    for (const update of updates) {
-      offset = update.update_id + 1;
-      handleUpdate(update).catch((err: any) =>
-        console.error(`[TelegramBot] Update error: ${err.message}`)
-      );
+    for (const u of updates) {
+      offset = u.update_id + 1;
+      handleUpdate(u).catch(() => {});
     }
-  } catch (err: any) {
-    if (!err.message?.includes('timeout')) {
-      console.error(`[TelegramBot] Poll error: ${err.message}`);
-    }
+  } catch { }
+  finally {
+    polling = false;
+    setTimeout(poll, 500);
   }
-
-  if (polling) setTimeout(poll, 100);
 }
 
-function startBot() {
-  if (!apiBase()) {
-    console.warn('[TelegramBot] TELEGRAM_BOT_TOKEN not set — bot disabled.');
-    return;
-  }
-  polling = true;
+export function startBot() {
+  const token = process.env.TELEGRAM_BOT_TOKEN;
+  const chatId = process.env.TELEGRAM_CHAT_ID;
+  if (!token) { console.warn('[TelegramBot] No TELEGRAM_BOT_TOKEN set.'); return; }
+  if (!chatId) { console.warn('[TelegramBot] No TELEGRAM_CHAT_ID set.'); return; }
   console.log('[TelegramBot] Polling started. Send /menu to your bot.');
   poll();
 }
 
-function stopBot() { polling = false; }
+// ── Outbound alert helpers (used by agents) ───────────────────────────────────
 
-export = { startBot, stopBot };
+async function sendToChat(text: string): Promise<boolean> {
+  const chatId = authorizedChatId();
+  if (!chatId) return false;
+  const result = await sendMessage(chatId, text);
+  return !!result;
+}
+
+export { sendToChat };
