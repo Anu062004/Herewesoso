@@ -378,48 +378,76 @@ async function buildKeyInfo(): Promise<{ text: string; keyboard: InlineKeyboard 
   return { text: lines.join('\n'), keyboard: kb };
 }
 
+// ── SoDEX deep-link helpers ───────────────────────────────────────────────────
+
+function sodexTradeUrl(symbol?: string): string {
+  // Format: BTC-USD → BTC_USDC
+  const pair = symbol ? symbol.replace('-USD', '_USDC') : 'BTC_USDC';
+  return `https://testnet.sodex.dev/trade/perps/${pair}`;
+}
+
+function sodexTradeKeyboard(symbol?: string): InlineKeyboard {
+  return {
+    inline_keyboard: [
+      [{ text: '🌐 Open SoDEX to trade', url: sodexTradeUrl(symbol) }],
+      [{ text: '📊 Positions', callback_data: 'cmd_positions' }, { text: '🏠 Menu', callback_data: 'cmd_menu' }],
+    ]
+  };
+}
+
 // ── Trade execution handlers ──────────────────────────────────────────────────
 
 async function executeClose(chatId: string | number, symbol: string): Promise<void> {
-  if (!sodexTrader.hasKey()) {
-    await sendMessage(chatId,
-      `🔑 No private key set.\n\nTo enable trading, send:\n/setkey <your_private_key>\n\nTestnet use only.`,
-      cancelBar()
-    );
-    return;
-  }
-  await sendMessage(chatId, `⏳ Closing ${symbol}...`);
+  await sendMessage(chatId, `⏳ Attempting to close ${symbol}...`);
   try {
     const { positions } = await sodex.getEnrichedPositions(WALLET);
     const pos = positions.find(p => p.symbol === symbol);
     const size = pos ? String(pos.positionSize) : '0';
-    const result = await sodexTrader.closePosition(symbol, size);
+
+    if (sodexTrader.hasKey()) {
+      const result = await sodexTrader.closePosition(symbol, size);
+      if (result.success) {
+        await sendMessage(chatId,
+          `✅ CLOSE ORDER SENT\n${DIV}\n${result.message}\n\nOrder ID: ${result.orderId || 'pending'}\n\nUse /positions to verify.`,
+          navBar('cmd_positions')
+        );
+        return;
+      }
+    }
+
+    // API unavailable — send direct link to SoDEX
+    const entry = pos ? `$${parseFloat(String(pos.entryPrice || 0)).toFixed(2)}` : '--';
+    const sz = pos ? String(pos.positionSize) : '--';
     await sendMessage(chatId,
-      result.success
-        ? `✅ CLOSE ORDER SENT\n${DIV}\n${result.message}\n\nOrder ID: ${result.orderId || 'pending'}\n\nUse /positions to verify.`
-        : `❌ CLOSE FAILED\n${DIV}\n${result.message}\n\nNote: SoDEX testnet may require manual close at sodex.dev`,
-      navBar('cmd_positions')
+      `⚠️ MANUAL CLOSE REQUIRED\n${DIV}\nSoDEX testnet does not expose a public order API.\n\nYour position:\nSymbol: ${symbol}\nSize: ${sz}\nEntry: ${entry}\n\nTap below to close on SoDEX directly 👇`,
+      sodexTradeKeyboard(symbol)
     );
   } catch (err: any) {
-    await sendMessage(chatId, `❌ Error: ${err.message}`, navBar('cmd_positions'));
+    await sendMessage(chatId,
+      `⚠️ MANUAL CLOSE REQUIRED\n${DIV}\n${symbol}\n\nTap below to trade on SoDEX directly 👇`,
+      sodexTradeKeyboard(symbol)
+    );
   }
 }
 
 async function executeOrder(chatId: string | number, symbol: string, side: 'BUY' | 'SELL', size: string, leverage: number): Promise<void> {
-  if (!sodexTrader.hasKey()) {
-    await sendMessage(chatId,
-      `🔑 No private key set.\n\nTo enable trading, send:\n/setkey <your_private_key>`,
-      cancelBar()
-    );
-    return;
-  }
   await sendMessage(chatId, `⏳ Placing ${side} order for ${symbol}...`);
-  const result = await sodexTrader.placeOrder({ symbol, side, type: 'MARKET', quantity: size, leverage });
+
+  if (sodexTrader.hasKey()) {
+    const result = await sodexTrader.placeOrder({ symbol, side, type: 'MARKET', quantity: size, leverage });
+    if (result.success) {
+      await sendMessage(chatId,
+        `✅ ORDER SENT\n${DIV}\n${side} ${size} ${symbol} @ ${leverage}x\n\nOrder ID: ${result.orderId || 'pending'}\n\nUse /positions to monitor.`,
+        navBar('cmd_positions')
+      );
+      return;
+    }
+  }
+
+  // API unavailable — send direct link to SoDEX
   await sendMessage(chatId,
-    result.success
-      ? `✅ ORDER SENT\n${DIV}\n${side} ${size} ${symbol} @ ${leverage}x\n\nOrder ID: ${result.orderId || 'pending'}\n\nUse /positions to monitor.`
-      : `❌ ORDER FAILED\n${DIV}\n${result.message}\n\nNote: SoDEX testnet may not expose a public order API.\nTrade manually at sodex.dev`,
-    navBar('cmd_positions')
+    `⚠️ MANUAL ORDER REQUIRED\n${DIV}\nSoDEX testnet does not expose a public order API.\n\nYour order:\n${side} ${size} ${symbol} @ ${leverage}x MARKET\n\nTap below to place on SoDEX directly 👇`,
+    sodexTradeKeyboard(symbol)
   );
 }
 
