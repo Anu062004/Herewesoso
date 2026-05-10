@@ -1,6 +1,12 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
-import ws = require('ws');
 import errorUtils = require('../utils/error');
+
+// Polyfill WebSocket for Node.js < 22 before any supabase-js initialisation
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const ws = require('ws') as typeof import('ws');
+if (typeof (globalThis as any).WebSocket === 'undefined') {
+  (globalThis as any).WebSocket = ws;
+}
 
 const { getErrorMessage } = errorUtils;
 
@@ -41,8 +47,7 @@ let client: SupabaseClient | null = null;
 if (isSupabaseConfigured && supabaseUrl && supabaseKey) {
   try {
     client = createClient(supabaseUrl, supabaseKey, {
-      auth: { autoRefreshToken: false, persistSession: false },
-      realtime: { transport: ws as any }
+      auth: { autoRefreshToken: false, persistSession: false }
     });
   } catch (error) {
     console.warn(`[Supabase] Configuration rejected: ${getErrorMessage(error)}`);
