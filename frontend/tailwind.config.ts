@@ -9,26 +9,29 @@ const config: Config = {
   theme: {
     extend: {
       fontFamily: {
-        headline: ['Trebuchet MS', 'Segoe UI', 'sans-serif'],
-        body: ['Segoe UI', 'sans-serif'],
-        mono: ['Consolas', 'Liberation Mono', 'monospace']
+        headline: ['Geist', 'sans-serif'],
+        body: ['Inter', 'sans-serif'],
+        mono: ['JetBrains Mono', 'monospace']
       },
       colors: {
-        background: '#080808',
-        panel: '#111111',
-        border: '#1e1e1e',
-        text: '#e0e0e0',
-        accent: '#ff6d00',
-        'accent-dim': '#cc5200',
-        'accent-glow': '#ff8533',
-        safe: '#00e676',
-        'safe-dim': '#00cc6d',
-        caution: '#ffd600',
-        'caution-dim': '#e6b800',
-        danger: '#ff1744',
-        'danger-dim': '#cc3656',
-        critical: '#ff1744',
-        cyan: '#6dddff'
+        background: '#0d1515',
+        'background-deep': '#050508',
+        panel: 'rgba(15, 15, 25, 0.7)',
+        border: 'rgba(255, 255, 255, 0.1)',
+        text: '#dce4e4',
+        'text-dim': '#b9cacb',
+        accent: '#00f2ff',
+        'accent-dim': '#00dbe7',
+        'accent-glow': '#ff00d9',
+        safe: '#00ffa3',
+        'safe-dim': '#00cc82',
+        caution: '#ffd700',
+        'caution-dim': '#ccac00',
+        danger: '#ff3131',
+        'danger-dim': '#cc2727',
+        critical: '#ff3131',
+        cyan: '#00f2ff',
+        magenta: '#ff00d9'
       }
     }
   },

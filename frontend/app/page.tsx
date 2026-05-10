@@ -1,120 +1,97 @@
 import Link from 'next/link';
 
-const pillars = [
-  {
-    name: 'Narrative Alpha Scanner',
-    description: 'Scores eight crypto sectors every cycle using SoSoValue news, ETF flow, and macro data.'
-  },
-  {
-    name: 'Liquidation Shield',
-    description: 'Checks open SoDEX testnet positions against liquidation distance and incoming macro risk.'
-  },
-  {
-    name: 'Telegram Alerts',
-    description: 'Sends alert-only notifications and deep-links the user back to the dashboard to act.'
-  }
-];
-
-const waveOne = [
-  'Backend agents and API routes',
-  'Telegram alert delivery',
-  'Terminal-style dashboard UI',
-  'Execution confirmation modal',
-  'No real EIP-712 signing yet'
-];
-
 export default function HomePage() {
   return (
-    <main className="relative z-10 mx-auto flex min-h-screen w-full max-w-7xl flex-col px-6 py-10 sm:px-10">
-      <section className="panel overflow-hidden rounded-[2rem] px-8 py-12 sm:px-12 sm:py-16">
-        <p className="eyebrow">Sentinel Finance</p>
-        <h1 className="mt-5 max-w-4xl font-headline text-5xl font-extrabold leading-[1.02] tracking-tight text-white sm:text-7xl">
-          Find the trade. Protect the trade. Execute from the dashboard.
+    <main className="relative z-10 mx-auto flex min-h-screen w-full flex-col items-center justify-center px-6 py-10 sm:px-10">
+      
+      {/* Navbar / Header */}
+      <nav className="absolute top-0 w-full max-w-7xl px-6 py-8 flex justify-between items-center">
+        <div className="flex items-center gap-3">
+          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-accent/10 border border-accent/20">
+            <svg viewBox="0 0 24 24" fill="none" className="h-5 w-5 text-accent" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+            </svg>
+          </div>
+          <span className="font-mono text-lg font-bold text-white tracking-widest">SENTINEL</span>
+        </div>
+        <Link
+          href="/dashboard"
+          className="rounded-full bg-panel border border-border px-6 py-2.5 font-mono text-sm font-semibold tracking-wide text-accent transition-all hover:border-accent hover:shadow-[0_0_20px_rgba(0,242,255,0.2)]"
+        >
+          Launch Terminal
+        </Link>
+      </nav>
+
+      {/* Hero Section */}
+      <section className="relative w-full max-w-5xl text-center flex flex-col items-center pt-24 pb-16">
+        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 h-[500px] w-[800px] bg-accent/20 blur-[150px] rounded-full pointer-events-none" />
+        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 h-[400px] w-[600px] bg-magenta/10 blur-[150px] rounded-full pointer-events-none" />
+        
+        <p className="eyebrow mb-6 text-accent animate-pulse tracking-[0.3em]">System Online</p>
+        <h1 className="relative z-10 max-w-4xl font-headline text-5xl font-extrabold leading-[1.1] tracking-tight text-white sm:text-7xl">
+          Institutional Grade <br/>
+          <span className="text-transparent bg-clip-text bg-gradient-to-r from-accent to-magenta">Risk Intelligence</span>
         </h1>
-        <p className="mt-6 max-w-2xl text-base leading-8 text-zinc-400 sm:text-lg">
-          Sentinel Finance combines a narrative sector scanner with a liquidation defense loop
-          for leveraged crypto positions. Telegram handles alerts only. The dashboard is where
-          the user reviews risk and confirms actions.
+        <p className="relative z-10 mt-6 max-w-2xl text-base leading-8 text-text-dim sm:text-lg">
+          Real-time narrative tracking, SoDEX perpetuals monitoring, and automated Liquidation Shield for advanced crypto traders.
         </p>
 
-        <div className="mt-10 flex flex-wrap gap-4">
+        <div className="relative z-10 mt-10 flex flex-wrap justify-center gap-4">
           <Link
             href="/dashboard"
-            className="rounded-full bg-accent px-6 py-3.5 font-mono text-sm font-semibold tracking-wide text-black transition-all hover:bg-accent-glow hover:shadow-[0_0_30px_rgba(255,109,0,0.28)]"
+            className="rounded-lg bg-accent px-8 py-4 font-mono text-sm font-bold tracking-widest text-black transition-all hover:bg-white hover:shadow-[0_0_30px_rgba(0,242,255,0.4)]"
           >
-            Open Dashboard
+            CONNECT WALLET
           </Link>
           <a
             href="https://sosovalue.com"
             target="_blank"
             rel="noreferrer"
-            className="rounded-full border border-white/8 px-6 py-3.5 font-mono text-sm font-semibold text-zinc-300 transition-all hover:border-white/15 hover:bg-white/5 hover:text-white"
+            className="rounded-lg border border-accent/30 bg-black/40 px-8 py-4 font-mono text-sm font-semibold text-accent transition-all hover:border-accent hover:bg-accent/10"
           >
-            View SoSoValue
+            VIEW DOCS
           </a>
         </div>
-
-        <div className="pointer-events-none absolute -right-20 -top-20 h-80 w-80 rounded-full bg-accent/10 blur-[120px]" />
-        <div className="pointer-events-none absolute -bottom-20 right-40 h-60 w-60 rounded-full bg-safe/5 blur-[100px]" />
       </section>
 
-      <section className="mt-8 grid gap-4 md:grid-cols-3">
-        {pillars.map((pillar) => (
-          <article key={pillar.name} className="panel rounded-3xl p-7">
-            <p className="eyebrow">{pillar.name}</p>
-            <p className="mt-5 text-sm leading-7 text-zinc-400">{pillar.description}</p>
-          </article>
-        ))}
-      </section>
-
-      <section className="mt-8 grid gap-6 lg:grid-cols-[1.1fr_0.9fr]">
-        <div className="panel rounded-3xl p-7">
-          <p className="eyebrow">Cycle Logic</p>
-          <div className="mt-6 grid gap-3 sm:grid-cols-2">
-            <div className="inset-card rounded-2xl p-5">
-              <p className="font-mono text-[0.65rem] font-bold tracking-[0.2em] text-zinc-600">STEP 01</p>
-              <h2 className="mt-2.5 font-headline text-xl font-semibold text-white">Scan narratives</h2>
-              <p className="mt-2 text-xs leading-5 text-zinc-500">
-                Pull SoSoValue feeds, ETF history, and macro events to score the market every 30 minutes.
-              </p>
-            </div>
-            <div className="inset-card rounded-2xl p-5">
-              <p className="font-mono text-[0.65rem] font-bold tracking-[0.2em] text-zinc-600">STEP 02</p>
-              <h2 className="mt-2.5 font-headline text-xl font-semibold text-white">Watch positions</h2>
-              <p className="mt-2 text-xs leading-5 text-zinc-500">
-                Pull SoDEX testnet account state and compare liquidation distance against macro stress.
-              </p>
-            </div>
-            <div className="inset-card rounded-2xl p-5">
-              <p className="font-mono text-[0.65rem] font-bold tracking-[0.2em] text-zinc-600">STEP 03</p>
-              <h2 className="mt-2.5 font-headline text-xl font-semibold text-white">Alert only</h2>
-              <p className="mt-2 text-xs leading-5 text-zinc-500">
-                Send Telegram alerts with a direct dashboard link. No trading actions happen inside Telegram.
-              </p>
-            </div>
-            <div className="inset-card rounded-2xl p-5">
-              <p className="font-mono text-[0.65rem] font-bold tracking-[0.2em] text-zinc-600">STEP 04</p>
-              <h2 className="mt-2.5 font-headline text-xl font-semibold text-white">Confirm action</h2>
-              <p className="mt-2 text-xs leading-5 text-zinc-500">
-                The dashboard queues a reduce-leverage or close-position confirmation flow for Wave 1.
-              </p>
-            </div>
+      {/* Features Grid */}
+      <section className="relative z-10 mt-16 grid w-full max-w-6xl gap-6 md:grid-cols-3">
+        <article className="panel rounded-2xl p-8 hover:-translate-y-1 transition-transform duration-300">
+          <div className="mb-6 inline-flex h-12 w-12 items-center justify-center rounded-xl bg-accent/10 border border-accent/20 text-accent">
+            <svg viewBox="0 0 24 24" fill="none" className="h-6 w-6" stroke="currentColor" strokeWidth="2">
+              <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+            </svg>
           </div>
-        </div>
+          <h3 className="font-headline text-xl font-semibold text-white">Liquidation Shield</h3>
+          <p className="mt-4 text-sm leading-relaxed text-text-dim">
+            Automatically monitor your SoDEX perps and get Telegram alerts before liquidations hit.
+          </p>
+        </article>
 
-        <div className="panel rounded-3xl p-7">
-          <p className="eyebrow">Wave 1 Scope</p>
-          <h2 className="mt-5 font-headline text-3xl font-bold tracking-tight text-white">
-            Ship the alert and review loop first.
-          </h2>
-          <div className="mt-6 space-y-3">
-            {waveOne.map((item) => (
-              <div key={item} className="rounded-2xl border border-white/8 bg-black/20 px-4 py-3 text-sm text-zinc-300">
-                {item}
-              </div>
-            ))}
+        <article className="panel rounded-2xl p-8 hover:-translate-y-1 transition-transform duration-300">
+          <div className="mb-6 inline-flex h-12 w-12 items-center justify-center rounded-xl bg-magenta/10 border border-magenta/20 text-magenta">
+            <svg viewBox="0 0 24 24" fill="none" className="h-6 w-6" stroke="currentColor" strokeWidth="2">
+              <circle cx="12" cy="12" r="10" />
+              <polyline points="12 6 12 12 16 14" />
+            </svg>
           </div>
-        </div>
+          <h3 className="font-headline text-xl font-semibold text-white">Narrative Scanner</h3>
+          <p className="mt-4 text-sm leading-relaxed text-text-dim">
+            Real-time parsing of SoSoValue macroeconomic data and ETF flows to catch the next meta shift.
+          </p>
+        </article>
+
+        <article className="panel rounded-2xl p-8 hover:-translate-y-1 transition-transform duration-300">
+          <div className="mb-6 inline-flex h-12 w-12 items-center justify-center rounded-xl bg-safe/10 border border-safe/20 text-safe">
+            <svg viewBox="0 0 24 24" fill="none" className="h-6 w-6" stroke="currentColor" strokeWidth="2">
+              <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
+            </svg>
+          </div>
+          <h3 className="font-headline text-xl font-semibold text-white">Automated Execution</h3>
+          <p className="mt-4 text-sm leading-relaxed text-text-dim">
+            Connect to the Telegram bot to auto-hedge or reduce leverage when risk thresholds are breached.
+          </p>
+        </article>
       </section>
     </main>
   );
