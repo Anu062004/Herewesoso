@@ -6,6 +6,7 @@ import claude = require('../services/ai');
 import telegram = require('../services/telegram');
 import riskCalculator = require('../utils/riskCalculator');
 import supabaseService = require('../services/supabase');
+import memoryStore = require('../services/memoryStore');
 import errorUtils = require('../utils/error');
 
 const { safeInsert, createAgentRun, completeAgentRun, failAgentRun } = supabaseService;
@@ -88,14 +89,30 @@ function getNearestDangerousEvent(events: MacroEvent[]) {
   return { nearestEvent, hoursUntilEvent };
 }
 
-async function fetchShieldInputs() {
-  const [todayEvents, tomorrowEvents, etfData] = await Promise.all([
+let shieldInputCache: { data: Awaited<ReturnType<typeof fetchShieldInputsUncached>>; expiresAt: number } | null = null;
+const CACHE_TTL_MS = 25 * 60 * 1000; // 25 min — refresh slightly before 30-min cycle
+
+async function fetchShieldInputsUncached() {
+  const [todayEvents, tomorrowEvents, etfData] = await Promise.allSettled([
     sosovalue.getMacroEvents(toDateParts(0)),
     sosovalue.getMacroEvents(toDateParts(1)),
     sosovalue.getETFSummaryHistory(1)
   ]);
 
-  return { todayEvents, tomorrowEvents, etfData };
+  return {
+    todayEvents: todayEvents.status === 'fulfilled' ? todayEvents.value : { data: [] },
+    tomorrowEvents: tomorrowEvents.status === 'fulfilled' ? tomorrowEvents.value : { data: [] },
+    etfData: etfData.status === 'fulfilled' ? etfData.value : { data: {} }
+  };
+}
+
+async function fetchShieldInputs() {
+  if (shieldInputCache && Date.now() < shieldInputCache.expiresAt) {
+    return shieldInputCache.data;
+  }
+  const data = await fetchShieldInputsUncached();
+  shieldInputCache = { data, expiresAt: Date.now() + CACHE_TTL_MS };
+  return data;
 }
 
 function parseNumber(value: unknown): number {
@@ -209,6 +226,13 @@ async function runShieldAgent(): Promise<ShieldAgentResult> {
           riskLevel
         });
 
+        memoryStore.pushMemo({
+          memo_type: 'RISK_ALERT',
+          content: claudeMemo,
+          related_symbol: symbol,
+          data: { riskLevel, riskScore: combinedRisk, distancePct }
+        });
+
         await safeInsert('trade_memos', {
           memo_type: 'RISK_ALERT',
           content: claudeMemo,
@@ -254,6 +278,15 @@ async function runShieldAgent(): Promise<ShieldAgentResult> {
             ? `${getEventName(nearestEvent)} in ${hoursUntilEvent.toFixed(1)}h`
             : 'No imminent macro events',
           claudeMemo
+        });
+
+        memoryStore.pushAlert({
+          alert_type: alertResult.alertType,
+          severity: alertResult.severity,
+          title: alertResult.title,
+          message: alertResult.message,
+          telegram_sent: Boolean(alertResult.telegramSent),
+          data: { symbol, riskLevel, riskScore: combinedRisk }
         });
 
         await safeInsert('alerts', {

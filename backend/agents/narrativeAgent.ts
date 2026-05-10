@@ -6,6 +6,7 @@ import telegram = require('../services/telegram');
 import narrativeScorer = require('../utils/narrativeScorer');
 import delayUtils = require('../utils/delay');
 import supabaseService = require('../services/supabase');
+import memoryStore = require('../services/memoryStore');
 import errorUtils = require('../utils/error');
 
 const { delay } = delayUtils;
@@ -88,6 +89,13 @@ async function runNarrativeAgent(): Promise<NarrativeAgentResult> {
 
       topSignal.reasoning = reasoning;
 
+      memoryStore.pushMemo({
+        memo_type: 'ENTRY_SIGNAL',
+        content: reasoning,
+        related_symbol: topSignal.sector,
+        data: { sector: topSignal.sector, combinedScore: topSignal.combined_score, signal: topSignal.signal }
+      });
+
       await safeInsert('trade_memos', {
         memo_type: 'ENTRY_SIGNAL',
         content: reasoning,
@@ -110,6 +118,15 @@ async function runNarrativeAgent(): Promise<NarrativeAgentResult> {
         reasoning
       });
 
+      memoryStore.pushAlert({
+        alert_type: alertResult.alertType,
+        severity: alertResult.severity,
+        title: alertResult.title,
+        message: alertResult.message,
+        telegram_sent: Boolean(alertResult.telegramSent),
+        data: { sector: topSignal.sector, signal: topSignal.signal, combinedScore: topSignal.combined_score }
+      });
+
       await safeInsert('alerts', {
         alert_type: alertResult.alertType,
         severity: alertResult.severity,
@@ -124,11 +141,18 @@ async function runNarrativeAgent(): Promise<NarrativeAgentResult> {
       });
     }
 
+    memoryStore.pushSignals(
+      sectorScores.map((score) => ({
+        ...score,
+        reasoning: score.sector === topSignal?.sector ? (topSignal?.reasoning || null) : null
+      }))
+    );
+
     await safeInsert(
       'narrative_scores',
       sectorScores.map((score) => ({
         ...score,
-        reasoning: score.sector === topSignal?.sector ? topSignal.reasoning || null : null
+        reasoning: score.sector === topSignal?.sector ? topSignal?.reasoning || null : null
       }))
     );
 

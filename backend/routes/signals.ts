@@ -3,6 +3,7 @@ import type { NarrativeScoreRow } from '../types/domain';
 
 import express from 'express';
 import supabaseService = require('../services/supabase');
+import memoryStore = require('../services/memoryStore');
 
 const { safeSelect } = supabaseService;
 
@@ -13,11 +14,11 @@ router.get('/', async (_req: Request, res: Response) => {
     query.order('created_at', { ascending: false }).limit(16)
   );
 
-  if (error) {
-    return res.status(500).json({ error: error.message, data: [] });
+  if (!error && data && data.length > 0) {
+    return res.json(data);
   }
 
-  return res.json(data);
+  return res.json(memoryStore.getSignals());
 });
 
 export = router;
