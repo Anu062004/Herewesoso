@@ -1,0 +1,226 @@
+const axios = require('axios');
+
+function getApiBase() {
+  const token = process.env.TELEGRAM_BOT_TOKEN;
+  return token ? `https://api.telegram.org/bot${token}` : null;
+}
+
+function getChatId() {
+  return process.env.TELEGRAM_CHAT_ID;
+}
+
+function getAppUrl() {
+  return process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
+}
+
+function getSeverityFromSignal(signal) {
+  if (signal === 'STRONG_BUY' || signal === 'BUY') return 'INFO';
+  if (signal === 'WATCH' || signal === 'NEUTRAL') return 'WARNING';
+  return 'DANGER';
+}
+
+function timestamp() {
+  return new Date().toLocaleString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit'
+  });
+}
+
+const telegram = {
+  async sendMessage(text, replyMarkup = null) {
+    const apiBase = getApiBase();
+    const chatId = getChatId();
+
+    if (!apiBase || !chatId) {
+      console.warn('[Telegram] Skipping message; TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID is missing.');
+      return false;
+    }
+
+    const body = {
+      chat_id: chatId,
+      text,
+      parse_mode: 'Markdown',
+      disable_web_page_preview: true
+    };
+
+    if (replyMarkup) {
+      body.reply_markup = replyMarkup;
+    }
+
+    try {
+      await axios.post(`${apiBase}/sendMessage`, body);
+      return true;
+    } catch (error) {
+      console.error(`[Telegram] Failed to send: ${error.message}`);
+      return false;
+    }
+  },
+
+  dashboardButton(path = '/dashboard') {
+    return {
+      inline_keyboard: [[
+        {
+          text: 'Open Dashboard to Act',
+          url: `${getAppUrl()}${path}`
+        }
+      ]]
+    };
+  },
+
+  buildLiquidationAlert({
+    symbol,
+    leverage,
+    riskLevel,
+    riskScore,
+    distancePct,
+    macroThreat,
+    claudeMemo
+  }) {
+    return {
+      alertType: 'LIQUIDATION_RISK',
+      severity: riskLevel === 'CRITICAL' ? 'CRITICAL' : riskLevel === 'DANGER' ? 'DANGER' : 'WARNING',
+      title: `${riskLevel} liquidation risk on ${symbol}`,
+      message: [
+        `SENTINEL SHIELD - ${riskLevel}`,
+        '',
+        `Position: ${symbol}`,
+        `Leverage: ${leverage}x`,
+        `Risk Score: ${riskScore}/100`,
+        `Distance to Liquidation: ${distancePct.toFixed(2)}%`,
+        `Macro Threat: ${macroThreat}`,
+        '',
+        'Claude Analysis:',
+        claudeMemo,
+        '',
+        'Open the dashboard to review and act.',
+        '',
+        `Sentinel Finance | ${timestamp()}`
+      ].join('\n')
+    };
+  },
+
+  async sendLiquidationAlert(input) {
+    const payload = this.buildLiquidationAlert(input);
+    const telegramSent = await this.sendMessage(payload.message, this.dashboardButton('/dashboard'));
+    return { ...payload, telegramSent };
+  },
+
+  buildNarrativeSignal({
+    sector,
+    signal,
+    combinedScore,
+    narrativeScore,
+    etfScore,
+    macroScore,
+    topHeadline,
+    reasoning
+  }) {
+    return {
+      alertType: 'NARRATIVE_SIGNAL',
+      severity: getSeverityFromSignal(signal),
+      title: `${signal} signal for ${sector}`,
+      message: [
+        `NARRATIVE SIGNAL - ${signal}`,
+        '',
+        `Sector: ${sector}`,
+        `Combined Score: ${combinedScore}/100`,
+        `Narrative: ${narrativeScore}/100`,
+        `ETF Flows: ${etfScore}/100`,
+        `Macro: ${macroScore}/100`,
+        '',
+        'Headline:',
+        topHeadline,
+        '',
+        'Claude Take:',
+        reasoning,
+        '',
+        'Open the dashboard to view the full signal.',
+        '',
+        `Sentinel Finance | ${timestamp()}`
+      ].join('\n')
+    };
+  },
+
+  async sendNarrativeSignal(input) {
+    const payload = this.buildNarrativeSignal(input);
+    const telegramSent = await this.sendMessage(payload.message, this.dashboardButton('/dashboard'));
+    return { ...payload, telegramSent };
+  },
+
+  buildMacroWarning({ eventName, hoursUntil, historicalAvgMove, affectedPositions }) {
+    const positionsLine = affectedPositions.length > 0
+      ? affectedPositions.map((position) => `- ${position.symbol} @ ${position.leverage}x`).join('\n')
+      : 'None currently open';
+
+    return {
+      alertType: 'MACRO_EVENT',
+      severity: hoursUntil < 3 ? 'CRITICAL' : 'WARNING',
+      title: `${eventName} approaching`,
+      message: [
+        'MACRO EVENT INCOMING',
+        '',
+        `Event: ${eventName}`,
+        `In: ${hoursUntil.toFixed(1)} hours`,
+        `Average Historical Move: +/-${historicalAvgMove.toFixed(1)}%`,
+        '',
+        'Positions At Risk:',
+        positionsLine,
+        '',
+        'High-impact releases can cause fast liquidations on leveraged books.',
+        '',
+        `Sentinel Finance | ${timestamp()}`
+      ].join('\n')
+    };
+  },
+
+  async sendMacroWarning(input) {
+    const payload = this.buildMacroWarning(input);
+    const telegramSent = await this.sendMessage(payload.message, this.dashboardButton('/dashboard'));
+    return { ...payload, telegramSent };
+  },
+
+  buildDailySummary({ topSignal, positionsMonitored, alertsSent, claudeMemo }) {
+    return {
+      title: 'Sentinel Daily Summary',
+      message: [
+        'SENTINEL DAILY BRIEF',
+        new Date().toLocaleDateString('en-US', {
+          weekday: 'long',
+          month: 'short',
+          day: 'numeric'
+        }),
+        '',
+        `Top Signal: ${topSignal}`,
+        `Positions Monitored: ${positionsMonitored}`,
+        `Alerts Sent: ${alertsSent}`,
+        '',
+        'Claude Market Read:',
+        claudeMemo,
+        '',
+        `Sentinel Finance | ${timestamp()}`
+      ].join('\n')
+    };
+  },
+
+  async sendDailySummary(input) {
+    const payload = this.buildDailySummary(input);
+    const telegramSent = await this.sendMessage(payload.message, this.dashboardButton('/dashboard'));
+    return { ...payload, telegramSent };
+  },
+
+  async sendTest() {
+    const message = [
+      'Sentinel Finance bot is connected and running.',
+      '',
+      'You will receive narrative and liquidation alerts here.',
+      '',
+      `Sentinel Finance | ${timestamp()}`
+    ].join('\n');
+
+    return this.sendMessage(message, this.dashboardButton('/dashboard'));
+  }
+};
+
+module.exports = telegram;
