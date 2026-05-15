@@ -135,3 +135,66 @@ export async function runAnalysis(): Promise<AnalysisResult> {
     { method: 'POST' }
   );
 }
+
+// ─── News API ───────────────────────────────────────────────────────
+
+export interface NewsArticle {
+  id: string;
+  title: string;
+  summary: string;
+  source: string;
+  url: string | null;
+  imageUrl: string | null;
+  publishedAt: string;
+  category: string;
+  sentiment: string | null;
+}
+
+export interface NewsResponse {
+  success: boolean;
+  count: number;
+  articles: NewsArticle[];
+  error?: string;
+}
+
+export async function fetchNews(limit = 30): Promise<NewsResponse> {
+  return fetchJson<NewsResponse>(
+    `/api/news?limit=${limit}`,
+    { success: false, count: 0, articles: [] }
+  );
+}
+
+export async function fetchHotNews(): Promise<NewsResponse> {
+  return fetchJson<NewsResponse>(
+    '/api/news/hot',
+    { success: false, count: 0, articles: [] }
+  );
+}
+
+export interface ETFResponse {
+  success: boolean;
+  flows: unknown;
+  summary: Record<string, unknown>;
+  error?: string;
+}
+
+export async function fetchETFData(): Promise<ETFResponse> {
+  return fetchJson<ETFResponse>(
+    '/api/news/etf',
+    { success: false, flows: [], summary: {} }
+  );
+}
+
+export interface MacroResponse {
+  success: boolean;
+  events: MacroEvent[];
+  error?: string;
+}
+
+export async function fetchMacroEvents(date?: string): Promise<MacroResponse> {
+  const query = date ? `?date=${date}` : '';
+  return fetchJson<MacroResponse>(
+    `/api/news/macro${query}`,
+    { success: false, events: [] }
+  );
+}

@@ -1,15 +1,14 @@
 import type { Metadata } from 'next';
 import type { ReactNode } from 'react';
 import { Inter, JetBrains_Mono } from 'next/font/google';
-import localFont from 'next/font/local';
 import './globals.css';
 
 const inter = Inter({ subsets: ['latin'], variable: '--font-inter' });
 const jetbrains = JetBrains_Mono({ subsets: ['latin'], variable: '--font-jetbrains' });
 
 export const metadata: Metadata = {
-  title: 'Sentinel Finance | Midnight Nebula Terminal',
-  description: 'Institutional grade risk intelligence and trading execution dashboard.'
+  title: 'Sentinel Finance | Crypto Intelligence Terminal',
+  description: 'Institutional grade risk intelligence, real-time news, AI-powered trading suggestions, and SoDEX monitoring dashboard.'
 };
 
 export default function RootLayout({ children }: { children: ReactNode }) {
