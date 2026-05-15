@@ -61,15 +61,13 @@ export default function HomePage() {
             href="https://app.sodex.com"
             target="_blank"
             rel="noreferrer"
-            className="group relative rounded-lg bg-gradient-to-r from-accent via-cyan to-magenta p-[1.5px] transition-all hover:shadow-[0_0_40px_rgba(0,242,255,0.4)]"
+            className="inline-flex items-center gap-2.5 rounded-lg bg-gradient-to-r from-accent via-[#55a2ff] to-magenta px-8 py-4 font-mono text-sm font-bold tracking-widest text-black transition-all hover:shadow-[0_0_40px_rgba(0,242,255,0.4)] hover:opacity-90"
           >
-            <span className="flex items-center gap-2.5 rounded-[7px] bg-background-deep px-8 py-4 font-mono text-sm font-bold tracking-widest text-white transition group-hover:bg-transparent group-hover:text-black">
-              <svg viewBox="0 0 24 24" fill="none" className="h-5 w-5" stroke="currentColor" strokeWidth="2">
-                <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
-                <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
-              </svg>
-              CONNECT SOSO DEX
-            </span>
+            <svg viewBox="0 0 24 24" fill="none" className="h-5 w-5" stroke="currentColor" strokeWidth="2">
+              <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
+              <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
+            </svg>
+            CONNECT SOSO DEX
           </a>
           <Link
             href="/dashboard"
