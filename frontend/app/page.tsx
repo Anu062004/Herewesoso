@@ -41,15 +41,15 @@ export default function HomePage() {
             href="/dashboard"
             className="rounded-lg bg-accent px-8 py-4 font-mono text-sm font-bold tracking-widest text-black transition-all hover:bg-white hover:shadow-[0_0_30px_rgba(0,242,255,0.4)]"
           >
-            CONNECT WALLET
+            LAUNCH DASHBOARD
           </Link>
           <a
-            href="https://sosovalue.com"
+            href="https://sodex.com/documentation/api/api"
             target="_blank"
             rel="noreferrer"
             className="rounded-lg border border-accent/30 bg-black/40 px-8 py-4 font-mono text-sm font-semibold text-accent transition-all hover:border-accent hover:bg-accent/10"
           >
-            VIEW DOCS
+            API DOCS
           </a>
         </div>
       </section>

@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import AlertFeed from '@/components/AlertFeed';
+import BotSetup from '@/components/BotSetup';
 import ExecuteModal from '@/components/ExecuteModal';
 import MacroCalendar from '@/components/MacroCalendar';
 import NarrativeHeatmap from '@/components/NarrativeHeatmap';
@@ -17,7 +18,6 @@ import {
   queueDashboardAction,
   runAnalysis,
   sendTelegramTest,
-  triggerCycle,
   type AnalysisResult
 } from '@/lib/api';
 import AnalysisModal from '@/components/AnalysisModal';
@@ -89,7 +89,7 @@ export default function DashboardClient({ initialData }: { initialData: Dashboar
   const [memos, setMemos] = useState(initialData.memos);
   const [macro, setMacro] = useState(initialData.macro);
   const [lastUpdated, setLastUpdated] = useState(initialData.positions.updatedAt || new Date().toISOString());
-  const [isRunning, setIsRunning] = useState(false);
+  const [isRefreshing, setIsRefreshing] = useState(false);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [analysisResult, setAnalysisResult] = useState<AnalysisResult | null>(null);
   const [showAnalysis, setShowAnalysis] = useState(false);
@@ -136,19 +136,22 @@ export default function DashboardClient({ initialData }: { initialData: Dashboar
   const latestRiskMemos = latestRiskMemoBySymbol(memos);
   const wallet = positions.live?.walletAddress || positions.history[0]?.wallet_address || '';
 
-  async function handleRunNow() {
-    setIsRunning(true);
-    const result = await triggerCycle();
-    setStatusMessage(result.message);
-
-    const nextPositions = await fetchPositions();
+  async function handleRefresh() {
+    setIsRefreshing(true);
+    const [nextPositions, nextSignals, nextAlerts, nextMemos, nextMacro] = await Promise.all([
+      fetchPositions(),
+      fetchSignals(),
+      fetchAlerts(),
+      fetchMemos(),
+      fetchMacro()
+    ]);
     setPositions(nextPositions);
     setLastUpdated(nextPositions.updatedAt || new Date().toISOString());
-    setSignals(await fetchSignals());
-    setAlerts(await fetchAlerts());
-    setMemos(await fetchMemos());
-    setMacro(await fetchMacro());
-    setIsRunning(false);
+    setSignals(nextSignals);
+    setAlerts(nextAlerts);
+    setMemos(nextMemos);
+    setMacro(nextMacro);
+    setIsRefreshing(false);
   }
 
   async function handleTestTelegram() {
@@ -188,11 +191,11 @@ export default function DashboardClient({ initialData }: { initialData: Dashboar
         <StatusBar
           wallet={wallet}
           lastUpdated={timeAgo(lastUpdated)}
-          onRunNow={handleRunNow}
           onTestTelegram={handleTestTelegram}
           onRunAnalysis={handleRunAnalysis}
-          isRunning={isRunning}
+          onRefresh={handleRefresh}
           isAnalyzing={isAnalyzing}
+          isRefreshing={isRefreshing}
         />
 
         {statusMessage ? (
@@ -248,6 +251,10 @@ export default function DashboardClient({ initialData }: { initialData: Dashboar
         <section className="mt-6 grid gap-6 xl:grid-cols-[0.95fr_1.05fr]">
           <TradeMemo memos={memos} />
           <AlertFeed alerts={alerts} />
+        </section>
+
+        <section className="mt-6">
+          <BotSetup />
         </section>
       </main>
 

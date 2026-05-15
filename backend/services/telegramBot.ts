@@ -57,15 +57,39 @@ function apiBase(): string | null {
 }
 function authorizedChatId() { return process.env.TELEGRAM_CHAT_ID; }
 
+function escapeHtml(text: string): string {
+  return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+function deduplicateNews(items: any[]): any[] {
+  const seen = new Set<string>();
+  return items.filter(item => {
+    const raw = (item.title || item.content || '')
+      .toLowerCase().replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim();
+    const key = raw.slice(0, 65);
+    if (!key || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function isHighImpactNews(text: string): boolean {
+  const lower = text.toLowerCase();
+  return HIGH_IMPACT.some(k => lower.includes(k.toLowerCase())) ||
+    ['fed', 'sec', 'etf', 'hack', 'crash', 'ban', 'sanction', 'bankruptcy', 'liquidation', 'exploit'].some(k => lower.includes(k));
+}
+
 async function sendMessage(
   chatId: string | number,
   text: string,
-  keyboard?: InlineKeyboard | null
+  keyboard?: InlineKeyboard | null,
+  parseMode?: 'HTML'
 ): Promise<any> {
   const base = apiBase();
   if (!base) return null;
   const body: Record<string, unknown> = { chat_id: chatId, text, disable_web_page_preview: true };
   if (keyboard) body.reply_markup = keyboard;
+  if (parseMode) body.parse_mode = parseMode;
   try {
     const r = await axios.post(`${base}/sendMessage`, body);
     return r.data?.result;
@@ -603,16 +627,22 @@ async function handleCommand(chatId: string | number, command: string, args: str
     case '/news': {
       await sendMessage(chatId, '⏳ Fetching news...');
       try {
-        const news = await sosovalue.getNews(6);
-        const items: any[] = news?.data?.list || news?.data || [];
+        const news = await sosovalue.getNews(20);
+        const raw: any[] = (news?.data as any[]) || news?.data?.list || [];
+        const items = deduplicateNews(raw);
         if (!items.length) { await sendMessage(chatId, '📰 No news available.', navBar('cmd_news')); break; }
-        const lines = ['🗞 LATEST CRYPTO NEWS', DIV];
-        items.slice(0, 6).forEach((n: any, i: number) => {
-          if (n.title || n.content) {
-            lines.push(`${i + 1}. ${(n.title || n.content || '').replace(/<[^>]+>/g, '').slice(0, 120)}`);
+        const lines = ['<b>🗞 LATEST CRYPTO NEWS</b>', '─────────────────────'];
+        items.slice(0, 8).forEach((n: any) => {
+          const title = (n.title || n.content || '').replace(/<[^>]+>/g, '').trim();
+          if (!title) return;
+          const safe = escapeHtml(title.slice(0, 130));
+          if (isHighImpactNews(title)) {
+            lines.push(`\n⚡ <b>${safe}</b>`);
+          } else {
+            lines.push(`• ${safe}`);
           }
         });
-        await sendMessage(chatId, lines.join('\n'), navBar('cmd_news'));
+        await sendMessage(chatId, lines.join('\n'), navBar('cmd_news'), 'HTML');
       } catch (err: any) {
         await sendMessage(chatId, `❌ Error: ${err.message}`, navBar('cmd_news'));
       }
@@ -625,11 +655,21 @@ async function handleCommand(chatId: string | number, command: string, args: str
         const events = await sosovalue.getMacroEvents();
         const items: any[] = events?.data || [];
         if (!items.length) { await sendMessage(chatId, '📅 No macro events found.', navBar('cmd_macro')); break; }
-        const lines = ['📅 MACRO EVENTS', DIV];
-        const filtered = items.filter((e: any) => HIGH_IMPACT.some(k => e.name?.includes(k))).slice(0, 8);
-        if (!filtered.length) items.slice(0, 8).forEach((e: any) => lines.push(`• ${e.name || 'Unknown'}`));
-        else filtered.forEach((e: any) => lines.push(`⚡ ${e.name} — ${e.eventTime || e.date || 'TBD'}`));
-        await sendMessage(chatId, lines.join('\n'), navBar('cmd_macro'));
+        const lines = ['<b>📅 MACRO CALENDAR</b>', '─────────────────────'];
+        const highImpact = items.filter((e: any) => HIGH_IMPACT.some(k => e.name?.toLowerCase().includes(k.toLowerCase())));
+        const regular = items.filter((e: any) => !highImpact.includes(e));
+        highImpact.slice(0, 5).forEach((e: any) => {
+          const name = escapeHtml(e.name || 'Unknown');
+          const time = escapeHtml(e.eventTime || e.date || 'TBD');
+          lines.push(`\n⚡ <b>${name}</b>\n   🕐 ${time}`);
+        });
+        if (highImpact.length === 0) {
+          regular.slice(0, 6).forEach((e: any) => lines.push(`• ${escapeHtml(e.name || 'Unknown')}`));
+        } else if (regular.length > 0) {
+          lines.push('\n<b>Other Events</b>');
+          regular.slice(0, 3).forEach((e: any) => lines.push(`• ${escapeHtml(e.name || 'Unknown')}`));
+        }
+        await sendMessage(chatId, lines.join('\n'), navBar('cmd_macro'), 'HTML');
       } catch (err: any) {
         await sendMessage(chatId, `❌ Error: ${err.message}`, navBar('cmd_macro'));
       }
