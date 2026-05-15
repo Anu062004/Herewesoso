@@ -2,12 +2,9 @@ import claude = require('./claude');
 import gemini = require('./gemini');
 import groq = require('./groq');
 import grok = require('./grok');
-// SkillMint adapter — routes every memo through TEE-attested execution on 0G.
-// Drop-in compatible with the other adapters (same 3 methods, same shapes).
-// Adds two extra methods (`getLastReceipt`, `isReady`) for agents that want to
-// capture the on-chain receipt rootHash alongside the memo content.
-// See backend/services/skillmint.ts for the full integration rationale.
-import skillmint = require('./skillmint');
+// SkillMint is lazy-required at runtime only when AI_SERVICE=skillmint.
+// Eager import causes a ReferenceError in skillmint.ts under tsx (skillmint_module
+// not defined), crashing the entire server even when skillmint is not in use.
 
 const service = (process.env.AI_SERVICE || 'groq').toLowerCase();
 
@@ -18,7 +15,7 @@ const ai =
   service === 'gemini' ? gemini :
   service === 'groq' ? groq :
   (service === 'grok' || service === 'xai') ? grok :
-  service === 'skillmint' ? skillmint :
+  service === 'skillmint' ? require('./skillmint') :
   claude;
 
 console.log(`[AI] Using ${service.charAt(0).toUpperCase() + service.slice(1)}`);
