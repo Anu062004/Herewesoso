@@ -17,11 +17,19 @@ interface NarrativeMemoInput {
 
 interface RiskMemoInput {
   symbol: string;
+  side?: string;
   leverage: number;
+  entryPrice?: number;
+  markPrice?: number;
+  positionSize?: number;
+  positionValue?: number;
   distancePct: number;
   macroEvents: Array<{ name: string; hoursUntil: number }>;
   riskScore: number;
   riskLevel: string;
+  accountValue?: number;
+  availableMargin?: number;
+  etfOutflow?: boolean;
 }
 
 interface DailySummaryInput {
@@ -95,21 +103,47 @@ Instructions:
     return (await generate(prompt, 200)) || fallbackNarrativeMemo({ sector, scores, etfFlow, macroEvents });
   },
 
-  async generateRiskMemo({ symbol, leverage, distancePct, macroEvents, riskScore, riskLevel }: RiskMemoInput): Promise<string> {
-    const prompt = `You are Sentinel Finance's risk officer. Write a 2-sentence risk warning.
+  async generateRiskMemo(input: RiskMemoInput): Promise<string> {
+    const {
+      symbol, side, leverage, entryPrice, markPrice, positionSize, positionValue,
+      distancePct, macroEvents, riskScore, riskLevel,
+      accountValue, availableMargin, etfOutflow
+    } = input;
 
-Position: ${symbol} at ${leverage}x leverage
-Distance to Liquidation: ${distancePct.toFixed(2)}%
+    const direction = side === 'SHORT' ? 'SHORT' : 'LONG';
+    const liqApprox = markPrice && distancePct
+      ? (direction === 'SHORT'
+          ? markPrice * (1 + distancePct / 100)
+          : markPrice * (1 - distancePct / 100))
+      : null;
+    const marginNeededToHalveDist = availableMargin && positionValue
+      ? Math.min(availableMargin * 0.5, positionValue * 0.05)
+      : null;
+
+    const prompt = `You are Sentinel Finance's risk officer analyzing a leveraged perp position. Output EXACTLY 4 numbered lines — no headers, no labels, no extra text.
+
+POSITION DATA:
+Symbol: ${symbol} ${direction} at ${leverage}x leverage
+Entry Price: ${entryPrice ? `$${entryPrice.toLocaleString()}` : 'unknown'}
+Mark Price: ${markPrice ? `$${markPrice.toLocaleString()}` : 'unknown'}
+Position Size: ${positionSize ?? 'unknown'} ${symbol.split('-')[0]}
+Position Value: ${positionValue ? `$${positionValue.toLocaleString(undefined, { maximumFractionDigits: 0 })}` : 'unknown'}
+Distance to Liquidation: ${distancePct.toFixed(2)}%${liqApprox ? ` (approx liq at $${liqApprox.toLocaleString(undefined, { maximumFractionDigits: 0 })})` : ''}
 Risk Score: ${riskScore}/100 — ${riskLevel}
+Account Value: ${accountValue ? `$${accountValue.toLocaleString()}` : 'unknown'}
+Available Margin: ${availableMargin ? `$${availableMargin.toLocaleString()}` : 'unknown'}
+ETF Outflows Active: ${etfOutflow ? 'YES — institutional selling pressure' : 'No'}
 Upcoming Events: ${macroEvents.map(e => `${e.name} in ${e.hoursUntil.toFixed(1)}h`).join(', ') || 'None imminent'}
 
-Instructions:
-- Write exactly 2 sentences
-- Sentence 1: What specifically makes this position dangerous right now
-- Sentence 2: The single most important action to take
-- Be blunt. This person could lose real money. No hedging.`;
+Rules:
+1. [Assessment] One sentence: why THIS specific position is at risk right now, using the actual numbers above.
+2. [Do this first] The single most effective immediate action with a SPECIFIC dollar amount or price — e.g. "Add $${marginNeededToHalveDist ? marginNeededToHalveDist.toFixed(0) : '500'} margin to push liquidation from $${liqApprox ? liqApprox.toFixed(0) : '...'} to a safer level" or "Close 30% of position to drop leverage from ${leverage}x to ${Math.round(leverage * 0.7)}x".
+3. [Stop-loss] A specific price level to exit if the move goes against you, with one-line reasoning.
+4. [If no action] What happens at current trajectory — specific price and rough timeframe.
 
-    return (await generate(prompt, 180)) || fallbackRiskMemo({ symbol, riskLevel, distancePct });
+Be blunt. Use the actual numbers. Sound like a hedge fund risk desk.`;
+
+    return (await generate(prompt, 320)) || fallbackRiskMemo(input);
   },
 
   async generateDailySummary({ narrativeScores, alerts, positions }: DailySummaryInput): Promise<string> {

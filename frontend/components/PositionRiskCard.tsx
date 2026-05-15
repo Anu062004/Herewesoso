@@ -37,6 +37,13 @@ export default function PositionRiskCard({
     : 'No imminent macro event';
   const positionDirection = position.positionSide === 'SHORT' ? 'SHORT' : 'LONG';
 
+  const pnlPct =
+    position.entryPrice && position.markPrice && position.entryPrice > 0
+      ? ((position.markPrice - position.entryPrice) / position.entryPrice) *
+        100 *
+        (positionDirection === 'SHORT' ? -1 : 1)
+      : null;
+
   return (
     <article className={`panel rounded-3xl p-6 ${riskLevel === 'CRITICAL' ? 'critical-pulse' : ''}`}>
       <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
@@ -63,7 +70,7 @@ export default function PositionRiskCard({
       <div className="grid gap-6 xl:grid-cols-[240px_1fr]">
         <RiskGauge score={riskScore} />
 
-        <div className="grid gap-4 lg:grid-cols-2">
+        <div className="grid gap-4 lg:grid-cols-3">
           <div className="rounded-3xl border border-white/8 bg-black/20 px-4 py-4">
             <p className="data-label">Distance To Liquidation</p>
             <p className="mt-3 text-2xl font-semibold text-white">
@@ -71,11 +78,20 @@ export default function PositionRiskCard({
             </p>
           </div>
           <div className="rounded-3xl border border-white/8 bg-black/20 px-4 py-4">
+            <p className="data-label">Unrealised PnL</p>
+            <p className={`mt-3 text-2xl font-semibold ${
+              pnlPct === null ? 'text-zinc-400' :
+              pnlPct >= 0 ? 'text-safe' : 'text-danger'
+            }`}>
+              {pnlPct === null ? '--' : `${pnlPct >= 0 ? '+' : ''}${pnlPct.toFixed(2)}%`}
+            </p>
+          </div>
+          <div className="rounded-3xl border border-white/8 bg-black/20 px-4 py-4">
             <p className="data-label">Macro Threat</p>
             <p className="mt-3 text-sm leading-6 text-zinc-300">{macroThreat}</p>
           </div>
-          <div className="rounded-3xl border border-white/8 bg-black/20 px-4 py-4 lg:col-span-2">
-            <p className="data-label">Claude</p>
+          <div className="rounded-3xl border border-white/8 bg-black/20 px-4 py-4 lg:col-span-3">
+            <p className="data-label">AI Insight</p>
             <p className="mt-3 text-sm leading-7 text-zinc-300">
               {memo?.content || 'No risk memo stored yet for this position.'}
             </p>

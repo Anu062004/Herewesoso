@@ -134,8 +134,10 @@ async function runShieldAgent(): Promise<ShieldAgentResult> {
     try {
       shieldState = await sodex.getEnrichedPositions(WALLET);
     } catch (error) {
-      console.warn(`[ShieldAgent] Falling back to demo BTC position: ${getErrorMessage(error)}`);
-      shieldState = buildDemoShieldState(WALLET);
+      console.warn(`[ShieldAgent] SoDEX API unreachable — skipping cycle: ${getErrorMessage(error)}`);
+      const duration = Date.now() - startTime;
+      await completeAgentRun(runRecord?.id, { duration_ms: duration, summary: { positionsMonitored: 0 } });
+      return { success: true, positionsMonitored: 0, snapshots: [] };
     }
 
     const { positions = [] } = shieldState;
@@ -215,16 +217,25 @@ async function runShieldAgent(): Promise<ShieldAgentResult> {
 
       let claudeMemo = suggestedAction;
 
-      if (combinedRisk >= ALERT_THRESHOLD) {
+      if (combinedRisk >= 30) {
+        const positionValue = parsedMarkPrice * parsedPositionSize;
         claudeMemo = await claude.generateRiskMemo({
           symbol,
+          side: positionSide,
           leverage: parsedLeverage,
+          entryPrice,
+          markPrice: parsedMarkPrice,
+          positionSize: parsedPositionSize,
+          positionValue,
           distancePct,
           macroEvents: nearestEvent
             ? [{ name: getEventName(nearestEvent), hoursUntil: hoursUntilEvent }]
             : [],
           riskScore: combinedRisk,
-          riskLevel
+          riskLevel,
+          accountValue: shieldState.accountState?.accountValue || 0,
+          availableMargin: shieldState.accountState?.availableMargin || 0,
+          etfOutflow
         });
 
         // SkillMint side-channel — captures receipt rootHash when the active
@@ -281,7 +292,7 @@ async function runShieldAgent(): Promise<ShieldAgentResult> {
 
       riskSnapshots.push(snapshot);
 
-      if (combinedRisk >= ALERT_THRESHOLD) {
+      if (combinedRisk >= 30) {
         const alertResult = await telegram.sendLiquidationAlert({
           symbol,
           leverage: parsedLeverage,
