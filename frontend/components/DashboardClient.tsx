@@ -129,8 +129,13 @@ export default function DashboardClient({ initialData }: { initialData: Dashboar
     };
   }, []);
 
-  const livePositions = positions.live?.positions?.length
-    ? positions.live.positions
+  // live !== null → SoDEX API responded (trust it even if positions array is empty —
+  //   empty means positions were closed, not that the API is down)
+  // live === null → API unreachable → fall back to last Supabase snapshot so the
+  //   dashboard isn't blank while testnet is temporarily down
+  const apiReachable = positions.live !== null;
+  const livePositions = apiReachable
+    ? (positions.live?.positions || [])
     : fallbackPositions(positions.history);
   const latestRisk = latestRiskBySymbol(positions.history);
   const latestRiskMemos = latestRiskMemoBySymbol(memos);
@@ -231,11 +236,24 @@ export default function DashboardClient({ initialData }: { initialData: Dashboar
             ))
           ) : (
             <section className="panel rounded-3xl p-6">
-              <p className="eyebrow">Liquidation Shield</p>
-              <h2 className="mt-3 font-headline text-2xl font-bold text-white">No open positions</h2>
-              <p className="mt-4 text-sm leading-7 text-zinc-400">
-                The shield will populate automatically when SoDEX returns an open testnet position or when a risk snapshot exists in Supabase.
-              </p>
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <p className="eyebrow">Liquidation Shield</p>
+                  <h2 className="mt-3 font-headline text-2xl font-bold text-white">No open positions</h2>
+                  <p className="mt-4 text-sm leading-7 text-zinc-400">
+                    {apiReachable
+                      ? 'All positions are closed on SoDEX. Open a position on the testnet to start monitoring.'
+                      : 'SoDEX API is currently unreachable. Showing last known snapshot from Supabase.'}
+                  </p>
+                </div>
+                <span className={`shrink-0 rounded-full border px-3 py-1 font-mono text-xs font-semibold ${
+                  apiReachable
+                    ? 'border-safe/30 bg-safe/10 text-safe'
+                    : 'border-caution/30 bg-caution/10 text-caution'
+                }`}>
+                  {apiReachable ? '✓ Synced' : '⚠ Offline'}
+                </span>
+              </div>
             </section>
           )}
         </section>

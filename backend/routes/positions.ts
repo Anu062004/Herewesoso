@@ -32,33 +32,14 @@ interface LiveStateView {
 
 const router = express.Router();
 
-function buildDemoLiveState(wallet: string): LiveStateView {
-  return {
-    walletAddress: wallet,
-    user: wallet,
-    accountValue: 2500,
-    availableMargin: 1400,
-    positions: [
-      {
-        symbol: 'BTC-USD',
-        entryPrice: 80381,
-        markPrice: 81240,
-        liquidationPrice: 76320,
-        leverage: 20,
-        positionSide: 'BOTH',
-        size: 0.03116,
-        marginMode: 'CROSS'
-      }
-    ],
-    balances: []
-  };
-}
-
 router.get('/', async (req: Request, res: Response) => {
   const wallet = typeof req.query.wallet === 'string' ? req.query.wallet : process.env.USER_WALLET_ADDRESS;
 
   try {
+    // live === null  → SoDEX API unreachable (frontend falls back to Supabase history)
+    // live.positions === [] → API reachable, genuinely no open positions (show flat)
     let live: LiveStateView | null = null;
+    let liveError: string | null = null;
 
     if (wallet) {
       try {
@@ -81,8 +62,11 @@ router.get('/', async (req: Request, res: Response) => {
             marginMode: position.marginMode || 'CROSS'
           }))
         };
-      } catch {
-        live = buildDemoLiveState(wallet);
+      } catch (err) {
+        // API unavailable — leave live as null so the frontend can distinguish
+        // "no positions" (live=[]) from "can't reach SoDEX" (live=null)
+        liveError = getErrorMessage(err);
+        live = null;
       }
     }
 
@@ -98,13 +82,15 @@ router.get('/', async (req: Request, res: Response) => {
 
     return res.json({
       live,
+      liveError,
       history: historyData,
       updatedAt: new Date().toISOString()
     });
   } catch (error) {
     return res.status(500).json({
       error: getErrorMessage(error),
-      live: wallet ? buildDemoLiveState(wallet) : null,
+      live: null,
+      liveError: getErrorMessage(error),
       history: [],
       updatedAt: new Date().toISOString()
     });
