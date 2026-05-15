@@ -100,6 +100,11 @@ async function runNarrativeAgent(): Promise<NarrativeAgentResult> {
     // Generate reasoning for top signal + any BUY signals (up to 3)
     const signalsToReason = strongSignals.slice(0, 3);
     const reasoningMap = new Map<string, string>();
+    // Per-sector receipt metadata. Populated only when the active AI adapter
+    // exposes `getLastReceipt` (currently just the SkillMint adapter does).
+    // Other adapters return undefined via optional chaining and we leave the
+    // map empty — the rest of the agent works exactly the same.
+    const receiptMap = new Map<string, unknown>();
 
     for (const sig of signalsToReason) {
       try {
@@ -111,6 +116,15 @@ async function runNarrativeAgent(): Promise<NarrativeAgentResult> {
           scores: { combined: sig.combined_score, signal: sig.signal }
         });
         reasoningMap.set(sig.sector, reasoning);
+
+        // SkillMint side-channel: if the adapter just ran a TEE-attested skill
+        // it stored a receipt rootHash under "narrative:<sector>". Grab it
+        // and remember it so we can persist it alongside the memo in Supabase.
+        // Optional chaining + cast keeps us compatible with groq/gemini/claude
+        // adapters that don't expose this method.
+        const receipt = (claude as any).getLastReceipt?.(`narrative:${sig.sector}`);
+        if (receipt) receiptMap.set(sig.sector, receipt);
+
         await delay(300);
       } catch { /* use fallback */ }
     }
@@ -119,12 +133,16 @@ async function runNarrativeAgent(): Promise<NarrativeAgentResult> {
     if (topSignal) {
       const reasoning = reasoningMap.get(topSignal.sector) || '';
       topSignal.reasoning = reasoning;
+      // Pull the receipt for the top signal so we can write it to the DB. If
+      // there is no receipt (groq/gemini/claude in use), this is just null and
+      // the downstream Supabase row keeps its existing shape.
+      const topReceipt = receiptMap.get(topSignal.sector) || null;
 
       memoryStore.pushMemo({
         memo_type: 'ENTRY_SIGNAL',
         content: reasoning,
         related_symbol: topSignal.sector,
-        data: { sector: topSignal.sector, combinedScore: topSignal.combined_score, signal: topSignal.signal }
+        data: { sector: topSignal.sector, combinedScore: topSignal.combined_score, signal: topSignal.signal, skillmint_receipt: topReceipt }
       });
 
       await safeInsert('trade_memos', {
@@ -134,7 +152,14 @@ async function runNarrativeAgent(): Promise<NarrativeAgentResult> {
         data: {
           sector: topSignal.sector,
           combinedScore: topSignal.combined_score,
-          signal: topSignal.signal
+          signal: topSignal.signal,
+          // skillmint_receipt is null when AI_SERVICE != "skillmint" — leaving
+          // the field present-but-null lets downstream queries always look for
+          // it without branching. When SkillMint is the active adapter this
+          // contains { receiptRootHash, settlementTx, skillId, paidUSDC, capturedAt }.
+          // The receiptRootHash is the audit primary key — anyone can fetch
+          // the signed receipt from 0G Storage with it forever.
+          skillmint_receipt: topReceipt
         }
       });
 

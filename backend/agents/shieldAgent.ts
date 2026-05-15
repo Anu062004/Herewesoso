@@ -227,11 +227,19 @@ async function runShieldAgent(): Promise<ShieldAgentResult> {
           riskLevel
         });
 
+        // SkillMint side-channel — captures receipt rootHash when the active
+        // AI adapter is the SkillMint one (AI_SERVICE=skillmint). For
+        // groq/gemini/claude this returns undefined and we persist null. The
+        // receipt is the on-chain proof that this exact risk reasoning was
+        // produced by a TEE-attested skill on 0G — critical for defending
+        // "you didn't warn me about this liquidation" disputes after the fact.
+        const riskReceipt = (claude as any).getLastReceipt?.(`risk:${symbol}`) || null;
+
         memoryStore.pushMemo({
           memo_type: 'RISK_ALERT',
           content: claudeMemo,
           related_symbol: symbol,
-          data: { riskLevel, riskScore: combinedRisk, distancePct }
+          data: { riskLevel, riskScore: combinedRisk, distancePct, skillmint_receipt: riskReceipt }
         });
 
         await safeInsert('trade_memos', {
@@ -241,7 +249,12 @@ async function runShieldAgent(): Promise<ShieldAgentResult> {
           data: {
             riskLevel,
             riskScore: combinedRisk,
-            distancePct
+            distancePct,
+            // When AI_SERVICE=skillmint, this carries
+            // { receiptRootHash, settlementTx, skillId, paidUSDC, capturedAt }.
+            // The receiptRootHash is permanent — fetch the signed receipt body
+            // from 0G Storage at any time with that hash. Otherwise null.
+            skillmint_receipt: riskReceipt
           }
         });
       }
