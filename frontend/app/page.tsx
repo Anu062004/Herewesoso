@@ -16,7 +16,7 @@ export default function HomePage() {
         </div>
         <div className="flex items-center gap-3">
           <a
-            href="https://app.sodex.com"
+            href="https://testnet.sodex.dev"
             target="_blank"
             rel="noreferrer"
             className="group relative rounded-full bg-gradient-to-r from-accent via-cyan to-magenta p-[1px] transition-all hover:shadow-[0_0_30px_rgba(0,242,255,0.3)]"
@@ -58,7 +58,7 @@ export default function HomePage() {
 
         <div className="relative z-10 mt-10 flex flex-wrap justify-center gap-4">
           <a
-            href="https://app.sodex.com"
+            href="https://testnet.sodex.dev"
             target="_blank"
             rel="noreferrer"
             className="inline-flex items-center gap-2.5 rounded-lg bg-gradient-to-r from-accent via-[#55a2ff] to-magenta px-8 py-4 font-mono text-sm font-bold tracking-widest text-black transition-all hover:shadow-[0_0_40px_rgba(0,242,255,0.4)] hover:opacity-90"
@@ -166,7 +166,7 @@ export default function HomePage() {
               </p>
             </div>
             <a
-              href="https://app.sodex.com"
+              href="https://testnet.sodex.dev"
               target="_blank"
               rel="noreferrer"
               className="shrink-0 group relative rounded-xl bg-gradient-to-r from-accent to-magenta p-[1.5px] transition-all hover:shadow-[0_0_40px_rgba(0,242,255,0.35)]"

@@ -223,7 +223,7 @@ export default function PositionsPage() {
                     : 'SoDEX API is currently unreachable. Connect to SoDEX to view your positions.'}
                 </p>
                 <a
-                  href="https://app.sodex.com"
+                  href="https://testnet.sodex.dev"
                   target="_blank"
                   rel="noreferrer"
                   className="mt-6 inline-flex items-center gap-2 rounded-full bg-accent px-6 py-3 font-mono text-sm font-bold text-black transition hover:bg-white"

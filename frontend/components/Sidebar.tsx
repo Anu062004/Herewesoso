@@ -105,7 +105,7 @@ export default function Sidebar() {
       {/* SoSo DEX Connect */}
       <div className="w-full px-3 mt-auto">
         <a
-          href="https://app.sodex.com"
+          href="https://testnet.sodex.dev"
           target="_blank"
           rel="noreferrer"
           className="flex items-center gap-3 rounded-xl bg-gradient-to-r from-accent/10 to-magenta/10 border border-accent/15 px-3 py-2.5 transition-all hover:border-accent/30 hover:shadow-[0_0_20px_rgba(0,242,255,0.1)]"
