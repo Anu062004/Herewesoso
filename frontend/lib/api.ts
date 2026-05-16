@@ -11,7 +11,7 @@ import type {
 // Server: call EC2 directly. Client (browser): use Next.js proxy to avoid mixed-content blocks.
 const isServer = typeof window === 'undefined';
 const API_BASE = isServer
-  ? (process.env.API_BASE_URL || process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:3001')
+  ? (process.env.API_BASE_URL || process.env.NEXT_PUBLIC_API_BASE_URL || 'http://3.87.110.3:3001')
   : '/api/proxy';
 
 async function fetchJson<T>(path: string, fallback: T, init?: RequestInit): Promise<T> {
