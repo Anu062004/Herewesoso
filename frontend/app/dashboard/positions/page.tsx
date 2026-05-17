@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 
-import { fetchPositions } from '@/lib/api';
+import { fetchPositions, queueDashboardAction } from '@/lib/api';
 import { formatPercent, formatPrice } from '@/lib/format';
 import {
   computeDistancePercent,
@@ -28,9 +28,18 @@ import {
   SkeletonBlock
 } from '@/components/terminal/ui';
 
+type PendingAction =
+  | {
+      action: 'REDUCE_LEVERAGE' | 'CLOSE_POSITION';
+      symbol: string;
+      currentLeverage: number;
+      targetLeverage?: number;
+    }
+  | null;
+
 export default function PositionsPage() {
   const positions = usePollingResource({ fetcher: fetchPositions, intervalMs: 30000 });
-  const [pendingSymbol, setPendingSymbol] = useState<string | null>(null);
+  const [pendingAction, setPendingAction] = useState<PendingAction>(null);
   const state = positions.data || { live: null, history: [] };
   const resolved = resolvePositions(state);
   const latestRisk = latestRiskBySymbol(state.history);
@@ -123,13 +132,35 @@ export default function PositionsPage() {
                         <Pill tone={status.tone === 'green' ? 'green' : 'amber'}>{status.label}</Pill>
                       </td>
                       <td className="px-4 py-3">
-                        <button
-                          type="button"
-                          onClick={() => setPendingSymbol(position.symbol)}
-                          className="inline-flex h-8 items-center rounded-md border border-[var(--border)] px-3 text-[12px] text-[var(--text-2)] transition hover:border-[var(--border-hover)] hover:text-[var(--text-1)]"
-                        >
-                          Manage
-                        </button>
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setPendingAction({
+                                action: 'REDUCE_LEVERAGE',
+                                symbol: position.symbol,
+                                currentLeverage: position.leverage,
+                                targetLeverage: Math.max(Math.floor(position.leverage / 4), 5)
+                              })
+                            }
+                            className="inline-flex h-8 items-center rounded-md border border-[var(--border)] px-3 text-[12px] text-[var(--text-2)] transition hover:border-[var(--border-hover)] hover:text-[var(--text-1)]"
+                          >
+                            Reduce
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setPendingAction({
+                                action: 'CLOSE_POSITION',
+                                symbol: position.symbol,
+                                currentLeverage: position.leverage
+                              })
+                            }
+                            className="inline-flex h-8 items-center rounded-md border border-[rgba(239,68,68,0.28)] px-3 text-[12px] text-[var(--red)] transition hover:border-[rgba(239,68,68,0.5)]"
+                          >
+                            Close
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   );
@@ -141,15 +172,39 @@ export default function PositionsPage() {
       </Panel>
 
       <ConfirmationModal
-        open={Boolean(pendingSymbol)}
-        title="Manage Position"
-        description={`This opens the Wave 2 position-management flow for ${pendingSymbol || 'the selected market'}.`}
-        confirmLabel="Confirm"
-        onClose={() => setPendingSymbol(null)}
-        onConfirm={async () => ({
-          title: 'Wave 2 placeholder',
-          message: `Advanced management for ${pendingSymbol || 'this position'} is reserved for the Wave 2 execution flow.`
-        })}
+        open={Boolean(pendingAction)}
+        title={pendingAction?.action === 'REDUCE_LEVERAGE' ? 'Reduce Leverage' : 'Close Position'}
+        description={
+          pendingAction?.action === 'REDUCE_LEVERAGE'
+            ? `This will reduce ${pendingAction?.symbol} from ${pendingAction?.currentLeverage}x to ${pendingAction?.targetLeverage}x on SoDEX testnet.`
+            : `This will submit a reduce-only market close for ${pendingAction?.symbol} on SoDEX testnet.`
+        }
+        confirmLabel={pendingAction?.action === 'REDUCE_LEVERAGE' ? 'Reduce' : 'Close'}
+        disclaimer="Testnet execution — requires a configured SoDEX private key"
+        onClose={() => setPendingAction(null)}
+        onConfirm={async () => {
+          if (!pendingAction) {
+            return { message: 'No action configured.' };
+          }
+
+          const result = await queueDashboardAction({
+            action: pendingAction.action,
+            symbol: pendingAction.symbol,
+            currentLeverage: pendingAction.currentLeverage,
+            targetLeverage: pendingAction.targetLeverage
+          });
+
+          if (!result.queued) {
+            throw new Error(result.message);
+          }
+
+          await positions.refresh();
+
+          return {
+            title: pendingAction.action === 'REDUCE_LEVERAGE' ? 'Leverage update sent' : 'Close request sent',
+            message: result.message
+          };
+        }}
       />
     </div>
   );

@@ -1,8 +1,9 @@
 'use client';
 
+import { useState } from 'react';
 import Link from 'next/link';
 
-import { fetchAlerts, fetchMacro, fetchPositions, fetchSignals } from '@/lib/api';
+import { fetchAlerts, fetchMacro, fetchNews, fetchPositions, fetchSignals, queueDashboardAction } from '@/lib/api';
 import { formatDateTime, formatPercent, formatPrice } from '@/lib/format';
 import {
   alertSourceLabel,
@@ -20,8 +21,10 @@ import {
 } from '@/lib/terminal';
 import { usePollingResource } from '@/lib/usePollingResource';
 
-import { BellIcon, ShieldIcon } from '@/components/terminal/icons';
+import { ConfirmationModal } from '@/components/terminal/ConfirmationModal';
+import { ShieldIcon } from '@/components/terminal/icons';
 import {
+  Button,
   DistanceBar,
   Dot,
   EmptyState,
@@ -35,6 +38,15 @@ import {
   SkeletonBlock,
   Sparkline
 } from '@/components/terminal/ui';
+
+type PendingAction =
+  | {
+      action: 'REDUCE_LEVERAGE' | 'CLOSE_POSITION';
+      symbol: string;
+      currentLeverage: number;
+      targetLeverage?: number;
+    }
+  | null;
 
 function scoreTone(score: number) {
   if (score >= 70) {
@@ -53,6 +65,19 @@ export default function DashboardPage() {
   const positions = usePollingResource({ fetcher: fetchPositions, intervalMs: 30000 });
   const alerts = usePollingResource({ fetcher: fetchAlerts, intervalMs: 30000 });
   const macro = usePollingResource({ fetcher: fetchMacro, intervalMs: 300000 });
+  const news = usePollingResource({
+    fetcher: async () => {
+      const response = await fetchNews(6);
+
+      if (!response.success && response.error) {
+        throw new Error(response.error);
+      }
+
+      return response;
+    },
+    intervalMs: 60000
+  });
+  const [pendingAction, setPendingAction] = useState<PendingAction>(null);
 
   const latestSignals = latestSignalsBySector(signals.data || []).slice(0, 8);
   const positionsState = positions.data || { live: null, history: [] };
@@ -62,6 +87,7 @@ export default function DashboardPage() {
   const highestRisk = highestRiskSummary(positionsState);
   const unreadCount = unreadAlertCount(alerts.data || []);
   const macroEvents = sortMacroEvents(macro.data || []).slice(0, 6);
+  const articles = news.data?.articles || [];
 
   return (
     <div className="space-y-4">
@@ -217,6 +243,59 @@ export default function DashboardPage() {
               )}
             </div>
           </Panel>
+
+          <Panel>
+            <PanelHeader
+              title="Market News"
+              accent="blue"
+              right={<PollingIndicator freshness={news.freshness} nextPollInMs={news.nextPollInMs} />}
+            />
+            <div className="p-4">
+              {news.loading ? (
+                <div className="space-y-2">
+                  {Array.from({ length: 4 }).map((_, index) => (
+                    <SkeletonBlock key={index} className="h-20 w-full" />
+                  ))}
+                </div>
+              ) : news.error ? (
+                <ErrorCard message={news.error} onRetry={() => void news.refresh()} />
+              ) : articles.length === 0 ? (
+                <EmptyState title="No news items" description="Latest market headlines will appear here when the SoSoValue news feed responds." />
+              ) : (
+                <>
+                  <div className="space-y-2">
+                    {articles.slice(0, 5).map((article) => (
+                      <a
+                        key={article.id}
+                        href={article.url || undefined}
+                        target={article.url ? '_blank' : undefined}
+                        rel={article.url ? 'noreferrer' : undefined}
+                        className="block rounded-[8px] border border-[var(--border)] bg-[var(--bg-panel)] px-3 py-3 transition hover:border-[var(--border-hover)]"
+                      >
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0 flex-1">
+                            <div className="line-clamp-2 text-[13px] text-[var(--text-1)]">{article.title}</div>
+                            <div className="mt-1 line-clamp-2 text-[12px] leading-5 text-[var(--text-2)]">{article.summary || 'No summary available.'}</div>
+                          </div>
+                          <Pill tone="gray">{article.category}</Pill>
+                        </div>
+                        <div className="mt-2 flex items-center gap-2 text-[11px] text-[var(--text-3)]">
+                          <span>{article.source}</span>
+                          <span>•</span>
+                          <span>{formatDateTime(article.publishedAt)}</span>
+                        </div>
+                      </a>
+                    ))}
+                  </div>
+                  <div className="mt-3 flex justify-end">
+                    <Link href="/dashboard/news" className="text-[12px] text-[var(--blue)]">
+                      View More
+                    </Link>
+                  </div>
+                </>
+              )}
+            </div>
+          </Panel>
         </div>
 
         <div className="space-y-4">
@@ -284,6 +363,33 @@ export default function DashboardPage() {
                       <div className="mt-3">
                         <DistanceBar percent={distance} />
                       </div>
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        <Button
+                          onClick={() =>
+                            setPendingAction({
+                              action: 'REDUCE_LEVERAGE',
+                              symbol: position.symbol,
+                              currentLeverage: position.leverage,
+                              targetLeverage: Math.max(Math.floor(position.leverage / 4), 5)
+                            })
+                          }
+                          className="h-8 px-3 text-[12px]"
+                        >
+                          Reduce Leverage
+                        </Button>
+                        <Button
+                          onClick={() =>
+                            setPendingAction({
+                              action: 'CLOSE_POSITION',
+                              symbol: position.symbol,
+                              currentLeverage: position.leverage
+                            })
+                          }
+                          className="h-8 px-3 text-[12px]"
+                        >
+                          Close Position
+                        </Button>
+                      </div>
                     </div>
                   );
                 })
@@ -337,6 +443,43 @@ export default function DashboardPage() {
           </Panel>
         </div>
       </div>
+
+      <ConfirmationModal
+        open={Boolean(pendingAction)}
+        title={pendingAction?.action === 'REDUCE_LEVERAGE' ? 'Reduce Leverage' : 'Close Position'}
+        description={
+          pendingAction?.action === 'REDUCE_LEVERAGE'
+            ? `This will reduce ${pendingAction?.symbol} from ${pendingAction?.currentLeverage}x to ${pendingAction?.targetLeverage}x on SoDEX testnet.`
+            : `This will submit a reduce-only market close for ${pendingAction?.symbol} on SoDEX testnet.`
+        }
+        confirmLabel={pendingAction?.action === 'REDUCE_LEVERAGE' ? 'Reduce' : 'Close'}
+        disclaimer="Testnet execution — requires a configured SoDEX private key"
+        onClose={() => setPendingAction(null)}
+        onConfirm={async () => {
+          if (!pendingAction) {
+            return { message: 'No action configured.' };
+          }
+
+          const result = await queueDashboardAction({
+            action: pendingAction.action,
+            symbol: pendingAction.symbol,
+            currentLeverage: pendingAction.currentLeverage,
+            targetLeverage: pendingAction.targetLeverage
+          });
+
+          if (!result.queued) {
+            throw new Error(result.message);
+          }
+
+          await positions.refresh();
+          await alerts.refresh();
+
+          return {
+            title: pendingAction.action === 'REDUCE_LEVERAGE' ? 'Leverage update sent' : 'Close request sent',
+            message: result.message
+          };
+        }}
+      />
     </div>
   );
 }
