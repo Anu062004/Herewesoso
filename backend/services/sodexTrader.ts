@@ -25,6 +25,8 @@ type TradingContext = {
   marginMode: number;
 };
 
+type TimeInForceValue = 'GTC' | 'FOK' | 'IOC' | 'GTX';
+
 type PerpsStateResponse = {
   data?: {
     aid?: number | string;
@@ -34,11 +36,29 @@ type PerpsStateResponse = {
 };
 
 type PerpsSymbolResponse = {
-  data?: Array<{ id?: number | string; name?: string }>;
+  data?: Array<{
+    id?: number | string;
+    name?: string;
+    tickSize?: string;
+    pricePrecision?: number;
+    buyLimitUpRatio?: string;
+    sellLimitDownRatio?: string;
+  }>;
 };
 
 type PerpsApiKeysResponse = {
   data?: Array<{ name?: string; publicKey?: string }>;
+};
+
+type PerpsTickerResponse = {
+  data?: Array<{
+    symbol?: string;
+    lastPx?: string;
+    askPx?: string;
+    bidPx?: string;
+    indexPrice?: string;
+    markPrice?: string;
+  }>;
 };
 
 type PerpsRestResponse<T = unknown> = {
@@ -93,10 +113,47 @@ function parseRequiredNumber(value: number | string | undefined, label: string):
   return parsed;
 }
 
+function parsePositiveNumber(value: number | string | undefined | null): number | null {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+}
+
 function trimToNull(value: string | undefined | null): string | null {
   if (!value) return null;
   const trimmed = value.trim();
   return trimmed ? trimmed : null;
+}
+
+function countFractionDigits(value: string): number {
+  const trimmed = value.trim();
+  if (!trimmed.includes('.')) return 0;
+  return trimmed.split('.')[1]?.length || 0;
+}
+
+function formatStepValue(value: number, step: string, mode: 'up' | 'down'): string {
+  const numericStep = parseRequiredNumber(step, 'tick size');
+  const decimals = countFractionDigits(step);
+  const scaled = value / numericStep;
+  const roundedUnits = mode === 'up' ? Math.ceil(scaled - 1e-9) : Math.floor(scaled + 1e-9);
+  const roundedValue = roundedUnits * numericStep;
+  return roundedValue.toFixed(decimals);
+}
+
+function timeInForceCode(value: TimeInForceValue | undefined, orderType: 'MARKET' | 'LIMIT'): number {
+  const normalized = value || (orderType === 'MARKET' ? 'IOC' : 'GTC');
+
+  switch (normalized) {
+    case 'GTC':
+      return 1;
+    case 'FOK':
+      return 2;
+    case 'IOC':
+      return 3;
+    case 'GTX':
+      return 4;
+    default:
+      return orderType === 'MARKET' ? 3 : 1;
+  }
 }
 
 function createClientOrderId(symbol: string): string {
@@ -169,6 +226,67 @@ async function resolveTradingContext(wallet: ethers.Wallet, symbol: string): Pro
   };
 }
 
+async function fetchClosePricing(symbol: string): Promise<{
+  tickSize: string;
+  markPrice: number;
+  bidPrice: number | null;
+  askPrice: number | null;
+  buyLimitUpRatio: number;
+  sellLimitDownRatio: number;
+}> {
+  const [symbolResponse, tickerResponse] = await Promise.all([
+    client.get<PerpsRestResponse<PerpsSymbolResponse['data']>>(`${PERPS_BASE}/markets/symbols`, {
+      params: { symbol }
+    }),
+    client.get<PerpsRestResponse<PerpsTickerResponse['data']>>(`${PERPS_BASE}/markets/tickers`, {
+      params: { symbol }
+    })
+  ]);
+
+  const symbolRecord = (symbolResponse.data?.data || []).find((entry) => entry?.name === symbol);
+  const tickerRecord = (tickerResponse.data?.data || []).find((entry) => entry?.symbol === symbol);
+
+  if (!symbolRecord?.tickSize) {
+    throw new Error(`Could not resolve SoDEX tick size for ${symbol}.`);
+  }
+
+  const markPrice =
+    parsePositiveNumber(tickerRecord?.markPrice) ||
+    parsePositiveNumber(tickerRecord?.indexPrice) ||
+    parsePositiveNumber(tickerRecord?.lastPx);
+
+  if (!markPrice) {
+    throw new Error(`Could not resolve SoDEX reference price for ${symbol}.`);
+  }
+
+  return {
+    tickSize: symbolRecord.tickSize,
+    markPrice,
+    bidPrice: parsePositiveNumber(tickerRecord?.bidPx),
+    askPrice: parsePositiveNumber(tickerRecord?.askPx),
+    buyLimitUpRatio: parsePositiveNumber(symbolRecord.buyLimitUpRatio) || 0.05,
+    sellLimitDownRatio: parsePositiveNumber(symbolRecord.sellLimitDownRatio) || 0.05
+  };
+}
+
+async function buildCloseLimitPrice(symbol: string, side: 'BUY' | 'SELL'): Promise<string> {
+  const pricing = await fetchClosePricing(symbol);
+  const referenceBid = pricing.bidPrice || pricing.markPrice;
+  const referenceAsk = pricing.askPrice || pricing.markPrice;
+
+  if (side === 'BUY') {
+    const cap = pricing.markPrice * (1 + pricing.buyLimitUpRatio);
+    const target = Math.max(referenceAsk, pricing.markPrice) * 1.01;
+    const bounded = Math.max(referenceAsk, Math.min(cap, target));
+    return formatStepValue(bounded, pricing.tickSize, 'up');
+  }
+
+  const floor = pricing.markPrice * (1 - pricing.sellLimitDownRatio);
+  const target = Math.min(referenceBid, pricing.markPrice) * 0.99;
+  const bounded = Math.min(referenceBid, Math.max(floor, target));
+  return formatStepValue(bounded, pricing.tickSize, 'down');
+}
+
 async function signAction(
   wallet: ethers.Wallet,
   actionType: SignedActionType,
@@ -236,7 +354,7 @@ function buildOrderPayload(params: PlaceOrderParams): SignedOrderPayload {
     modifier: 1,
     side: params.side === 'BUY' ? 1 : 2,
     type: params.type === 'MARKET' ? 2 : 1,
-    timeInForce: params.type === 'MARKET' ? 3 : 1,
+    timeInForce: timeInForceCode(params.timeInForce, params.type),
     reduceOnly: Boolean(params.reduceOnly),
     positionSide: 1
   };
@@ -335,6 +453,7 @@ export interface PlaceOrderParams {
   type: 'MARKET' | 'LIMIT';
   quantity: string;
   price?: string;
+  timeInForce?: TimeInForceValue;
   leverage?: number;
   reduceOnly?: boolean;
 }
@@ -372,10 +491,23 @@ export async function closePosition(symbol: string, sizeHint = ''): Promise<Orde
     };
   }
 
+  let price: string;
+
+  try {
+    price = await buildCloseLimitPrice(symbol, side);
+  } catch (error: any) {
+    return {
+      success: false,
+      message: error?.message || `Could not price close order for ${symbol}.`
+    };
+  }
+
   return placeOrder({
     symbol,
     side,
-    type: 'MARKET',
+    type: 'LIMIT',
+    price,
+    timeInForce: 'IOC',
     quantity,
     reduceOnly: true
   });
@@ -403,7 +535,9 @@ export async function placeOrder(params: PlaceOrderParams): Promise<OrderResult>
       orders: [buildOrderPayload(params)]
     };
 
-    const response = await postSigned<Array<{ orderID?: number | string; error?: string }>>(
+    const response = await postSigned<
+      Array<{ code?: number; orderID?: number | string; error?: string; clOrdID?: string }>
+    >(
       wallet,
       context,
       'newOrder',
@@ -413,10 +547,21 @@ export async function placeOrder(params: PlaceOrderParams): Promise<OrderResult>
 
     if (response.code === 0) {
       const firstOrder = Array.isArray(response.data) ? response.data[0] : undefined;
+      if (firstOrder && typeof firstOrder.code === 'number' && firstOrder.code !== 0) {
+        return {
+          success: false,
+          message: firstOrder.error || `SoDEX rejected the order for ${params.symbol}.`,
+          raw: response
+        };
+      }
+
       return {
         success: true,
         orderId: firstOrder?.orderID ? String(firstOrder.orderID) : undefined,
-        message: `Order placed: ${params.side} ${params.quantity} ${params.symbol}`,
+        message:
+          params.reduceOnly && params.timeInForce === 'IOC'
+            ? `Close order submitted: ${params.side} ${params.quantity} ${params.symbol} @ ${params.price}`
+            : `Order placed: ${params.side} ${params.quantity} ${params.symbol}`,
         raw: response
       };
     }

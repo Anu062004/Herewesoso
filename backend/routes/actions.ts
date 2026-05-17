@@ -29,43 +29,13 @@ router.post('/', async (req: Request, res: Response) => {
 
   if (action === 'CLOSE_POSITION') {
     try {
-      const wallet = sodexTrader.getWalletAddress();
-      if (!wallet) {
-        throw new Error('Could not derive wallet address from private key.');
-      }
-
-      // Fetch current positions to find the exact size and side
-      const sodex = require('../services/sodex');
-      const enriched = await sodex.getEnrichedPositions(wallet);
-      const position = (enriched.positions || []).find((p: any) => p.symbol === symbol);
-
-      if (!position || !position.positionSize || Number(position.positionSize) === 0) {
-        return res.json({
-          queued: false,
-          action,
-          symbol,
-          message: `No open position found for ${symbol} on SoDEX.`
-        });
-      }
-
-      // If it's a SHORT position (negative size or side='SHORT'), we need to BUY to close.
-      // If it's a LONG position, we SELL to close.
-      const size = String(Math.abs(Number(position.positionSize)));
-      const side = (position.side === 'SHORT' || Number(position.positionSize) < 0) ? 'BUY' : 'SELL';
-
-      const result = await sodexTrader.placeOrder({
-        symbol,
-        side,
-        type: 'MARKET',
-        quantity: size,
-        reduceOnly: true
-      });
+      const result = await sodexTrader.closePosition(symbol);
 
       return res.json({
         queued: result.success,
         action,
         symbol,
-        message: result.success ? `Successfully closed ${symbol} position (${size})` : result.message
+        message: result.message
       });
     } catch (error: any) {
       console.error('[Actions Route] Close Error:', error.message);
