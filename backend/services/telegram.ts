@@ -2,8 +2,10 @@ import type { AlertSeverity, RiskLevel, SignalType, TelegramAlertResult, Telegra
 
 import axios from 'axios';
 import errorUtils = require('../utils/error');
+import runtimeStatus = require('./runtimeStatus');
 
 const { getErrorMessage } = errorUtils;
+const { recordTelegramMessage } = runtimeStatus;
 
 interface ReplyMarkup {
   inline_keyboard: Array<Array<{ text: string; url: string }>>;
@@ -94,6 +96,7 @@ const telegram = {
 
     try {
       await axios.post(`${apiBase}/sendMessage`, body);
+      recordTelegramMessage();
       return true;
     } catch (error) {
       console.error(`[Telegram] Failed to send: ${getErrorMessage(error)}`);

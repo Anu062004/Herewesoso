@@ -14,6 +14,7 @@ import actionsRoute = require('./routes/actions');
 import analyzeRoute = require('./routes/analyze');
 import sodexRoute = require('./routes/sodex');
 import newsRoute = require('./routes/news');
+import agentRunsRoute = require('./routes/agentRuns');
 
 const app = express();
 
@@ -21,6 +22,8 @@ app.use(cors());
 app.use(express.json());
 
 app.use('/health', healthRoute);
+app.use('/api/health', healthRoute);
+app.use('/api/agent-runs', agentRunsRoute);
 app.use('/api/signals', signalsRoute);
 app.use('/api/positions', positionsRoute);
 app.use('/api/alerts', alertsRoute);

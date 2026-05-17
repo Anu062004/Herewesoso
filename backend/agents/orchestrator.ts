@@ -5,11 +5,13 @@ import shieldAgent = require('./shieldAgent');
 import claude = require('../services/ai');
 import telegram = require('../services/telegram');
 import supabaseService = require('../services/supabase');
+import runtimeStatus = require('../services/runtimeStatus');
 import errorUtils = require('../utils/error');
 
 const { runNarrativeAgent } = narrativeAgent;
 const { runShieldAgent } = shieldAgent;
 const { safeSelect, createAgentRun, completeAgentRun, failAgentRun } = supabaseService;
+const { recordAgentRun, updateAgentRun } = runtimeStatus;
 const { getErrorMessage } = errorUtils;
 
 const CYCLE_MS = Number.parseInt(process.env.CYCLE_INTERVAL_MS || '1800000', 10);
@@ -26,6 +28,12 @@ async function runFullCycle() {
   cycleInFlight = true;
   const cycleStart = Date.now();
   const runRecord = await createAgentRun('orchestrator');
+  recordAgentRun({
+    id: runRecord?.id,
+    agent: 'orchestrator',
+    status: 'running',
+    created_at: new Date(cycleStart).toISOString()
+  });
 
   console.log(`\n[Orchestrator] ===== CYCLE START ${new Date().toISOString()} =====`);
 
@@ -35,6 +43,17 @@ async function runFullCycle() {
     const duration = Date.now() - cycleStart;
 
     await completeAgentRun(runRecord?.id, {
+      duration_ms: duration,
+      summary: {
+        narrativeSuccess: narrativeResult.success,
+        shieldSuccess: shieldResult.success,
+        topSignal: narrativeResult.strongSignals?.[0]?.sector || null,
+        positionsMonitored: shieldResult.positionsMonitored || 0
+      }
+    });
+    updateAgentRun({
+      id: runRecord?.id,
+      status: 'completed',
       duration_ms: duration,
       summary: {
         narrativeSuccess: narrativeResult.success,
@@ -54,6 +73,12 @@ async function runFullCycle() {
   } catch (error) {
     await failAgentRun(runRecord?.id, getErrorMessage(error), {
       duration_ms: Date.now() - cycleStart
+    });
+    updateAgentRun({
+      id: runRecord?.id,
+      status: 'failed',
+      duration_ms: Date.now() - cycleStart,
+      error: getErrorMessage(error)
     });
 
     console.error('[Orchestrator] Fatal cycle error:', getErrorMessage(error));
