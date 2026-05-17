@@ -119,12 +119,164 @@ async function getWithFallback<T = unknown>(
 }
 
 const NEWS_ARRAY_KEYS = ['list', 'items', 'articles', 'records', 'news', 'data', 'results', 'feeds'];
+const MACRO_ARRAY_KEYS = ['list', 'items', 'events', 'records', 'data', 'results'];
 
 function extractNewsArray(obj: Record<string, unknown>): unknown[] | null {
   for (const key of NEWS_ARRAY_KEYS) {
     if (Array.isArray(obj[key])) return obj[key] as unknown[];
   }
   return null;
+}
+
+function extractMacroArray(input: unknown): unknown[] {
+  if (Array.isArray(input)) {
+    return input;
+  }
+
+  if (input && typeof input === 'object') {
+    for (const key of MACRO_ARRAY_KEYS) {
+      if (Array.isArray((input as Record<string, unknown>)[key])) {
+        return (input as Record<string, unknown>)[key] as unknown[];
+      }
+    }
+  }
+
+  return [];
+}
+
+function toIsoOrNull(input: string | null): string | null {
+  if (!input) return null;
+  const parsed = new Date(input);
+  return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString();
+}
+
+function normalizeFlatMacroEvent(item: Record<string, unknown>, fallbackDate?: string): MacroEvent | null {
+  const name =
+    typeof item.name === 'string' ? item.name :
+    typeof item.event === 'string' ? item.event :
+    typeof item.title === 'string' ? item.title :
+    typeof item.indicator === 'string' ? item.indicator :
+    null;
+
+  if (!name) {
+    return null;
+  }
+
+  const date =
+    typeof item.date === 'string' ? item.date :
+    typeof item.releaseDate === 'string' ? item.releaseDate.split('T')[0] :
+    typeof item.day === 'string' ? item.day :
+    fallbackDate || undefined;
+
+  const time =
+    typeof item.time === 'string' ? item.time :
+    typeof item.releaseTime === 'string' ? item.releaseTime :
+    undefined;
+
+  const eventTime =
+    typeof item.eventTime === 'string' ? item.eventTime :
+    typeof item.releaseDate === 'string' ? item.releaseDate :
+    typeof item.datetime === 'string' ? item.datetime :
+    date ? toIsoOrNull([date, time].filter(Boolean).join(' ')) || undefined : undefined;
+
+  return {
+    ...item,
+    id:
+      typeof item.id === 'string'
+        ? item.id
+        : `${date || 'unknown'}:${name}:${time || 'unknown'}`,
+    name,
+    date,
+    time,
+    eventTime,
+    importance:
+      typeof item.importance === 'string' ? item.importance :
+      typeof item.impact === 'string' ? item.impact :
+      typeof item.level === 'string' ? item.level :
+      undefined,
+    country: typeof item.country === 'string' ? item.country : undefined,
+    actual: typeof item.actual === 'string' ? item.actual : undefined,
+    forecast: typeof item.forecast === 'string' ? item.forecast : undefined,
+    previous: typeof item.previous === 'string' ? item.previous : undefined
+  };
+}
+
+function normalizeMacroResponse(
+  response: SosoResponse<unknown>,
+  requestedDate?: string
+): SosoResponse<MacroEvent[]> {
+  const source = extractMacroArray(response?.data);
+  const events: MacroEvent[] = [];
+
+  for (const entry of source) {
+    if (!entry || typeof entry !== 'object') {
+      continue;
+    }
+
+    const row = entry as Record<string, unknown>;
+    const rowDate =
+      typeof row.date === 'string' ? row.date :
+      typeof row.releaseDate === 'string' ? row.releaseDate.split('T')[0] :
+      undefined;
+
+    if (Array.isArray(row.events)) {
+      for (const rawName of row.events) {
+        if (typeof rawName !== 'string' || !rawName.trim()) {
+          continue;
+        }
+
+        events.push({
+          id: `${rowDate || requestedDate || 'unknown'}:${rawName}`,
+          name: rawName.trim(),
+          date: rowDate || requestedDate,
+          time: typeof row.time === 'string' ? row.time : undefined,
+          eventTime:
+            toIsoOrNull(
+              [rowDate || requestedDate, typeof row.time === 'string' ? row.time : null]
+                .filter(Boolean)
+                .join(' ')
+            ) || undefined,
+          importance:
+            typeof row.importance === 'string' ? row.importance :
+            typeof row.impact === 'string' ? row.impact :
+            typeof row.level === 'string' ? row.level :
+            undefined,
+          country: typeof row.country === 'string' ? row.country : undefined
+        });
+      }
+
+      continue;
+    }
+
+    const normalized = normalizeFlatMacroEvent(row, requestedDate);
+    if (normalized) {
+      events.push(normalized);
+    }
+  }
+
+  const filtered = requestedDate
+    ? events.filter((event) => !event.date || event.date === requestedDate)
+    : events;
+
+  const deduped = Array.from(
+    new Map(
+      filtered.map((event) => [
+        `${event.date || ''}|${event.time || ''}|${event.name || ''}`,
+        event
+      ])
+    ).values()
+  );
+
+  deduped.sort((left, right) => {
+    const leftTime = new Date(left.eventTime || left.releaseDate || [left.date, left.time].filter(Boolean).join(' ')).getTime();
+    const rightTime = new Date(right.eventTime || right.releaseDate || [right.date, right.time].filter(Boolean).join(' ')).getTime();
+    return leftTime - rightTime;
+  });
+
+  return {
+    ...response,
+    data: deduped
+  };
 }
 
 function normalizeNewsResponse(response: SosoResponse<unknown>): SosoResponse<unknown[]> {
@@ -259,7 +411,8 @@ const sosovalue = {
 
   async getMacroEvents(date?: string): Promise<SosoResponse<MacroEvent[]>> {
     const targetDate = date || new Date().toISOString().split('T')[0];
-    return get<SosoResponse<MacroEvent[]>>('/macro/events', { date: targetDate });
+    const response = await get<SosoResponse<unknown>>('/macro/events', { date: targetDate });
+    return normalizeMacroResponse(response, date ? targetDate : undefined);
   },
 
   async getMacroEventHistory(eventName: string): Promise<SosoResponse<unknown[]>> {
