@@ -48,7 +48,7 @@ export default function PositionsPage() {
     <div className="space-y-4">
       {resolved.fallbackActive && resolved.positions.length > 0 ? (
         <div className="flex h-9 items-center rounded-[10px] border border-[rgba(245,158,11,0.24)] bg-[rgba(245,158,11,0.12)] px-4 text-[13px] text-[var(--amber)]">
-          ⚠ SoDEX position fetch failed — showing demo BTC-USD testnet position
+          Warning: SoDEX position fetch failed - showing demo BTC-USD testnet position
         </div>
       ) : null}
 
@@ -180,7 +180,7 @@ export default function PositionsPage() {
             : `This will submit a reduce-only market close for ${pendingAction?.symbol} on SoDEX testnet.`
         }
         confirmLabel={pendingAction?.action === 'REDUCE_LEVERAGE' ? 'Reduce' : 'Close'}
-        disclaimer="Testnet execution — requires a configured SoDEX private key"
+        disclaimer="Testnet execution - requires a configured SoDEX API signing key"
         onClose={() => setPendingAction(null)}
         onConfirm={async () => {
           if (!pendingAction) {

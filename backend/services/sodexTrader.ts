@@ -1,13 +1,10 @@
-import { ethers } from 'ethers';
 import axios from 'axios';
 import fs = require('fs');
 import path = require('path');
+import sodexSigner = require('./sodexSigner');
 
 const PERPS_BASE = process.env.SODEX_TESTNET_PERPS || 'https://testnet-gw.sodex.dev/api/v1/perps';
 const KEY_FILE = path.join(__dirname, '../../.sodex_key');
-const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000';
-const TESTNET_CHAIN_ID = 138565;
-const MAINNET_CHAIN_ID = 286623;
 
 const client = axios.create({
   timeout: 10000,
@@ -21,8 +18,9 @@ type SignedActionType = 'newOrder' | 'updateLeverage';
 type TradingContext = {
   accountID: number;
   symbolID: number;
-  apiKeyName: string;
+  apiKeyName?: string;
   marginMode: number;
+  accountAddress: string;
 };
 
 type TimeInForceValue = 'GTC' | 'FOK' | 'IOC' | 'GTX';
@@ -96,10 +94,6 @@ type UpdateLeverageRequest = {
   leverage: number;
   marginMode: number;
 };
-
-function perpsChainId(): number {
-  return PERPS_BASE.includes('testnet') ? TESTNET_CHAIN_ID : MAINNET_CHAIN_ID;
-}
 
 function normalizeAddress(value: string): string {
   return value.trim().toLowerCase();
@@ -186,32 +180,58 @@ function extractErrorMessage(error: any): string {
   return 'Unexpected SoDEX API error.';
 }
 
-async function resolveTradingContext(wallet: ethers.Wallet, symbol: string): Promise<TradingContext> {
-  const [stateResponse, symbolResponse, apiKeyResponse] = await Promise.all([
-    client.get<PerpsRestResponse<PerpsStateResponse['data']>>(`${PERPS_BASE}/accounts/${wallet.address}/state`),
+type SodexWallet = ReturnType<typeof sodexSigner.createWallet>;
+
+function configuredAccountAddress(fallbackAddress: string): string {
+  return (
+    trimToNull(process.env.SODEX_ACCOUNT_ADDRESS) ||
+    trimToNull(process.env.SODEX_WALLET_ADDRESS) ||
+    fallbackAddress
+  );
+}
+
+function configuredApiKeyName(): string | null {
+  return trimToNull(process.env.SODEX_API_KEY_NAME) || trimToNull(process.env.SODEX_KEY_NAME);
+}
+
+async function resolveTradingContext(wallet: SodexWallet, symbol: string): Promise<TradingContext> {
+  const accountAddress = configuredAccountAddress(wallet.address);
+  const envAccountID = trimToNull(process.env.SODEX_ACCOUNT_ID);
+  const envApiKeyName = configuredApiKeyName();
+
+  const [stateResponse, symbolResponse] = await Promise.all([
+    client.get<PerpsRestResponse<PerpsStateResponse['data']>>(`${PERPS_BASE}/accounts/${accountAddress}/state`),
     client.get<PerpsRestResponse<PerpsSymbolResponse['data']>>(`${PERPS_BASE}/markets/symbols`, {
       params: { symbol }
-    }),
-    client.get<PerpsRestResponse<PerpsApiKeysResponse['data']>>(`${PERPS_BASE}/accounts/${wallet.address}/api-keys`)
+    })
   ]);
 
   const state = stateResponse.data?.data;
   const symbols = symbolResponse.data?.data || [];
-  const apiKeys = apiKeyResponse.data?.data || [];
 
-  const accountID = parseRequiredNumber(state?.aid, 'account ID');
+  const accountID = parseRequiredNumber(envAccountID || state?.aid, 'account ID');
   const symbolRecord = symbols.find((entry) => entry?.name === symbol);
 
   if (!symbolRecord?.id) {
     throw new Error(`Could not resolve SoDEX symbol ID for ${symbol}.`);
   }
 
-  const matchingKey =
-    apiKeys.find((entry) => normalizeAddress(entry?.publicKey || '') === normalizeAddress(wallet.address)) ||
-    apiKeys.find((entry) => entry?.name === 'default') ||
-    apiKeys[0];
+  let apiKeyName = envApiKeyName || undefined;
 
-  if (!matchingKey?.name) {
+  if (!apiKeyName) {
+    const apiKeyResponse = await client.get<PerpsRestResponse<PerpsApiKeysResponse['data']>>(
+      `${PERPS_BASE}/accounts/${accountAddress}/api-keys`
+    );
+    const apiKeys = apiKeyResponse.data?.data || [];
+    const matchingKey =
+      apiKeys.find((entry) => normalizeAddress(entry?.publicKey || '') === normalizeAddress(wallet.address)) ||
+      apiKeys.find((entry) => entry?.name === 'default') ||
+      apiKeys[0];
+
+    apiKeyName = matchingKey?.name;
+  }
+
+  if (!apiKeyName) {
     throw new Error('No SoDEX API key is registered for this wallet.');
   }
 
@@ -221,8 +241,9 @@ async function resolveTradingContext(wallet: ethers.Wallet, symbol: string): Pro
   return {
     accountID,
     symbolID: parseRequiredNumber(symbolRecord.id, 'symbol ID'),
-    apiKeyName: matchingKey.name,
-    marginMode: typeof symbolConfig?.m === 'number' ? symbolConfig.m : 2
+    apiKeyName,
+    marginMode: typeof symbolConfig?.m === 'number' ? symbolConfig.m : 2,
+    accountAddress
   };
 }
 
@@ -287,62 +308,33 @@ async function buildCloseLimitPrice(symbol: string, side: 'BUY' | 'SELL'): Promi
   return formatStepValue(bounded, pricing.tickSize, 'down');
 }
 
-async function signAction(
-  wallet: ethers.Wallet,
-  actionType: SignedActionType,
-  params: NewOrderRequest | UpdateLeverageRequest
-): Promise<{ nonce: string; signature: string }> {
-  const nonce = BigInt(Date.now());
-  const payloadHash = ethers.keccak256(
-    ethers.toUtf8Bytes(
-      JSON.stringify({
-        type: actionType,
-        params
-      })
-    )
-  );
-
-  const signature = await wallet.signTypedData(
-    {
-      name: 'futures',
-      version: '1',
-      chainId: perpsChainId(),
-      verifyingContract: ZERO_ADDRESS
-    },
-    {
-      ExchangeAction: [
-        { name: 'payloadHash', type: 'bytes32' },
-        { name: 'nonce', type: 'uint64' }
-      ]
-    },
-    {
-      payloadHash,
-      nonce
-    }
-  );
-
-  return {
-    nonce: nonce.toString(),
-    signature: `0x01${signature.slice(2)}`
-  };
-}
-
 async function postSigned<T>(
-  wallet: ethers.Wallet,
+  wallet: SodexWallet,
   context: TradingContext,
   actionType: SignedActionType,
   endpoint: string,
   body: NewOrderRequest | UpdateLeverageRequest
 ): Promise<PerpsRestResponse<T>> {
-  const signed = await signAction(wallet, actionType, body);
+  const signed = await sodexSigner.signSodexAction({
+    privateKey: wallet.privateKey,
+    marketType: 'perps',
+    actionType,
+    params: body,
+    baseUrl: PERPS_BASE
+  });
+  const signedHeaders: Record<string, string> = {
+    'Content-Type': 'application/json',
+    Accept: 'application/json',
+    'X-API-Sign': signed.typedSignature,
+    'X-API-Nonce': signed.nonce
+  };
+
+  if (context.apiKeyName && context.apiKeyName !== 'default') {
+    signedHeaders['X-API-Key'] = context.apiKeyName;
+  }
+
   const response = await client.post<PerpsRestResponse<T>>(`${PERPS_BASE}${endpoint}`, body, {
-    headers: {
-      'Content-Type': 'application/json',
-      Accept: 'application/json',
-      'X-API-Key': context.apiKeyName,
-      'X-API-Sign': signed.signature,
-      'X-API-Nonce': signed.nonce
-    }
+    headers: signedHeaders
   });
 
   return response.data;
@@ -374,7 +366,7 @@ function buildOrderPayload(params: PlaceOrderParams): SignedOrderPayload {
 }
 
 async function submitLeverageUpdate(
-  wallet: ethers.Wallet,
+  wallet: SodexWallet,
   context: TradingContext,
   symbol: string,
   newLeverage: number
@@ -413,12 +405,13 @@ async function submitLeverageUpdate(
 
 export function saveKey(privateKey: string): void {
   const normalized = privateKey.startsWith('0x') ? privateKey : `0x${privateKey}`;
-  new ethers.Wallet(normalized);
+  sodexSigner.createWallet(normalized);
   fs.writeFileSync(KEY_FILE, normalized, { mode: 0o600 });
 }
 
 export function loadKey(): string | null {
   try {
+    if (process.env.SODEX_API_PRIVATE_KEY) return process.env.SODEX_API_PRIVATE_KEY;
     if (fs.existsSync(KEY_FILE)) return fs.readFileSync(KEY_FILE, 'utf8').trim();
     return process.env.SODEX_PRIVATE_KEY || null;
   } catch {
@@ -441,10 +434,16 @@ export function getWalletAddress(): string | null {
   if (!key) return null;
 
   try {
-    return new ethers.Wallet(key).address;
+    return sodexSigner.createWallet(key).address;
   } catch {
     return null;
   }
+}
+
+export function getAccountAddress(): string | null {
+  const signerAddress = getWalletAddress();
+  if (!signerAddress) return trimToNull(process.env.SODEX_ACCOUNT_ADDRESS);
+  return configuredAccountAddress(signerAddress);
 }
 
 export interface PlaceOrderParams {
@@ -467,15 +466,15 @@ export interface OrderResult {
 
 export async function closePosition(symbol: string, sizeHint = ''): Promise<OrderResult> {
   const key = loadKey();
-  if (!key) return { success: false, message: 'No private key set. Use /setkey to add one.' };
+  if (!key) return { success: false, message: 'No SoDEX API signing key set. Use SODEX_API_PRIVATE_KEY or /setkey to add one.' };
 
-  const wallet = new ethers.Wallet(key);
+  const wallet = sodexSigner.createWallet(key);
   let side: 'BUY' | 'SELL' = 'SELL';
   let quantity = trimToNull(sizeHint);
 
   try {
     const sodex = require('./sodex');
-    const enriched = await sodex.getEnrichedPositions(wallet.address);
+    const enriched = await sodex.getEnrichedPositions(configuredAccountAddress(wallet.address));
     const position = (enriched.positions || []).find((entry: any) => entry.symbol === symbol);
 
     if (position && Number(position.positionSize) !== 0) {
@@ -515,9 +514,9 @@ export async function closePosition(symbol: string, sizeHint = ''): Promise<Orde
 
 export async function placeOrder(params: PlaceOrderParams): Promise<OrderResult> {
   const key = loadKey();
-  if (!key) return { success: false, message: 'No private key set. Use /setkey to add one.' };
+  if (!key) return { success: false, message: 'No SoDEX API signing key set. Use SODEX_API_PRIVATE_KEY or /setkey to add one.' };
 
-  const wallet = new ethers.Wallet(key);
+  const wallet = sodexSigner.createWallet(key);
 
   try {
     const context = await resolveTradingContext(wallet, params.symbol);
@@ -582,9 +581,9 @@ export async function placeOrder(params: PlaceOrderParams): Promise<OrderResult>
 
 export async function reduceLeverage(symbol: string, newLeverage: number): Promise<OrderResult> {
   const key = loadKey();
-  if (!key) return { success: false, message: 'No private key set. Use /setkey to add one.' };
+  if (!key) return { success: false, message: 'No SoDEX API signing key set. Use SODEX_API_PRIVATE_KEY or /setkey to add one.' };
 
-  const wallet = new ethers.Wallet(key);
+  const wallet = sodexSigner.createWallet(key);
 
   try {
     const context = await resolveTradingContext(wallet, symbol);
@@ -604,6 +603,7 @@ export const sodexTrader = {
   removeKey,
   hasKey,
   getWalletAddress,
+  getAccountAddress,
   placeOrder,
   closePosition,
   reduceLeverage

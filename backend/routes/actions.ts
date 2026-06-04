@@ -23,7 +23,7 @@ router.post('/', async (req: Request, res: Response) => {
       queued: false,
       action,
       symbol,
-      message: 'No private key configured. Use /setkey in Telegram to add your wallet key before executing trades.'
+      message: 'No SoDEX API signing key configured. Set SODEX_API_PRIVATE_KEY or use /setkey in Telegram before executing trades.'
     });
   }
 

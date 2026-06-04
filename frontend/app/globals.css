@@ -3,21 +3,29 @@
 @tailwind utilities;
 
 :root {
-  --bg-app: #070a14;
-  --bg-surface: #0d1121;
-  --bg-panel: #131728;
-  --bg-card: #1a1f35;
-  --border: #252b45;
-  --border-hover: #2e3555;
-  --text-1: #f0f2f8;
-  --text-2: #a0aabf;
-  --text-3: #5a6480;
-  --blue: #3b82f6;
-  --green: #10b981;
-  --red: #ef4444;
-  --amber: #f59e0b;
-  --purple: #8b5cf6;
-  --cyan: #06b6d4;
+  --font-headline: Bahnschrift, Aptos Display, Aptos, Segoe UI, sans-serif;
+  --font-body: Bahnschrift, Aptos, Segoe UI, sans-serif;
+  --font-mono: Cascadia Mono, JetBrains Mono, SFMono-Regular, Consolas, monospace;
+  --bg-app: #050505;
+  --bg-surface: #080808;
+  --bg-panel: #101010;
+  --bg-card: #0c0c0c;
+  --bg-elevated: #151515;
+  --border: #242424;
+  --border-hover: #3a3a3a;
+  --text-1: #f5f5f5;
+  --text-2: #b8b8b8;
+  --text-3: #777777;
+  --blue: #4b8dff;
+  --green: #16c784;
+  --red: #ea3943;
+  --amber: #f0b90b;
+  --purple: #ff6b00;
+  --cyan: #42c8f5;
+  --brand: #ff6b00;
+  --brand-soft: rgba(255, 107, 0, 0.12);
+  --shadow-sm: 0 1px 0 rgba(255, 255, 255, 0.04), 0 12px 30px rgba(0, 0, 0, 0.24);
+  --shadow-md: 0 20px 50px rgba(0, 0, 0, 0.52);
 }
 
 * {
@@ -34,9 +42,14 @@ html {
 body {
   margin: 0;
   min-height: 100vh;
-  background: var(--bg-app);
+  background:
+    linear-gradient(180deg, #0b0b0b 0%, #050505 36%, #050505 100%),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.028) 1px, transparent 1px),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.022) 1px, transparent 1px);
+  background-size: auto, 56px 56px, 56px 56px;
   color: var(--text-1);
-  font-family: var(--font-inter), Inter, system-ui, sans-serif;
+  font-family: var(--font-body);
+  overflow-x: hidden;
   text-rendering: optimizeLegibility;
 }
 
@@ -57,20 +70,42 @@ table {
   border-collapse: collapse;
 }
 
+thead {
+  color: var(--text-3);
+}
+
+th {
+  white-space: nowrap;
+}
+
+td {
+  vertical-align: middle;
+}
+
+:focus-visible {
+  outline: 2px solid rgba(255, 107, 0, 0.62);
+  outline-offset: 2px;
+}
+
+::selection {
+  background: rgba(255, 107, 0, 0.34);
+  color: #ffffff;
+}
+
 ::-webkit-scrollbar {
   width: 4px;
   height: 4px;
 }
 
 ::-webkit-scrollbar-track {
-  background: var(--bg-panel);
+  background: #0a0a0a;
 }
 
 ::-webkit-scrollbar-thumb {
-  background: var(--border);
+  background: #2c2c2c;
   border-radius: 999px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: var(--border-hover);
+  background: #444444;
 }

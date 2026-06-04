@@ -56,7 +56,7 @@ export default function AlertsPage() {
               onClick={() => setFilter(value)}
               className={
                 active
-                  ? 'inline-flex h-8 items-center rounded-md border border-[rgba(59,130,246,0.3)] bg-[rgba(59,130,246,0.12)] px-3 text-[12px] text-[var(--blue)]'
+                  ? 'inline-flex h-8 items-center rounded-md border border-[rgba(249,115,22,0.3)] bg-[rgba(249,115,22,0.1)] px-3 text-[12px] text-[var(--brand)]'
                   : 'inline-flex h-8 items-center rounded-md border border-[var(--border)] bg-[var(--bg-card)] px-3 text-[12px] text-[var(--text-2)]'
               }
             >
@@ -107,7 +107,7 @@ export default function AlertsPage() {
                       <div className="mt-3 text-[14px] text-[var(--text-1)]">{alert.message}</div>
                       <div className="mt-3 flex flex-wrap items-center gap-3 text-[11px] text-[var(--text-3)]">
                         <span>{formatDateTime(alert.created_at || null)}</span>
-                        {alert.telegram_sent ? <span>↗ Sent to Telegram</span> : null}
+                        {alert.telegram_sent ? <span>Sent to Telegram</span> : null}
                       </div>
                     </div>
                   </div>

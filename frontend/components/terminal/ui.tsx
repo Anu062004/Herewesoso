@@ -20,10 +20,10 @@ export function PageHeader({
   right?: ReactNode;
 }) {
   return (
-    <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
-      <div>
-        <h1 className="text-[18px] font-semibold text-[var(--text-1)]">{title}</h1>
-        {description ? <p className="mt-2 text-[13px] text-[var(--text-2)]">{description}</p> : null}
+    <div className="flex flex-col gap-3 border-b border-[var(--border)] pb-4 md:flex-row md:items-end md:justify-between">
+      <div className="min-w-0">
+        <h1 className="font-headline text-[24px] font-semibold leading-tight text-[var(--text-1)]">{title}</h1>
+        {description ? <p className="mt-1 max-w-xs text-[13px] leading-5 text-[var(--text-2)] sm:max-w-3xl">{description}</p> : null}
       </div>
       {right ? <div className="flex items-center gap-3">{right}</div> : null}
     </div>
@@ -38,7 +38,7 @@ export function Panel({
   className?: string;
 }) {
   return (
-    <section className={cx('rounded-[10px] border border-[var(--border)] bg-[var(--bg-card)]', className)}>
+    <section className={cx('overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--bg-card)] shadow-[var(--shadow-sm)]', className)}>
       {children}
     </section>
   );
@@ -65,11 +65,11 @@ export function PanelHeader({
     : 'transparent';
 
   return (
-    <div className="flex items-center justify-between gap-3 border-b border-[var(--border)] px-4 py-3">
+    <div className="flex min-h-12 items-center justify-between gap-3 border-b border-[var(--border)] bg-[var(--bg-panel)] px-4 py-3">
       <div className="min-w-0">
         <div className="flex items-center gap-3">
-          {accent ? <span className="h-5 w-[3px] rounded-full" style={{ backgroundColor: accentColor }} /> : null}
-          <h2 className="truncate text-[15px] font-medium text-[var(--text-1)]">{title}</h2>
+          {accent ? <span className="h-4 w-[3px] rounded-full" style={{ backgroundColor: accentColor }} /> : null}
+          <h2 className="truncate text-[14px] font-semibold text-[var(--text-1)]">{title}</h2>
         </div>
         {subtitle ? <p className="mt-1 text-[11px] text-[var(--text-3)]">{subtitle}</p> : null}
       </div>
@@ -88,17 +88,17 @@ export function Pill({
   className?: string;
 }) {
   const styles = {
-    default: 'border-[var(--border)] bg-[var(--bg-panel)] text-[var(--text-2)]',
-    green: 'border-[rgba(16,185,129,0.22)] bg-[rgba(16,185,129,0.12)] text-[var(--green)]',
-    amber: 'border-[rgba(245,158,11,0.24)] bg-[rgba(245,158,11,0.12)] text-[var(--amber)]',
-    red: 'border-[rgba(239,68,68,0.24)] bg-[rgba(239,68,68,0.12)] text-[var(--red)]',
-    cyan: 'border-[rgba(6,182,212,0.24)] bg-[rgba(6,182,212,0.12)] text-[var(--cyan)]',
-    purple: 'border-[rgba(139,92,246,0.24)] bg-[rgba(139,92,246,0.14)] text-[var(--purple)]',
+    default: 'border-[var(--border)] bg-[var(--bg-elevated)] text-[var(--text-2)]',
+    green: 'border-[rgba(22,163,74,0.22)] bg-[rgba(22,163,74,0.08)] text-[var(--green)]',
+    amber: 'border-[rgba(217,119,6,0.24)] bg-[rgba(217,119,6,0.08)] text-[var(--amber)]',
+    red: 'border-[rgba(220,38,38,0.22)] bg-[rgba(220,38,38,0.08)] text-[var(--red)]',
+    cyan: 'border-[rgba(8,145,178,0.22)] bg-[rgba(8,145,178,0.08)] text-[var(--cyan)]',
+    purple: 'border-[rgba(249,115,22,0.24)] bg-[rgba(249,115,22,0.1)] text-[var(--purple)]',
     gray: 'border-[var(--border)] bg-[var(--bg-panel)] text-[var(--text-3)]'
   }[tone];
 
   return (
-    <span className={cx('inline-flex h-6 items-center rounded-md border px-2 text-[11px] font-medium', styles, className)}>
+    <span className={cx('inline-flex h-6 items-center rounded-md border px-2 text-[11px] font-medium tabular-nums', styles, className)}>
       {children}
     </span>
   );
@@ -149,8 +149,8 @@ export function Button({
 }) {
   const styles =
     tone === 'primary'
-      ? 'border-[rgba(59,130,246,0.4)] bg-[var(--blue)] text-white hover:brightness-110'
-      : 'border-[var(--border)] bg-transparent text-[var(--text-2)] hover:border-[var(--border-hover)] hover:text-[var(--text-1)]';
+      ? 'border-[rgba(255,107,0,0.62)] bg-[var(--brand)] text-black shadow-[0_0_0_1px_rgba(255,255,255,0.06)_inset] hover:brightness-110'
+      : 'border-[var(--border)] bg-[var(--bg-elevated)] text-[var(--text-2)] hover:border-[var(--border-hover)] hover:text-[var(--text-1)]';
 
   return (
     <button
@@ -191,7 +191,7 @@ export function ErrorCard({
   onRetry?: () => void;
 }) {
   return (
-    <div className="rounded-[10px] border border-[rgba(239,68,68,0.24)] bg-[var(--bg-card)]">
+    <div className="rounded-lg border border-[rgba(234,57,67,0.28)] bg-[var(--bg-card)]">
       <div className="flex items-center gap-3 border-l-[3px] border-[var(--red)] px-4 py-4">
         <AlertTriangleIcon className="h-4 w-4 text-[var(--red)]" />
         <div className="min-w-0 flex-1 text-[13px] text-[var(--text-2)]">{message}</div>
@@ -216,7 +216,7 @@ export function EmptyState({
 }) {
   return (
     <div className="flex min-h-[220px] flex-col items-center justify-center px-6 py-12 text-center">
-      <div className="flex h-12 w-12 items-center justify-center rounded-[10px] border border-[var(--border)] bg-[var(--bg-panel)]">
+      <div className="flex h-12 w-12 items-center justify-center rounded-lg border border-[var(--border)] bg-[var(--bg-panel)]">
         {icon}
       </div>
       <div className="mt-4 text-[15px] font-medium text-[var(--text-1)]">{title}</div>
@@ -230,7 +230,7 @@ export function SkeletonBlock({
 }: {
   className?: string;
 }) {
-  return <div className={cx('animate-pulse rounded-[8px] border border-[var(--border)] bg-[var(--bg-panel)]', className)} />;
+  return <div className={cx('animate-pulse rounded-md border border-[var(--border)] bg-[#171717]', className)} />;
 }
 
 export function MetricCard({
@@ -254,9 +254,9 @@ export function MetricCard({
 
   return (
     <Panel className="p-4">
-      <div className="text-[11px] font-medium text-[var(--text-2)]">{label}</div>
-      <div className={cx('mt-3 text-[28px] font-semibold leading-none', color)}>{value}</div>
-      {supporting ? <div className="mt-3 text-[13px] text-[var(--text-2)]">{supporting}</div> : null}
+      <div className="text-[12px] font-medium text-[var(--text-2)]">{label}</div>
+      <div className={cx('mt-2 text-[26px] font-semibold leading-none tabular-nums', color)}>{value}</div>
+      {supporting ? <div className="mt-3 text-[12px] text-[var(--text-2)]">{supporting}</div> : null}
     </Panel>
   );
 }
@@ -304,7 +304,7 @@ export function DistanceBar({
   const tone = clamped > 20 ? 'var(--green)' : clamped >= 10 ? 'var(--amber)' : 'var(--red)';
 
   return (
-    <div className={cx('w-full overflow-hidden rounded-[999px] bg-[var(--bg-panel)]', compact ? 'h-[10px]' : 'h-2')}>
+    <div className={cx('w-full overflow-hidden rounded-[999px] bg-[#222222]', compact ? 'h-[10px]' : 'h-2')}>
       <div className="h-full rounded-[999px]" style={{ width: `${Math.min(clamped, 100)}%`, backgroundColor: tone }} />
     </div>
   );
@@ -316,14 +316,14 @@ export function ValueChange({
   value: number | null;
 }) {
   if (value === null) {
-    return <span className="text-[var(--text-3)]">—</span>;
+    return <span className="text-[var(--text-3)]">-</span>;
   }
 
   const positive = value >= 0;
 
   return (
     <span className={positive ? 'text-[var(--green)]' : 'text-[var(--red)]'}>
-      {positive ? '▲' : '▼'} {Math.abs(value).toFixed(2)}%
+      {positive ? '+' : '-'}{Math.abs(value).toFixed(2)}%
     </span>
   );
 }
@@ -360,7 +360,7 @@ export function CandlestickChart({
   const priceToY = (value: number) => height - padding - ((value - min) / range) * (height - padding * 2);
 
   return (
-    <div className="overflow-hidden rounded-[10px] border border-[var(--border)] bg-[var(--bg-panel)] p-4">
+    <div className="overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--bg-card)] p-4">
       <svg viewBox={`0 0 ${width} ${height}`} className="h-[320px] w-full">
         {[0.2, 0.4, 0.6, 0.8].map((stop) => {
           const y = padding + stop * (height - padding * 2);

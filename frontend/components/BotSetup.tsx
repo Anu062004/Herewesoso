@@ -29,7 +29,7 @@ const STEP_ADD = [
   {
     n: 4,
     title: 'Restart & Verify',
-    body: 'After restarting, message /start to your bot. You should receive the Sentinel main menu.',
+    body: 'After restarting, message /start to your bot. You should receive the Gold and Grith main menu.',
     code: 'pm2 restart sentinel-finance',
     tag: 'EC2'
   }
@@ -112,7 +112,7 @@ export default function BotSetup() {
           <p className="eyebrow">Telegram Integration</p>
           <h2 className="mt-3 font-headline text-2xl font-bold text-white">Bot Setup</h2>
           <p className="mt-2 text-sm text-zinc-400">
-            Connect the Sentinel Telegram bot to receive real-time alerts, check positions, and run commands from anywhere.
+            Connect the Gold and Grith Telegram bot to receive real-time alerts, check positions, and run commands from anywhere.
           </p>
         </div>
 

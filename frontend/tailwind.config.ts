@@ -9,29 +9,29 @@ const config: Config = {
   theme: {
     extend: {
       fontFamily: {
-        headline: ['Geist', 'sans-serif'],
-        body: ['Inter', 'sans-serif'],
-        mono: ['JetBrains Mono', 'monospace']
+        headline: ['var(--font-headline)'],
+        body: ['var(--font-body)'],
+        mono: ['var(--font-mono)']
       },
       colors: {
-        background: '#0d1515',
-        'background-deep': '#050508',
-        panel: 'rgba(15, 15, 25, 0.7)',
+        background: '#050505',
+        'background-deep': '#020202',
+        panel: 'rgba(16, 16, 16, 0.86)',
         border: 'rgba(255, 255, 255, 0.1)',
-        text: '#dce4e4',
-        'text-dim': '#b9cacb',
-        accent: '#00f2ff',
-        'accent-dim': '#00dbe7',
-        'accent-glow': '#ff00d9',
-        safe: '#00ffa3',
-        'safe-dim': '#00cc82',
-        caution: '#ffd700',
-        'caution-dim': '#ccac00',
-        danger: '#ff3131',
-        'danger-dim': '#cc2727',
-        critical: '#ff3131',
-        cyan: '#00f2ff',
-        magenta: '#ff00d9'
+        text: '#f5f5f5',
+        'text-dim': '#b8b8b8',
+        accent: '#ff6b00',
+        'accent-dim': '#d95b00',
+        'accent-glow': '#f0b90b',
+        safe: '#16c784',
+        'safe-dim': '#0fa86c',
+        caution: '#f0b90b',
+        'caution-dim': '#c89705',
+        danger: '#ea3943',
+        'danger-dim': '#c62f38',
+        critical: '#ea3943',
+        cyan: '#42c8f5',
+        magenta: '#ff9f1c'
       }
     }
   },

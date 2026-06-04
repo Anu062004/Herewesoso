@@ -37,7 +37,7 @@ export default function KlinesClient({ initialSymbol }: { initialSymbol: string 
     <div className="space-y-4">
       <PageHeader
         title="SoDEX Klines"
-        description="Candlestick view using the same dark finance palette as the terminal."
+        description="Candlestick view in the same market terminal palette as the rest of the app."
         right={<PollingIndicator freshness={klines.freshness} nextPollInMs={klines.nextPollInMs} />}
       />
 
@@ -71,7 +71,7 @@ export default function KlinesClient({ initialSymbol }: { initialSymbol: string 
                 onClick={() => setInterval(value)}
                 className={
                   active
-                    ? 'inline-flex h-8 items-center rounded-md border border-[rgba(59,130,246,0.3)] bg-[rgba(59,130,246,0.12)] px-3 text-[12px] text-[var(--blue)]'
+                    ? 'inline-flex h-8 items-center rounded-md border border-[rgba(249,115,22,0.3)] bg-[rgba(249,115,22,0.1)] px-3 text-[12px] text-[var(--brand)]'
                     : 'inline-flex h-8 items-center rounded-md border border-[var(--border)] bg-[var(--bg-card)] px-3 text-[12px] text-[var(--text-2)]'
                 }
               >
@@ -88,7 +88,7 @@ export default function KlinesClient({ initialSymbol }: { initialSymbol: string 
           {klines.error ? (
             <ErrorCard message={klines.error} onRetry={() => void klines.refresh()} />
           ) : klines.loading ? (
-            <div className="rounded-[10px] border border-[var(--border)] bg-[var(--bg-panel)] p-8 text-[13px] text-[var(--text-3)]">
+            <div className="rounded-lg border border-[var(--border)] bg-[var(--bg-panel)] p-8 text-[13px] text-[var(--text-3)]">
               Loading market candles...
             </div>
           ) : (klines.data?.points || []).length === 0 ? (

@@ -71,7 +71,7 @@ export default function NewsPage() {
                   </div>
                   <div className="mt-3 flex flex-wrap items-center gap-2 text-[11px] text-[var(--text-3)]">
                     <span>{article.source}</span>
-                    <span>•</span>
+                    <span>|</span>
                     <span>{formatDateTime(article.publishedAt)}</span>
                   </div>
                 </a>

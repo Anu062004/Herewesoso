@@ -37,7 +37,7 @@ export default function ShieldPage() {
     <div className="space-y-4">
       {openPositions.fallbackActive && openPositions.positions.length > 0 ? (
         <div className="flex h-9 items-center rounded-[10px] border border-[rgba(245,158,11,0.24)] bg-[rgba(245,158,11,0.12)] px-4 text-[13px] text-[var(--amber)]">
-          ⚠ SoDEX position fetch failed — showing demo BTC-USD testnet position
+          Warning: SoDEX position fetch failed - showing demo BTC-USD testnet position
         </div>
       ) : null}
 

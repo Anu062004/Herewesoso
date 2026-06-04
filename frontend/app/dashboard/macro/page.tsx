@@ -71,8 +71,8 @@ export default function MacroPage() {
                         <Pill tone={impact === 'High' ? 'red' : impact === 'Medium' ? 'amber' : 'gray'}>{impact}</Pill>
                       </td>
                       <td className="px-4 py-3 text-[var(--text-2)]">{cryptoSensitivity(event)}</td>
-                      <td className="px-4 py-3 text-[var(--text-2)]">{String(event.forecast || '—')}</td>
-                      <td className="px-4 py-3 text-[var(--text-2)]">{String(event.previous || '—')}</td>
+                      <td className="px-4 py-3 text-[var(--text-2)]">{String(event.forecast || '-')}</td>
+                      <td className="px-4 py-3 text-[var(--text-2)]">{String(event.previous || '-')}</td>
                     </tr>
                   );
                 })}

@@ -93,16 +93,25 @@ export default function DashboardPage() {
     <div className="space-y-4">
       {openPositions.fallbackActive && openPositions.positions.length > 0 ? (
         <div className="flex h-9 items-center rounded-[10px] border border-[rgba(245,158,11,0.24)] bg-[rgba(245,158,11,0.12)] px-4 text-[13px] text-[var(--amber)]">
-          ⚠ SoDEX position fetch failed — showing demo {openPositions.positions[0]?.symbol || 'BTC-USD'} testnet position
+          Warning: SoDEX position fetch failed - showing demo {openPositions.positions[0]?.symbol || 'BTC-USD'} testnet position
         </div>
       ) : null}
 
       <PageHeader title="Dashboard" description="Cross-market narrative, macro, and liquidation intelligence in one terminal view." />
 
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-[12px] font-medium text-[var(--text-3)]">Sector</span>
+        {['All', 'BTC Treasury', 'Exchange', 'Stablecoin', 'DeFi', 'AI', 'Meme'].map((sector, index) => (
+          <Pill key={sector} tone={index === 0 ? 'purple' : 'gray'}>
+            {sector}
+          </Pill>
+        ))}
+      </div>
+
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         <MetricCard
           label="Top Sector Score"
-          value={topSignal ? topSignal.combined_score : '—'}
+          value={topSignal ? topSignal.combined_score : '-'}
           tone="purple"
           supporting={topSignal ? <span className="text-[var(--purple)]">{topSignal.sector}</span> : 'Awaiting signals'}
         />
@@ -281,7 +290,7 @@ export default function DashboardPage() {
                         </div>
                         <div className="mt-2 flex items-center gap-2 text-[11px] text-[var(--text-3)]">
                           <span>{article.source}</span>
-                          <span>•</span>
+                          <span>|</span>
                           <span>{formatDateTime(article.publishedAt)}</span>
                         </div>
                       </a>
@@ -424,7 +433,7 @@ export default function DashboardPage() {
                             <div className="text-[13px] text-[var(--text-1)]">{alert.message}</div>
                             <div className="mt-1 flex items-center gap-2 text-[11px] text-[var(--text-3)]">
                               <span>{alertSourceLabel(alert.alert_type)}</span>
-                              <span>•</span>
+                              <span>|</span>
                               <span>{formatDateTime(alert.created_at || null)}</span>
                             </div>
                           </div>
@@ -453,7 +462,7 @@ export default function DashboardPage() {
             : `This will submit a reduce-only market close for ${pendingAction?.symbol} on SoDEX testnet.`
         }
         confirmLabel={pendingAction?.action === 'REDUCE_LEVERAGE' ? 'Reduce' : 'Close'}
-        disclaimer="Testnet execution — requires a configured SoDEX private key"
+        disclaimer="Testnet execution - requires a configured SoDEX API signing key"
         onClose={() => setPendingAction(null)}
         onConfirm={async () => {
           if (!pendingAction) {
