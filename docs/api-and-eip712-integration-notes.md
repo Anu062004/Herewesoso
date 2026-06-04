@@ -121,7 +121,7 @@ message: {
 }
 ```
 
-After generating the normal 65-byte ECDSA signature, prepend byte `0x01`. The final value goes into `X-API-Sign`.
+After generating the normal 65-byte ECDSA signature, normalize the final recovery byte to `0` or `1`, then prepend byte `0x01`. The final value goes into `X-API-Sign`.
 
 ### Payload Hash Rules
 
@@ -155,7 +155,7 @@ Signed write endpoints generally need:
 - `Content-Type: application/json`
 - `Accept: application/json`
 - `X-API-Key: <api-key-name>`
-- `X-API-Sign: 0x01<65-byte-eip712-signature>`
+- `X-API-Sign: 0x01<r><s><recovery-id-0-or-1>`
 - `X-API-Nonce: <uint64 nonce>`
 
 Public read endpoints usually only need:
@@ -407,7 +407,7 @@ Tests should cover:
 - omitted optional fields
 - nonce monotonicity
 - EIP-712 domain for testnet vs mainnet
-- signature prefix `0x01`
+- signature prefix `0x01` and compact recovery ID `0/1`
 
 ### 3. Add Explainable Risk Actions
 

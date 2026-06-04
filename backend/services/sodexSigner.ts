@@ -22,6 +22,7 @@ interface SodexSigningResult {
   nonce: string;
   payloadHash: string;
   rawSignature: string;
+  compactSignature: string;
   typedSignature: string;
   domain: {
     name: 'spot' | 'futures';
@@ -87,6 +88,16 @@ function createWallet(privateKey: string): ethers.Wallet {
   return new ethers.Wallet(normalizePrivateKey(privateKey));
 }
 
+function toCompactRecoverySignature(signature: string): string {
+  const parsed = ethers.Signature.from(signature);
+  const recoveryId = parsed.yParity.toString(16).padStart(2, '0');
+  return `0x${parsed.r.slice(2)}${parsed.s.slice(2)}${recoveryId}`;
+}
+
+function toSodexHeaderSignature(signature: string): string {
+  return `0x01${toCompactRecoverySignature(signature).slice(2)}`;
+}
+
 async function signSodexAction({
   privateKey,
   marketType,
@@ -117,12 +128,14 @@ async function signSodexAction({
     nonce: nextNonce.toString()
   };
   const rawSignature = await wallet.signTypedData(domain, types, message);
+  const compactSignature = toCompactRecoverySignature(rawSignature);
 
   return {
     nonce: nextNonce.toString(),
     payloadHash,
     rawSignature,
-    typedSignature: `0x01${rawSignature.slice(2)}`,
+    compactSignature,
+    typedSignature: `0x01${compactSignature.slice(2)}`,
     domain,
     typedData: {
       types,
@@ -147,5 +160,7 @@ export = {
   createWallet,
   getSodexDomain,
   recoverSodexSigner,
-  signSodexAction
+  signSodexAction,
+  toCompactRecoverySignature,
+  toSodexHeaderSignature
 };

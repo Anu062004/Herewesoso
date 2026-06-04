@@ -36,7 +36,7 @@ test('computePayloadHash hashes compact SoDEX action JSON', () => {
   assert.equal(sodexSigner.computePayloadHash('newOrder', params), expected);
 });
 
-test('signSodexAction creates recoverable EIP-712 signature with SoDEX prefix', async () => {
+test('signSodexAction creates recoverable EIP-712 signature with SoDEX header prefix', async () => {
   const wallet = sodexSigner.createWallet(PRIVATE_KEY);
   const signed = await sodexSigner.signSodexAction({
     privateKey: PRIVATE_KEY,
@@ -51,8 +51,15 @@ test('signSodexAction creates recoverable EIP-712 signature with SoDEX prefix', 
   assert.equal(signed.domain.chainId, 138565);
   assert.equal(signed.nonce, '1760373925000');
   assert.match(signed.rawSignature, /^0x[0-9a-fA-F]{130}$/);
-  assert.equal(signed.typedSignature, `0x01${signed.rawSignature.slice(2)}`);
+  assert.match(signed.compactSignature, /^0x[0-9a-fA-F]{130}$/);
+  assert.equal((signed.typedSignature.length - 2) / 2, 66);
+  assert.equal(signed.typedSignature, sodexSigner.toSodexHeaderSignature(signed.rawSignature));
+  assert.match(signed.typedSignature.slice(-2), /^(00|01)$/);
   assert.equal(sodexSigner.recoverSodexSigner(signed), wallet.address);
+  assert.equal(
+    ethers.verifyTypedData(signed.domain, signed.typedData.types, signed.typedData.message, signed.compactSignature),
+    wallet.address
+  );
 });
 
 test('nonce manager increases monotonically per signer', () => {
