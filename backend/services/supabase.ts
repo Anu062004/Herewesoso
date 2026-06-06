@@ -3,7 +3,7 @@ import errorUtils = require('../utils/error');
 
 // Polyfill WebSocket for Node.js < 22 before any supabase-js initialisation
 // eslint-disable-next-line @typescript-eslint/no-var-requires
-const ws = require('ws') as typeof import('ws');
+const ws = require('ws');
 if (typeof (globalThis as any).WebSocket === 'undefined') {
   (globalThis as any).WebSocket = ws;
 }

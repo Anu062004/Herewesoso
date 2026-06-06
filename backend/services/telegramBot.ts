@@ -4,7 +4,7 @@ import sosovalue = require('./sosovalue');
 import sodexTrader = require('./sodexTrader');
 import riskCalculator = require('../utils/riskCalculator');
 
-type InlineButton = { text: string; callback_data: string };
+type InlineButton = { text: string } & ({ callback_data: string } | { url: string });
 type InlineKeyboard = { inline_keyboard: InlineButton[][] };
 
 const WALLET = process.env.USER_WALLET_ADDRESS || '';
@@ -628,7 +628,12 @@ async function handleCommand(chatId: string | number, command: string, args: str
       await sendMessage(chatId, '⏳ Fetching news...');
       try {
         const news = await sosovalue.getNews(20);
-        const raw: any[] = (news?.data as any[]) || news?.data?.list || [];
+        const newsData = news?.data as unknown;
+        const raw: any[] = Array.isArray(newsData)
+          ? newsData
+          : Array.isArray((newsData as { list?: unknown })?.list)
+            ? ((newsData as { list: unknown[] }).list as any[])
+            : [];
         const items = deduplicateNews(raw);
         if (!items.length) { await sendMessage(chatId, '📰 No news available.', navBar('cmd_news')); break; }
         const lines = ['<b>🗞 LATEST CRYPTO NEWS</b>', '─────────────────────'];

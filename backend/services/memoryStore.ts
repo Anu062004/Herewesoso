@@ -42,7 +42,7 @@ export interface PositionRiskEntry {
   distance_to_liquidation_pct: number;
   risk_score: number;
   risk_level: string;
-  macro_threats?: Record<string, unknown> | null;
+  macro_threats?: unknown;
   created_at: string;
 }
 

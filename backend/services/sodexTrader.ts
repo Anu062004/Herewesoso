@@ -48,6 +48,8 @@ type PerpsApiKeysResponse = {
   data?: Array<{ name?: string; publicKey?: string }>;
 };
 
+type PerpsApiKey = NonNullable<PerpsApiKeysResponse['data']>[number];
+
 type PerpsTickerResponse = {
   data?: Array<{
     symbol?: string;
@@ -194,6 +196,44 @@ function configuredApiKeyName(): string | null {
   return trimToNull(process.env.SODEX_API_KEY_NAME) || trimToNull(process.env.SODEX_KEY_NAME);
 }
 
+async function fetchAccountApiKeys(accountAddress: string): Promise<PerpsApiKey[]> {
+  const apiKeyResponse = await client.get<PerpsRestResponse<PerpsApiKeysResponse['data']>>(
+    `${PERPS_BASE}/accounts/${accountAddress}/api-keys`
+  );
+
+  return apiKeyResponse.data?.data || [];
+}
+
+function resolveApiKeyNameFromList(
+  apiKeys: PerpsApiKey[],
+  signerAddress: string,
+  configuredName: string | null
+): string | undefined {
+  const matchingSignerKey = apiKeys.find((entry) =>
+    normalizeAddress(entry?.publicKey || '') === normalizeAddress(signerAddress)
+  );
+
+  if (configuredName) {
+    const configuredKey = apiKeys.find((entry) => entry?.name === configuredName);
+
+    if (configuredKey && (!configuredKey.publicKey || configuredKey === matchingSignerKey)) {
+      return configuredName;
+    }
+
+    if (matchingSignerKey?.name) {
+      console.warn(
+        `[SoDEX Trader] Configured API key "${configuredName}" was not registered for signer ${signerAddress}. ` +
+          `Using registered key "${matchingSignerKey.name}" instead.`
+      );
+      return matchingSignerKey.name;
+    }
+
+    return configuredName;
+  }
+
+  return matchingSignerKey?.name || apiKeys.find((entry) => entry?.name === 'default')?.name || apiKeys[0]?.name;
+}
+
 async function resolveTradingContext(wallet: SodexWallet, symbol: string): Promise<TradingContext> {
   const accountAddress = configuredAccountAddress(wallet.address);
   const envAccountID = trimToNull(process.env.SODEX_ACCOUNT_ID);
@@ -218,17 +258,17 @@ async function resolveTradingContext(wallet: SodexWallet, symbol: string): Promi
 
   let apiKeyName = envApiKeyName || undefined;
 
-  if (!apiKeyName) {
-    const apiKeyResponse = await client.get<PerpsRestResponse<PerpsApiKeysResponse['data']>>(
-      `${PERPS_BASE}/accounts/${accountAddress}/api-keys`
-    );
-    const apiKeys = apiKeyResponse.data?.data || [];
-    const matchingKey =
-      apiKeys.find((entry) => normalizeAddress(entry?.publicKey || '') === normalizeAddress(wallet.address)) ||
-      apiKeys.find((entry) => entry?.name === 'default') ||
-      apiKeys[0];
+  try {
+    const apiKeys = await fetchAccountApiKeys(accountAddress);
+    apiKeyName = resolveApiKeyNameFromList(apiKeys, wallet.address, envApiKeyName);
+  } catch (error: any) {
+    if (!apiKeyName) {
+      throw error;
+    }
 
-    apiKeyName = matchingKey?.name;
+    console.warn(
+      `[SoDEX Trader] Could not verify configured API key "${apiKeyName}"; using it anyway: ${extractErrorMessage(error)}`
+    );
   }
 
   if (!apiKeyName) {
@@ -329,7 +369,7 @@ async function postSigned<T>(
     'X-API-Nonce': signed.nonce
   };
 
-  if (context.apiKeyName && context.apiKeyName !== 'default') {
+  if (context.apiKeyName) {
     signedHeaders['X-API-Key'] = context.apiKeyName;
   }
 

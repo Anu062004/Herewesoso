@@ -124,7 +124,7 @@ interface DailySummaryInput {
 // calls `getLastReceipt('narrative:DeFi')` right after `generateNarrativeMemo`
 // to retrieve this and stash it in Supabase next to the memo content.
 
-export interface SkillMintReceiptMeta {
+interface SkillMintReceiptMeta {
   /** Permanent rootHash anchored on 0G Storage. The audit primary key. */
   receiptRootHash: string;
   /** 0G mainnet tx hash from the x402 settlement (the payment proof). */
