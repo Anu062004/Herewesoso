@@ -300,15 +300,35 @@ export async function triggerCycle() {
 }
 
 export async function queueDashboardAction(payload: {
-  action: 'REDUCE_LEVERAGE' | 'CLOSE_POSITION' | 'QUEUE_ACTION';
+  action: 'REDUCE_LEVERAGE' | 'CLOSE_POSITION' | 'CANCEL_ORDER' | 'QUEUE_ACTION';
   symbol: string;
   currentLeverage?: number;
   targetLeverage?: number;
+  orderId?: string | number;
+  clOrdId?: string;
+  cancels?: Array<{ orderId?: string | number; clOrdId?: string }>;
 }) {
   return requestJson<DashboardActionResponse>('/api/actions', {
     method: 'POST',
     body: JSON.stringify(payload)
   });
+}
+
+export async function cancelOrder(payload: {
+  symbol: string;
+  orderId?: string | number;
+  clOrdId?: string;
+  cancels?: Array<{ orderId?: string | number; clOrdId?: string }>;
+}) {
+  return queueDashboardAction({
+    action: 'CANCEL_ORDER',
+    ...payload
+  });
+}
+
+export async function fetchSodexOpenOrders(symbol?: string) {
+  const suffix = symbol ? `?symbol=${encodeURIComponent(symbol)}` : '';
+  return requestJson<unknown>(`/api/sodex/orders${suffix}`);
 }
 
 export async function sendTelegramTest() {

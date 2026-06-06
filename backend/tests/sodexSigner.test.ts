@@ -27,6 +27,13 @@ function sampleOrderRequest() {
   };
 }
 
+function sampleCancelRequest() {
+  return {
+    accountID: 12345,
+    cancels: [{ symbolID: 1, orderID: 67890 }]
+  };
+}
+
 test('computePayloadHash hashes compact SoDEX action JSON', () => {
   const params = sampleOrderRequest();
   const expected = ethers.keccak256(
@@ -34,6 +41,30 @@ test('computePayloadHash hashes compact SoDEX action JSON', () => {
   );
 
   assert.equal(sodexSigner.computePayloadHash('newOrder', params), expected);
+});
+
+test('computePayloadHash hashes compact cancelOrder action JSON', () => {
+  const params = sampleCancelRequest();
+  const expected = ethers.keccak256(
+    ethers.toUtf8Bytes(JSON.stringify({ type: 'cancelOrder', params }))
+  );
+
+  assert.equal(sodexSigner.computePayloadHash('cancelOrder', params), expected);
+});
+
+test('signSodexAction signs cancelOrder actions for DELETE /trade/orders', async () => {
+  const wallet = sodexSigner.createWallet(PRIVATE_KEY);
+  const signed = await sodexSigner.signSodexAction({
+    privateKey: PRIVATE_KEY,
+    marketType: 'perps',
+    actionType: 'cancelOrder',
+    params: sampleCancelRequest(),
+    baseUrl: 'https://testnet-gw.sodex.dev/api/v1/perps',
+    nonce: 1760373925001n
+  });
+
+  assert.equal(signed.domain.name, 'futures');
+  assert.equal(sodexSigner.recoverSodexSigner(signed), wallet.address);
 });
 
 test('signSodexAction creates recoverable EIP-712 signature with SoDEX header prefix', async () => {

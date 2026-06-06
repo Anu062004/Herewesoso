@@ -87,6 +87,24 @@ router.get('/orderbook/:symbol', async (req: Request, res: Response) => {
   }
 });
 
+router.get('/orders', async (req: Request, res: Response) => {
+  const wallet = getWallet(req);
+
+  if (!wallet) {
+    return res.status(400).json({ error: 'No wallet address provided.' });
+  }
+
+  const symbol = typeof req.query.symbol === 'string' ? req.query.symbol.trim().toUpperCase() : undefined;
+
+  try {
+    const orders = await sodex.getOpenOrders(wallet, symbol || undefined);
+    return res.json(orders);
+  } catch (error) {
+    console.error('[SoDEX Route] /orders error:', getErrorMessage(error));
+    return res.status(500).json({ error: getErrorMessage(error) });
+  }
+});
+
 router.get('/klines/:symbol', async (req: Request, res: Response) => {
   const symbol = parseSymbol(req.params.symbol);
 

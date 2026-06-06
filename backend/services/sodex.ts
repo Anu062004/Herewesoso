@@ -197,6 +197,14 @@ const sodex = {
     return get(perpsBaseUrl(), '/markets/symbols');
   },
 
+  async getOpenOrders(walletAddress: string, symbol?: string) {
+    if (!walletAddress) {
+      throw new Error('walletAddress is required for getOpenOrders().');
+    }
+
+    return get(perpsBaseUrl(), `/accounts/${walletAddress}/orders`, symbol ? { symbol } : undefined);
+  },
+
   async getSpotMarkets() {
     return get(spotBaseUrl(), '/markets');
   },

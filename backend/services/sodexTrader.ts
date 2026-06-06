@@ -13,7 +13,7 @@ const client = axios.create({
   }
 });
 
-type SignedActionType = 'newOrder' | 'updateLeverage';
+type SignedActionType = 'newOrder' | 'cancelOrder' | 'updateLeverage';
 
 type TradingContext = {
   accountID: number;
@@ -96,6 +96,19 @@ type UpdateLeverageRequest = {
   leverage: number;
   marginMode: number;
 };
+
+type CancelItemPayload = {
+  symbolID: number;
+  orderID?: number;
+  clOrdID?: string;
+};
+
+type CancelOrderRequest = {
+  accountID: number;
+  cancels: CancelItemPayload[];
+};
+
+type SignedRequestBody = NewOrderRequest | UpdateLeverageRequest | CancelOrderRequest;
 
 function normalizeAddress(value: string): string {
   return value.trim().toLowerCase();
@@ -360,7 +373,8 @@ async function postSigned<T>(
   context: TradingContext,
   actionType: SignedActionType,
   endpoint: string,
-  body: NewOrderRequest | UpdateLeverageRequest
+  body: SignedRequestBody,
+  method: 'POST' | 'DELETE' = 'POST'
 ): Promise<PerpsRestResponse<T>> {
   const signed = await sodexSigner.signSodexAction({
     privateKey: wallet.privateKey,
@@ -383,7 +397,7 @@ async function postSigned<T>(
 
   const requestBody = JSON.stringify(body);
   const response = await fetch(`${PERPS_BASE}${endpoint}`, {
-    method: 'POST',
+    method,
     headers: signedHeaders,
     body: requestBody
   });
@@ -520,6 +534,22 @@ export interface PlaceOrderParams {
   reduceOnly?: boolean;
 }
 
+export interface CancelOrderItem {
+  orderId?: string | number;
+  clOrdId?: string;
+}
+
+export interface CancelOrderParams {
+  symbol: string;
+  orderId?: string | number;
+  clOrdId?: string;
+}
+
+export interface CancelOrdersParams {
+  symbol: string;
+  cancels: CancelOrderItem[];
+}
+
 export interface OrderResult {
   success: boolean;
   orderId?: string;
@@ -642,6 +672,106 @@ export async function placeOrder(params: PlaceOrderParams): Promise<OrderResult>
   }
 }
 
+function buildCancelItem(symbolID: number, item: CancelOrderItem): CancelItemPayload {
+  const orderId =
+    item.orderId !== undefined && item.orderId !== null && String(item.orderId).trim()
+      ? String(item.orderId).trim()
+      : '';
+  const clOrdId = typeof item.clOrdId === 'string' ? item.clOrdId.trim() : '';
+
+  if (Boolean(orderId) === Boolean(clOrdId)) {
+    throw new Error('Provide either orderId or clOrdId for each cancel item, but not both.');
+  }
+
+  if (orderId) {
+    return {
+      symbolID,
+      orderID: parseRequiredNumber(orderId, 'order ID')
+    };
+  }
+
+  return {
+    symbolID,
+    clOrdID: clOrdId
+  };
+}
+
+export async function cancelOrders(params: CancelOrdersParams): Promise<OrderResult> {
+  const key = loadKey();
+  if (!key) {
+    return { success: false, message: 'No SoDEX API signing key set. Use SODEX_API_PRIVATE_KEY or /setkey to add one.' };
+  }
+
+  if (!Array.isArray(params.cancels) || params.cancels.length === 0) {
+    return { success: false, message: 'At least one order must be provided to cancel.' };
+  }
+
+  if (params.cancels.length > 100) {
+    return { success: false, message: 'SoDEX supports at most 100 cancels per request.' };
+  }
+
+  const wallet = sodexSigner.createWallet(key);
+
+  try {
+    const context = await resolveTradingContext(wallet, params.symbol);
+    const cancels = params.cancels.map((item) => buildCancelItem(context.symbolID, item));
+    const body: CancelOrderRequest = {
+      accountID: context.accountID,
+      cancels
+    };
+
+    const response = await postSigned<
+      Array<{ code?: number; orderID?: number | string; error?: string; clOrdID?: string }>
+    >(wallet, context, 'cancelOrder', '/trade/orders', body, 'DELETE');
+
+    if (response.code === 0) {
+      const results = Array.isArray(response.data) ? response.data : [];
+      const failures = results.filter((entry) => typeof entry.code === 'number' && entry.code !== 0);
+
+      if (failures.length > 0) {
+        const firstFailure = failures[0];
+        return {
+          success: false,
+          message: firstFailure.error || `SoDEX rejected cancel for ${params.symbol}.`,
+          raw: response
+        };
+      }
+
+      const cancelledIds = results
+        .map((entry) => (entry.orderID ? String(entry.orderID) : entry.clOrdID || null))
+        .filter(Boolean);
+
+      return {
+        success: true,
+        message:
+          cancelledIds.length === 1
+            ? `Cancelled order ${cancelledIds[0]} on ${params.symbol}`
+            : `Cancelled ${cancelledIds.length} orders on ${params.symbol}`,
+        raw: response
+      };
+    }
+
+    return {
+      success: false,
+      message: response.error || `SoDEX rejected the cancel request for ${params.symbol}.`,
+      raw: response
+    };
+  } catch (error: any) {
+    return {
+      success: false,
+      message: extractErrorMessage(error),
+      raw: error?.response?.data
+    };
+  }
+}
+
+export async function cancelOrder(params: CancelOrderParams): Promise<OrderResult> {
+  return cancelOrders({
+    symbol: params.symbol,
+    cancels: [{ orderId: params.orderId, clOrdId: params.clOrdId }]
+  });
+}
+
 export async function reduceLeverage(symbol: string, newLeverage: number): Promise<OrderResult> {
   const key = loadKey();
   if (!key) return { success: false, message: 'No SoDEX API signing key set. Use SODEX_API_PRIVATE_KEY or /setkey to add one.' };
@@ -668,6 +798,8 @@ export const sodexTrader = {
   getWalletAddress,
   getAccountAddress,
   placeOrder,
+  cancelOrder,
+  cancelOrders,
   closePosition,
   reduceLeverage
 };
