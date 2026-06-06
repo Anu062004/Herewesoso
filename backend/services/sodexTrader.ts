@@ -266,7 +266,7 @@ async function resolveTradingContext(wallet: SodexWallet, symbol: string): Promi
   if (apiKeyName || !signerMatchesAccount) {
     try {
       const apiKeys = await fetchAccountApiKeys(accountAddress);
-      apiKeyName = resolveApiKeyNameFromList(apiKeys, wallet.address, envApiKeyName);
+      apiKeyName = resolveApiKeyNameFromList(apiKeys, wallet.address, apiKeyName || null) || apiKeyName;
     } catch (error: any) {
       if (!apiKeyName) {
         throw error;
@@ -381,11 +381,26 @@ async function postSigned<T>(
     signedHeaders['X-API-Key'] = context.apiKeyName;
   }
 
-  const response = await client.post<PerpsRestResponse<T>>(`${PERPS_BASE}${endpoint}`, body, {
-    headers: signedHeaders
+  const requestBody = JSON.stringify(body);
+  const response = await fetch(`${PERPS_BASE}${endpoint}`, {
+    method: 'POST',
+    headers: signedHeaders,
+    body: requestBody
   });
 
-  return response.data;
+  const text = await response.text();
+  const responseData = (text ? JSON.parse(text) : {}) as PerpsRestResponse<T>;
+
+  if (!response.ok) {
+    const error: any = new Error(responseData.error || response.statusText || 'SoDEX signed request failed.');
+    error.response = {
+      status: response.status,
+      data: responseData
+    };
+    throw error;
+  }
+
+  return responseData;
 }
 
 function buildOrderPayload(params: PlaceOrderParams): SignedOrderPayload {
