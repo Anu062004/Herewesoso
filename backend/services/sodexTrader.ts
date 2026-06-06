@@ -374,7 +374,8 @@ async function postSigned<T>(
     'Content-Type': 'application/json',
     Accept: 'application/json',
     'X-API-Sign': signed.typedSignature,
-    'X-API-Nonce': signed.nonce
+    'X-API-Nonce': signed.nonce,
+    'X-API-Chain': String(signed.domain.chainId)
   };
 
   if (context.apiKeyName) {
