@@ -194,7 +194,7 @@ function configuredAccountAddress(fallbackAddress: string): string {
 
 function configuredApiKeyName(): string | null {
   const configured = trimToNull(process.env.SODEX_API_KEY_NAME) || trimToNull(process.env.SODEX_KEY_NAME);
-  return configured && configured.toLowerCase() !== 'default' ? configured : null;
+  return configured;
 }
 
 async function fetchAccountApiKeys(accountAddress: string): Promise<PerpsApiKey[]> {
@@ -219,13 +219,12 @@ function resolveApiKeyNameFromList(
 
     if (
       configuredKey &&
-      configuredKey.name?.toLowerCase() !== 'default' &&
       (!configuredKey.publicKey || configuredKey === matchingSignerKey)
     ) {
       return configuredName;
     }
 
-    if (matchingSignerKey?.name && matchingSignerKey.name.toLowerCase() !== 'default') {
+    if (matchingSignerKey?.name) {
       console.warn(
         `[SoDEX Trader] Configured API key "${configuredName}" was not registered for signer ${signerAddress}. ` +
           `Using registered key "${matchingSignerKey.name}" instead.`
@@ -236,7 +235,7 @@ function resolveApiKeyNameFromList(
     return configuredName;
   }
 
-  return matchingSignerKey?.name?.toLowerCase() === 'default' ? undefined : matchingSignerKey?.name;
+  return matchingSignerKey?.name;
 }
 
 async function resolveTradingContext(wallet: SodexWallet, symbol: string): Promise<TradingContext> {
@@ -262,7 +261,7 @@ async function resolveTradingContext(wallet: SodexWallet, symbol: string): Promi
     throw new Error(`Could not resolve SoDEX symbol ID for ${symbol}.`);
   }
 
-  let apiKeyName = envApiKeyName || undefined;
+  let apiKeyName = envApiKeyName || (signerMatchesAccount ? 'default' : undefined);
 
   if (apiKeyName || !signerMatchesAccount) {
     try {
