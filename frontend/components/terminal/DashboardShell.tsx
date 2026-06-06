@@ -96,8 +96,8 @@ function TapeItem({
   }[tone];
 
   return (
-    <span className="inline-flex shrink-0 items-center gap-2 tabular-nums">
-      <span className="text-white/58">{label}</span>
+    <span className="inline-flex shrink-0 items-center gap-2 whitespace-nowrap tabular-nums">
+      <span className="text-[var(--text-3)]">{label}</span>
       <span className={cx('font-medium', toneClass)}>{value}</span>
     </span>
   );
@@ -145,9 +145,9 @@ export default function DashboardShell({ children }: DashboardShellProps) {
   return (
     <>
       <div className="min-h-screen bg-[var(--bg-app)]">
-        <div className="sticky top-0 z-50 border-b border-[var(--border)] bg-[var(--bg-surface)]/95 shadow-[0_1px_0_rgba(255,255,255,0.04)] backdrop-blur">
-          <div className="border-b border-[var(--border)] bg-[#050505] text-[12px]">
-            <div className="mx-auto flex h-9 max-w-[1520px] items-center gap-5 overflow-x-auto px-4 sm:px-6">
+        <div className="sticky top-0 z-[var(--z-sticky)] border-b border-[var(--border)] bg-[var(--bg-surface)]/95 shadow-[0_1px_0_rgba(255,255,255,0.04)] backdrop-blur">
+          <div className="border-b border-[var(--border)] bg-[var(--bg-app)] text-[12px]">
+            <div className="mx-auto flex h-9 max-w-[1520px] items-center gap-6 overflow-x-auto px-4 sm:px-6">
               <TapeItem label="Terminal" value="Gold and Grith Live" tone="amber" />
               <TapeItem label="Run" value={runStatus === 'completed' ? 'Success' : runStatus === 'failed' ? 'Failed' : runStatus === 'running' ? 'Running' : 'Idle'} tone={runStatus === 'failed' ? 'red' : runStatus === 'running' ? 'blue' : 'green'} />
               <TapeItem label="Narrative" value={narrativeSuccess ? 'Scanner OK' : 'Check'} tone={narrativeSuccess ? 'green' : 'amber'} />
@@ -157,9 +157,9 @@ export default function DashboardShell({ children }: DashboardShellProps) {
             </div>
           </div>
 
-          <header className="mx-auto flex min-h-[66px] max-w-[1520px] flex-wrap items-center gap-3 px-4 py-3 sm:px-6">
-            <Link href="/dashboard" className="flex min-w-0 max-w-[230px] flex-1 items-center gap-3 sm:min-w-[240px] sm:max-w-none sm:flex-none">
-              <span className="flex h-9 w-9 items-center justify-center rounded-md border border-[rgba(255,107,0,0.5)] bg-[var(--brand)] text-[13px] font-bold text-black shadow-[0_0_0_1px_rgba(255,255,255,0.08)_inset]">
+          <header className="mx-auto flex min-h-[68px] max-w-[1520px] flex-wrap items-center gap-3 px-4 py-3.5 sm:px-6">
+            <Link href="/dashboard" className="flex min-w-0 max-w-[230px] flex-1 items-center gap-3 transition-opacity hover:opacity-90 sm:min-w-[240px] sm:max-w-none sm:flex-none">
+              <span className="flex h-9 w-9 items-center justify-center rounded-[var(--radius-md)] border border-[rgba(255,107,0,0.5)] bg-[var(--brand)] text-[13px] font-bold text-black shadow-[0_0_0_1px_rgba(255,255,255,0.08)_inset]">
                 G
               </span>
               <span className="min-w-0">
@@ -174,7 +174,7 @@ export default function DashboardShell({ children }: DashboardShellProps) {
                 value={searchTerm}
                 onChange={(event) => setSearchTerm(event.target.value)}
                 placeholder="Search sector / symbol / macro / alert"
-                className="h-10 w-full rounded-md border border-[var(--border)] bg-[var(--bg-panel)] pl-10 pr-3 text-[13px] text-[var(--text-1)] outline-none transition placeholder:text-[var(--text-3)] focus:border-[var(--brand)] focus:bg-[var(--bg-elevated)]"
+                className="h-10 w-full rounded-[var(--radius-md)] border border-[var(--border)] bg-[var(--bg-panel)] pl-10 pr-3 text-[13px] text-[var(--text-1)] outline-none transition-[border-color,background,box-shadow] duration-[var(--dur-short)] placeholder:text-[var(--text-3)] focus:border-[var(--brand)] focus:bg-[var(--bg-elevated)] focus:shadow-[0_0_0_3px_rgba(255,107,0,0.12)]"
               />
             </form>
 
@@ -183,14 +183,14 @@ export default function DashboardShell({ children }: DashboardShellProps) {
                 <button
                   type="button"
                   onClick={() => setTelegramOpen((open) => !open)}
-                  className="inline-flex h-9 items-center gap-2 rounded-md border border-[var(--border)] bg-[var(--bg-elevated)] px-3 text-[13px] text-[var(--text-2)] transition hover:border-[var(--border-hover)] hover:text-[var(--text-1)]"
+                  className="inline-flex h-9 items-center gap-2 rounded-[var(--radius-md)] border border-[var(--border)] bg-[var(--bg-elevated)] px-3 text-[13px] text-[var(--text-2)] transition-[border-color,color,background] duration-[var(--dur-short)] hover:border-[var(--border-hover)] hover:text-[var(--text-1)]"
                 >
                   <Dot tone={telegramTone} />
                   <span className="hidden sm:inline">{health.data?.telegram.connected ? 'Telegram Active' : 'Telegram Off'}</span>
                   <TelegramIcon className="h-4 w-4 text-[var(--cyan)] sm:hidden" />
                 </button>
                 {telegramOpen ? (
-                  <div className="absolute right-0 top-[calc(100%+10px)] w-[280px] rounded-lg border border-[var(--border)] bg-[var(--bg-elevated)] p-4 shadow-[var(--shadow-md)]">
+                  <div className="absolute right-0 top-[calc(100%+10px)] z-[var(--z-dropdown)] w-[280px] rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--bg-elevated)] p-4 shadow-[var(--shadow-md)]">
                     <div className="flex items-center gap-2 text-[13px] font-semibold text-[var(--text-1)]">
                       <TelegramIcon className="h-4 w-4 text-[var(--cyan)]" />
                       Telegram Status
@@ -262,7 +262,7 @@ export default function DashboardShell({ children }: DashboardShellProps) {
           </header>
 
           <nav className="border-t border-[var(--border)] bg-[var(--bg-surface)]">
-            <div className="mx-auto flex max-w-[1520px] items-center gap-1 overflow-x-auto px-4 sm:px-6">
+            <div className="mx-auto flex max-w-[1520px] items-center gap-0.5 overflow-x-auto px-3 py-1.5 sm:px-5">
               {NAV_ITEMS.map((item) => {
                 const active = isActive(pathname, item.href);
 
@@ -271,14 +271,15 @@ export default function DashboardShell({ children }: DashboardShellProps) {
                     key={item.href}
                     href={item.href}
                     className={cx(
-                      'relative inline-flex h-11 shrink-0 items-center gap-2 border-b-2 px-3 text-[13px] font-medium transition',
+                      'relative inline-flex h-10 shrink-0 items-center gap-2 rounded-[var(--radius-md)] px-3 text-[13px] font-medium transition-[color,background] duration-[var(--dur-short)]',
                       active
-                        ? 'border-[var(--brand)] text-[var(--text-1)]'
-                        : 'border-transparent text-[var(--text-2)] hover:border-[var(--border-hover)] hover:text-[var(--text-1)]'
+                        ? 'bg-[var(--brand-soft)] text-[var(--text-1)]'
+                        : 'text-[var(--text-2)] hover:bg-[rgba(255,255,255,0.04)] hover:text-[var(--text-1)]'
                     )}
                   >
                     <span className={active ? 'text-[var(--brand)]' : 'text-[var(--text-3)]'}>{item.icon}</span>
-                    {item.label}
+                    <span className="whitespace-nowrap">{item.label}</span>
+                    {active ? <span className="absolute inset-x-3 -bottom-1.5 h-0.5 rounded-full bg-[var(--brand)]" /> : null}
                   </Link>
                 );
               })}
@@ -286,7 +287,7 @@ export default function DashboardShell({ children }: DashboardShellProps) {
           </nav>
         </div>
 
-        <main className="mx-auto max-w-[1520px] px-4 py-5 sm:px-6">{children}</main>
+        <main className="mx-auto max-w-[1520px] px-4 py-6 sm:px-6">{children}</main>
       </div>
 
       <ConfirmationModal

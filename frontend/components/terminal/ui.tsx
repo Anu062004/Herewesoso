@@ -20,12 +20,12 @@ export function PageHeader({
   right?: ReactNode;
 }) {
   return (
-    <div className="flex flex-col gap-3 border-b border-[var(--border)] pb-4 md:flex-row md:items-end md:justify-between">
+    <div className="flex flex-col gap-4 border-b border-[var(--border)] pb-5 md:flex-row md:items-end md:justify-between">
       <div className="min-w-0">
-        <h1 className="font-headline text-[24px] font-semibold leading-tight text-[var(--text-1)]">{title}</h1>
-        {description ? <p className="mt-1 max-w-xs text-[13px] leading-5 text-[var(--text-2)] sm:max-w-3xl">{description}</p> : null}
+        <h1 className="font-headline text-[26px] font-semibold leading-tight tracking-[-0.03em] text-[var(--text-1)] sm:text-[28px]">{title}</h1>
+        {description ? <p className="mt-2 max-w-xs text-[14px] leading-6 text-[var(--text-2)] sm:max-w-3xl">{description}</p> : null}
       </div>
-      {right ? <div className="flex items-center gap-3">{right}</div> : null}
+      {right ? <div className="flex shrink-0 items-center gap-3">{right}</div> : null}
     </div>
   );
 }
@@ -38,7 +38,12 @@ export function Panel({
   className?: string;
 }) {
   return (
-    <section className={cx('overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--bg-card)] shadow-[var(--shadow-sm)]', className)}>
+    <section
+      className={cx(
+        'overflow-hidden rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--bg-card)] shadow-[var(--shadow-sm)] transition-[border-color,box-shadow] duration-[var(--dur-short)] hover:border-[var(--border-hover)]',
+        className
+      )}
+    >
       {children}
     </section>
   );
@@ -65,7 +70,7 @@ export function PanelHeader({
     : 'transparent';
 
   return (
-    <div className="flex min-h-12 items-center justify-between gap-3 border-b border-[var(--border)] bg-[var(--bg-panel)] px-4 py-3">
+    <div className="flex min-h-[52px] items-center justify-between gap-3 border-b border-[var(--border)] bg-[linear-gradient(180deg,rgba(255,255,255,0.02),transparent),var(--bg-panel)] px-4 py-3">
       <div className="min-w-0">
         <div className="flex items-center gap-3">
           {accent ? <span className="h-4 w-[3px] rounded-full" style={{ backgroundColor: accentColor }} /> : null}
@@ -158,7 +163,8 @@ export function Button({
       onClick={onClick}
       disabled={disabled}
       className={cx(
-        'inline-flex h-9 items-center justify-center rounded-md border px-4 text-[13px] font-medium transition disabled:cursor-not-allowed disabled:opacity-50',
+        'inline-flex h-9 items-center justify-center rounded-[var(--radius-md)] border px-4 text-[13px] font-medium transition-[transform,filter,border-color,color,background,box-shadow] duration-[var(--dur-short)] ease-[var(--ease-out)] disabled:cursor-not-allowed disabled:opacity-50',
+        tone === 'primary' && 'hover:-translate-y-px hover:brightness-110 active:translate-y-0',
         styles,
         className
       )}
@@ -253,10 +259,10 @@ export function MetricCard({
   }[tone];
 
   return (
-    <Panel className="p-4">
-      <div className="text-[12px] font-medium text-[var(--text-2)]">{label}</div>
-      <div className={cx('mt-2 text-[26px] font-semibold leading-none tabular-nums', color)}>{value}</div>
-      {supporting ? <div className="mt-3 text-[12px] text-[var(--text-2)]">{supporting}</div> : null}
+    <Panel className="p-5">
+      <div className="text-[12px] font-medium text-[var(--text-3)]">{label}</div>
+      <div className={cx('mt-2.5 font-headline text-[28px] font-semibold leading-none tracking-[-0.02em] tabular-nums', color)}>{value}</div>
+      {supporting ? <div className="mt-3 text-[12px] leading-5 text-[var(--text-2)]">{supporting}</div> : null}
     </Panel>
   );
 }

@@ -1,3 +1,8 @@
+/* Hallmark · macrostructure: Marquee Hero · genre: atmospheric · design-system: preserved-palette
+ * tone: technical · anchor hue: warm-orange · theme: locked (user palette)
+ * pre-emit critique: P4 H5 E4 S5 R4 V4
+ */
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -6,6 +11,7 @@
   --font-headline: Bahnschrift, Aptos Display, Aptos, Segoe UI, sans-serif;
   --font-body: Bahnschrift, Aptos, Segoe UI, sans-serif;
   --font-mono: Cascadia Mono, JetBrains Mono, SFMono-Regular, Consolas, monospace;
+
   --bg-app: #050505;
   --bg-surface: #080808;
   --bg-panel: #101010;
@@ -26,6 +32,35 @@
   --brand-soft: rgba(255, 107, 0, 0.12);
   --shadow-sm: 0 1px 0 rgba(255, 255, 255, 0.04), 0 12px 30px rgba(0, 0, 0, 0.24);
   --shadow-md: 0 20px 50px rgba(0, 0, 0, 0.52);
+  --shadow-whisper: 0 1px 2px rgba(0, 0, 0, 0.32);
+  --shadow-lift: 0 14px 40px rgba(0, 0, 0, 0.45);
+
+  --space-3xs: 0.125rem;
+  --space-2xs: 0.25rem;
+  --space-xs: 0.5rem;
+  --space-sm: 0.75rem;
+  --space-md: 1rem;
+  --space-lg: 1.5rem;
+  --space-xl: 2.5rem;
+  --space-2xl: 4rem;
+  --space-3xl: 6rem;
+
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-xl: 20px;
+  --radius-pill: 999px;
+
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-in: cubic-bezier(0.7, 0, 0.84, 0);
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+  --dur-short: 180ms;
+  --dur-medium: 280ms;
+
+  --z-raised: 10;
+  --z-dropdown: 100;
+  --z-sticky: 200;
+  --z-modal: 400;
 }
 
 * {
@@ -37,6 +72,7 @@ html {
   background: var(--bg-app);
   color: var(--text-1);
   scroll-behavior: smooth;
+  overflow-x: clip;
 }
 
 body {
@@ -49,8 +85,9 @@ body {
   background-size: auto, 56px 56px, 56px 56px;
   color: var(--text-1);
   font-family: var(--font-body);
-  overflow-x: hidden;
+  overflow-x: clip;
   text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
 }
 
 a {
@@ -108,4 +145,104 @@ td {
 
 ::-webkit-scrollbar-thumb:hover {
   background: #444444;
+}
+
+@layer components {
+  .hm-surface {
+    border: 1px solid var(--border);
+    background: var(--bg-card);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-sm);
+  }
+
+  .hm-surface-elevated {
+    border: 1px solid var(--border-hover);
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.03) 0%, transparent 42%), var(--bg-elevated);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-sm);
+  }
+
+  .hm-btn-primary {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid rgba(255, 107, 0, 0.62);
+    background: var(--brand);
+    color: #000;
+    font-weight: 600;
+    border-radius: var(--radius-md);
+    transition:
+      transform var(--dur-short) var(--ease-out),
+      filter var(--dur-short) var(--ease-out),
+      box-shadow var(--dur-short) var(--ease-out);
+  }
+
+  .hm-btn-primary:hover {
+    filter: brightness(1.08);
+    transform: translateY(-1.5px);
+    box-shadow: 0 8px 24px rgba(255, 107, 0, 0.22);
+  }
+
+  .hm-btn-primary:active {
+    transform: translateY(0);
+    transition-duration: 60ms;
+  }
+
+  .hm-btn-ghost {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid var(--border);
+    background: rgba(255, 255, 255, 0.04);
+    color: var(--text-2);
+    font-weight: 500;
+    border-radius: var(--radius-md);
+    transition:
+      border-color var(--dur-short) var(--ease-out),
+      color var(--dur-short) var(--ease-out),
+      background var(--dur-short) var(--ease-out);
+  }
+
+  .hm-btn-ghost:hover {
+    border-color: var(--border-hover);
+    color: var(--text-1);
+    background: rgba(255, 255, 255, 0.06);
+  }
+
+  .hm-section-rule {
+    height: 1px;
+    background: linear-gradient(90deg, transparent, var(--border) 12%, var(--border) 88%, transparent);
+  }
+
+  .hm-kicker {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-xs);
+    padding: var(--space-xs) var(--space-sm);
+    border: 1px solid rgba(22, 199, 132, 0.24);
+    border-radius: var(--radius-pill);
+    background: rgba(22, 199, 132, 0.08);
+    font-size: 12px;
+    color: var(--green);
+  }
+
+  .hm-display {
+    font-family: var(--font-headline);
+    font-style: normal;
+    letter-spacing: -0.045em;
+    line-height: 0.95;
+    overflow-wrap: anywhere;
+    min-width: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+
+  .hm-btn-primary:hover,
+  .hm-btn-primary:active {
+    transform: none;
+  }
 }
