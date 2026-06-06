@@ -31,12 +31,10 @@ export function ConfirmationModal({
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!open) {
-      setSubmitting(false);
-      setResult(null);
-      setError(null);
-    }
-  }, [open]);
+    setSubmitting(false);
+    setResult(null);
+    setError(null);
+  }, [open, title, description, confirmLabel]);
 
   if (!open) {
     return null;

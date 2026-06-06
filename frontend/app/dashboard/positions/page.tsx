@@ -37,6 +37,10 @@ type PendingAction =
     }
   | null;
 
+function isNoOpenPositionMessage(message: string | undefined) {
+  return Boolean(message?.toLowerCase().includes('no open position found'));
+}
+
 export default function PositionsPage() {
   const positions = usePollingResource({ fetcher: fetchPositions, intervalMs: 30000 });
   const [pendingAction, setPendingAction] = useState<PendingAction>(null);
@@ -180,7 +184,7 @@ export default function PositionsPage() {
             : `This will submit a reduce-only market close for ${pendingAction?.symbol} on SoDEX testnet.`
         }
         confirmLabel={pendingAction?.action === 'REDUCE_LEVERAGE' ? 'Reduce' : 'Close'}
-        disclaimer="Testnet execution - requires a configured SoDEX API signing key"
+        disclaimer="Testnet execution - signs through the configured SoDEX key"
         onClose={() => setPendingAction(null)}
         onConfirm={async () => {
           if (!pendingAction) {
@@ -193,6 +197,15 @@ export default function PositionsPage() {
             currentLeverage: pendingAction.currentLeverage,
             targetLeverage: pendingAction.targetLeverage
           });
+
+          if (!result.queued && isNoOpenPositionMessage(result.message)) {
+            await positions.refresh();
+
+            return {
+              title: 'Position already closed',
+              message: result.message
+            };
+          }
 
           if (!result.queued) {
             throw new Error(result.message);
