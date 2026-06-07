@@ -36,6 +36,45 @@ const operatorViews = [
   }
 ];
 
+const productFeatures = [
+  {
+    href: '/dashboard/signals',
+    label: 'SoSoValue',
+    title: 'ETF Flow',
+    copy: 'Seven-day institutional flow is scored alongside news and macro pressure.',
+    visual: 'flow'
+  },
+  {
+    href: '/dashboard/scanner',
+    label: 'Market structure',
+    title: 'SSI Indexes',
+    copy: 'Follow sector baskets and the narratives moving their constituents.',
+    visual: 'index'
+  },
+  {
+    href: '/dashboard/sodex/klines',
+    label: 'SoDEX Testnet',
+    title: 'Perps Charts',
+    copy: 'Inspect 1m to 1d candles without leaving the risk terminal.',
+    visual: 'chart',
+    featured: true
+  },
+  {
+    href: '/dashboard/sodex/orderbook',
+    label: 'Live depth',
+    title: 'Orderbook',
+    copy: 'Read bids, asks, spread, and size on a five-second refresh cycle.',
+    visual: 'book'
+  },
+  {
+    href: '/dashboard/shield',
+    label: 'Position protection',
+    title: 'Liquidation Shield',
+    copy: 'Combine leverage, liquidation distance, ETF flow, and macro-event pressure.',
+    visual: 'risk'
+  }
+];
+
 function ArrowIcon() {
   return (
     <svg viewBox="0 0 20 20" aria-hidden="true">
@@ -78,6 +117,60 @@ function BellIcon() {
   );
 }
 
+function ProductVisual({ type }: { type: string }) {
+  if (type === 'flow') {
+    return (
+      <div className={styles.flowVisual} aria-hidden="true">
+        {[34, 56, 43, 78, 61, 88, 72].map((height, index) => (
+          <span key={height + index} style={{ height: `${height}%` }} />
+        ))}
+      </div>
+    );
+  }
+
+  if (type === 'index') {
+    return (
+      <div className={styles.indexVisual} aria-hidden="true">
+        <span>DeFi</span>
+        <span>AI</span>
+        <span>RWA</span>
+        <span>L2</span>
+      </div>
+    );
+  }
+
+  if (type === 'book') {
+    return (
+      <div className={styles.bookVisual} aria-hidden="true">
+        <span><i />48.2K <b>104,820</b></span>
+        <span><i />31.7K <b>104,806</b></span>
+        <em>spread</em>
+        <span><i />39.4K <b>104,774</b></span>
+        <span><i />52.1K <b>104,761</b></span>
+      </div>
+    );
+  }
+
+  if (type === 'risk') {
+    return (
+      <div className={styles.riskVisual} aria-hidden="true">
+        <span><i>Position</i><b>64</b></span>
+        <span><i>Macro</i><b>38</b></span>
+        <span><i>Flow</i><b>72</b></span>
+        <strong>EIP-712 guarded action</strong>
+      </div>
+    );
+  }
+
+  return (
+    <svg className={styles.chartVisual} viewBox="0 0 360 118" preserveAspectRatio="none" aria-hidden="true">
+      <path className={styles.chartGrid} d="M0 24h360M0 59h360M0 94h360" />
+      <path className={styles.chartArea} d="M0 98 34 87 68 92 102 59 136 70 170 43 204 52 238 30 272 42 306 18 340 26 360 10v108H0Z" />
+      <path className={styles.chartLine} d="M0 98 34 87 68 92 102 59 136 70 170 43 204 52 238 30 272 42 306 18 340 26 360 10" />
+    </svg>
+  );
+}
+
 function MapNode({
   href,
   className,
@@ -113,7 +206,12 @@ export default function HomePage() {
     <main className={styles.page}>
       <header className={styles.header}>
         <Link href="/" className={styles.wordmark} aria-label="Gold and Grith home">
-          <img src="/brand/gold-and-grith-logo.svg" alt="Gold &amp; Grith" className={styles.logoImage} />
+          <img src="/brand/gold-and-grith-mark.svg" alt="" className={styles.logoMark} />
+          <span className={styles.logoType}>
+            <strong>Gold</strong>
+            <b>&amp;</b>
+            <strong>Grith</strong>
+          </span>
         </Link>
 
         <div className={styles.headerActions}>
@@ -122,7 +220,8 @@ export default function HomePage() {
             testnet connected
           </span>
           <Link href="/dashboard" className={styles.primaryAction}>
-            Open terminal
+            <span className={styles.headerCtaLong}>Open terminal</span>
+            <span className={styles.headerCtaShort}>Terminal</span>
             <ArrowIcon />
           </Link>
         </div>
@@ -135,12 +234,46 @@ export default function HomePage() {
           <p className={styles.heroLead}>
             Gold &amp; Grith turns news, ETF flow, macro events, and open-position risk into one operating surface for a crypto desk.
           </p>
+          <div className={styles.heroActions}>
+            <Link href="/dashboard" className={styles.primaryAction}>
+              Launch terminal
+              <ArrowIcon />
+            </Link>
+            <Link href="/dashboard/sodex/markets" className={styles.secondaryAction}>
+              View SoDEX markets
+            </Link>
+          </div>
         </div>
 
-        <div className={styles.legend} aria-label="System map legend">
-          <span><i className={styles.observeDot} />Observe</span>
-          <span><i className={styles.reasonDot} />Reason</span>
-          <span><i className={styles.actDot} />Act</span>
+        <div className={styles.productShowcase}>
+          <div className={styles.showcaseHeading}>
+            <span>Inside the terminal</span>
+            <strong>One desk. Four live market views.</strong>
+          </div>
+          <div className={styles.featureGrid}>
+            {productFeatures.map((feature) => (
+              <Link
+                href={feature.href}
+                key={feature.title}
+                className={`${styles.featureCard} ${feature.featured ? styles.featuredCard : ''}`}
+              >
+                <div className={styles.featureTopline}>
+                  <span>{feature.label}</span>
+                  <ArrowIcon />
+                </div>
+                <div>
+                  <h2>{feature.title}</h2>
+                  <p>{feature.copy}</p>
+                </div>
+                <ProductVisual type={feature.visual} />
+              </Link>
+            ))}
+          </div>
+          <div className={styles.legend} aria-label="System map legend">
+            <span><i className={styles.observeDot} />Observe</span>
+            <span><i className={styles.reasonDot} />Reason</span>
+            <span><i className={styles.actDot} />Act</span>
+          </div>
         </div>
       </section>
 

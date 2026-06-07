@@ -158,8 +158,13 @@ export default function DashboardShell({ children }: DashboardShellProps) {
           </div>
 
           <header className="mx-auto flex min-h-[68px] max-w-[1520px] flex-wrap items-center gap-3 px-4 py-3.5 sm:px-6">
-            <Link href="/dashboard" className="flex min-w-0 max-w-[230px] flex-1 items-center transition-opacity hover:opacity-90 sm:min-w-[240px] sm:max-w-none sm:flex-none" aria-label="Gold and Grith dashboard">
-              <img src="/brand/gold-and-grith-logo.svg" alt="Gold &amp; Grith" className="h-10 w-auto max-w-[190px]" />
+            <Link href="/dashboard" className="flex min-w-0 max-w-[230px] flex-1 items-center gap-2.5 transition-opacity hover:opacity-90 sm:min-w-[240px] sm:max-w-none sm:flex-none" aria-label="Gold and Grith dashboard">
+              <img src="/brand/gold-and-grith-mark.svg" alt="" className="h-10 w-10 shrink-0" />
+              <span className="inline-flex items-baseline gap-1.5 whitespace-nowrap font-headline text-[17px] font-bold tracking-[-0.035em] text-[var(--text-1)]">
+                <span>Gold</span>
+                <span className="text-[var(--brand)]">&amp;</span>
+                <span>Grith</span>
+              </span>
             </Link>
 
             <form onSubmit={handleSearch} className="relative order-3 min-w-full flex-1 md:order-none md:min-w-[320px]">
