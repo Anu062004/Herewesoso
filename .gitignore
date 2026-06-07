@@ -1,6 +1,11 @@
 node_modules/
-.env
-.env.local
+
+# Local environment/config files
+.env*
+
+# Local AI/tool state
+.claude/
+.hallmark/
 .next/
 coverage/
 dist/
