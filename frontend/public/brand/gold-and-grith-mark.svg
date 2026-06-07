@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title desc">
+  <title id="title">Gold &amp; Grith mark</title>
+  <desc id="desc">White angular Gold and Grith monogram with a red lower accent.</desc>
+  <path fill="#fff" d="M256 48 64 103v262l192 111v-58L115 336V148l141-41Z"/>
+  <path fill="#fff" d="M298 48v54l141 41v51h-51v-40l-90-26Z"/>
+  <path fill="#fff" d="M298 418v58l192-111V232H298v51h141v53Z"/>
+  <path fill="#fff" d="M274 157 160 190v139l82 47v-60l-30-18V196l64-18 21 7h95v-50Z"/>
+  <path fill="#ff3726" d="M248 325h61v35l-61 36Z"/>
+</svg>

@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 2048 512" role="img" aria-labelledby="title desc">
+  <title id="title">Gold &amp; Grith</title>
+  <desc id="desc">Gold and Grith product logo with a white angular monogram and red ampersand.</desc>
+  <defs>
+    <style>
+      .word { fill: #fff; font-family: "Arial Black", Impact, "Segoe UI Black", sans-serif; font-size: 178px; font-weight: 900; letter-spacing: -9px; }
+      .accent { fill: #ff3726; }
+    </style>
+  </defs>
+  <g transform="translate(108 66)">
+    <path fill="#fff" d="M180 0 0 52v246l180 104v-54L48 271V89l132-38Z"/>
+    <path fill="#fff" d="M220 0v51l132 38v48H304V99L220 75Z"/>
+    <path fill="#fff" d="M220 348v54l180-104V174H220v48h132v49Z"/>
+    <path fill="#fff" d="M188 102 82 132v130l76 44v-57l-28-16v-96l60-17 20 6h88V79Z"/>
+    <path fill="#ff3726" d="M164 254h57v33l-57 33Z"/>
+  </g>
+  <text class="word" x="640" y="324">Gold</text>
+  <text class="word accent" x="1190" y="324">&amp;</text>
+  <text class="word" x="1378" y="324">Grith</text>
+</svg>

@@ -7,7 +7,7 @@ import { usePathname, useRouter } from 'next/navigation';
 import { useMemo, useState } from 'react';
 
 import { fetchAgentRuns, fetchHealth, sendTelegramTest, triggerCycle } from '@/lib/api';
-import { formatDateTime, formatRelativeTime, initials } from '@/lib/format';
+import { formatDateTime, formatRelativeTime } from '@/lib/format';
 import { parseRunSummary } from '@/lib/terminal';
 import { usePollingResource } from '@/lib/usePollingResource';
 
@@ -158,14 +158,8 @@ export default function DashboardShell({ children }: DashboardShellProps) {
           </div>
 
           <header className="mx-auto flex min-h-[68px] max-w-[1520px] flex-wrap items-center gap-3 px-4 py-3.5 sm:px-6">
-            <Link href="/dashboard" className="flex min-w-0 max-w-[230px] flex-1 items-center gap-3 transition-opacity hover:opacity-90 sm:min-w-[240px] sm:max-w-none sm:flex-none">
-              <span className="flex h-9 w-9 items-center justify-center rounded-[var(--radius-md)] border border-[rgba(255,107,0,0.5)] bg-[var(--brand)] text-[13px] font-bold text-black shadow-[0_0_0_1px_rgba(255,255,255,0.08)_inset]">
-                G
-              </span>
-              <span className="min-w-0">
-                <span className="block truncate font-headline text-[16px] font-semibold leading-5 text-[var(--text-1)]">Gold and Grith</span>
-                <span className="block truncate text-[11px] text-[var(--text-3)]">Crypto intelligence terminal</span>
-              </span>
+            <Link href="/dashboard" className="flex min-w-0 max-w-[230px] flex-1 items-center transition-opacity hover:opacity-90 sm:min-w-[240px] sm:max-w-none sm:flex-none" aria-label="Gold and Grith dashboard">
+              <img src="/brand/gold-and-grith-logo.svg" alt="Gold &amp; Grith" className="h-10 w-auto max-w-[190px]" />
             </Link>
 
             <form onSubmit={handleSearch} className="relative order-3 min-w-full flex-1 md:order-none md:min-w-[320px]">
@@ -255,8 +249,8 @@ export default function DashboardShell({ children }: DashboardShellProps) {
                 <span className="sm:hidden">Run</span>
               </Button>
 
-              <div className="hidden h-9 w-9 items-center justify-center rounded-full border border-[var(--border)] bg-[var(--bg-panel)] text-[12px] font-semibold text-[var(--brand)] sm:flex">
-                {initials('Gold and Grith')}
+              <div className="hidden h-9 w-9 items-center justify-center rounded-full border border-[var(--border)] bg-[var(--bg-panel)] p-1.5 sm:flex">
+                <img src="/brand/gold-and-grith-mark.svg" alt="" className="h-full w-full" />
               </div>
             </div>
           </header>

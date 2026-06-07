@@ -112,14 +112,8 @@ export default function HomePage() {
   return (
     <main className={styles.page}>
       <header className={styles.header}>
-        <Link href="/" className={styles.wordmark} aria-label="Gold and Grit home">
-          <span className={styles.brandMark} aria-hidden="true">
-            <span />
-          </span>
-          <span className={styles.brandText}>
-            <strong>Gold &amp; Grit</strong>
-            <span>SoSo-native finance desk</span>
-          </span>
+        <Link href="/" className={styles.wordmark} aria-label="Gold and Grith home">
+          <img src="/brand/gold-and-grith-logo.svg" alt="Gold &amp; Grith" className={styles.logoImage} />
         </Link>
 
         <div className={styles.headerActions}>
@@ -139,7 +133,7 @@ export default function HomePage() {
           <p className={styles.orientation}>SoSoValue intelligence to SoDEX action</p>
           <h1 id="hero-title">Market context in. Risk decisions out.</h1>
           <p className={styles.heroLead}>
-            Gold &amp; Grit turns news, ETF flow, macro events, and open-position risk into one operating surface for a crypto desk.
+            Gold &amp; Grith turns news, ETF flow, macro events, and open-position risk into one operating surface for a crypto desk.
           </p>
         </div>
 
@@ -150,7 +144,7 @@ export default function HomePage() {
         </div>
       </section>
 
-      <section className={styles.systemSection} aria-label="Gold and Grit system map">
+      <section className={styles.systemSection} aria-label="Gold and Grith system map">
         <div className={styles.systemMap}>
           <svg className={styles.mapLines} viewBox="0 0 1200 610" preserveAspectRatio="none" aria-hidden="true">
             <path className={styles.lineMuted} d="M280 150C380 150 370 174 470 174" />
@@ -317,7 +311,7 @@ export default function HomePage() {
       <footer className={styles.footer}>
         <p>The market will not wait for another tab to load.</p>
         <div className={styles.footerMeta}>
-          <span>Gold &amp; Grit · SoSo-native crypto intelligence</span>
+          <span>Gold &amp; Grith · SoSo-native crypto intelligence</span>
           <Link href="/dashboard">
             Enter terminal
             <ArrowIcon />

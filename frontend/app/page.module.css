@@ -48,42 +48,13 @@
   display: inline-flex;
   min-height: 2.75rem;
   align-items: center;
-  gap: var(--space-sm-token);
 }
 
-.brandMark {
-  display: grid;
-  width: 2.5rem;
-  height: 2.5rem;
-  place-items: center;
-  border: var(--rule-thin-token) solid var(--color-rule-strong);
-  border-radius: var(--radius-md-token);
-  background: var(--color-paper-3);
-}
-
-.brandMark span {
-  width: 0.75rem;
-  height: 0.75rem;
-  border-radius: var(--radius-sm-token);
-  background: var(--color-accent);
-  transform: rotate(45deg);
-  transition: transform var(--dur-short-token) var(--ease-out-token);
-}
-
-.brandText {
-  display: grid;
-  gap: var(--space-3xs-token);
-}
-
-.brandText strong {
-  font-family: var(--font-display);
-  font-size: var(--text-base-token);
-  letter-spacing: 0.02em;
-}
-
-.brandText span {
-  color: var(--color-muted);
-  font-size: var(--text-xs-token);
+.logoImage {
+  display: block;
+  width: clamp(9.75rem, 24vw, 15.5rem);
+  max-width: 100%;
+  height: auto;
 }
 
 .headerActions {
@@ -871,8 +842,8 @@
 }
 
 @media (hover: hover) and (pointer: fine) {
-  .wordmark:hover .brandMark span {
-    transform: rotate(135deg);
+  .wordmark:hover {
+    opacity: 0.88;
   }
 
   .primaryAction:hover {
@@ -949,7 +920,6 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .brandMark span,
   .primaryAction,
   .secondaryAction,
   .mapNode,
