@@ -253,7 +253,7 @@ flowchart TB
 │   └── lib/              # API client, types, polling hooks
 ├── docs/
 │   └── api-and-eip712-integration-notes.md
-├── .env.example          # Environment variable template
+├── .env                  # Local-only environment file, never committed
 ├── package.json          # Root scripts and backend dependencies
 └── README.md
 ```
@@ -287,15 +287,15 @@ npm install
 npm --prefix frontend install
 
 # Configure environment
-cp .env.example .env
-# Edit .env with your API keys (see below)
+# Create .env manually and add the variables listed below.
+# Do not commit .env or private key material.
 ```
 
 ---
 
 ## Environment Variables
 
-Copy `.env.example` to `.env` and configure the following groups.
+Create a local `.env` file and configure the following groups. `.env` is intentionally ignored by Git.
 
 ### AI Service (pick one)
 
@@ -308,7 +308,7 @@ Copy `.env.example` to `.env` and configure the following groups.
 | `GROQ_MODEL` | Default: `llama-3.3-70b-versatile` |
 | `GEMINI_API_KEY` | Google Gemini API key |
 | `ANTHROPIC_API_KEY` | Anthropic Claude API key |
-| `SKILLMINT_*` | SkillMint / 0G verifiable execution settings (see `.env.example`) |
+| `SKILLMINT_*` | SkillMint / 0G verifiable execution settings |
 
 All AI adapters expose the same interface — switching providers requires only changing `AI_SERVICE`.
 
@@ -325,9 +325,11 @@ All AI adapters expose the same interface — switching providers requires only 
 |----------|-------------|
 | `SODEX_TESTNET_PERPS` | Perps REST base URL |
 | `SODEX_ACCOUNT_ADDRESS` | Master or account wallet address |
-| `SODEX_API_KEY_NAME` | Registered API key name |
-| `SODEX_API_PRIVATE_KEY` | API key private key for EIP-712 signing |
+| `SODEX_API_KEY_NAME` | Registered trading API key name, for example `webkey`; omit or set `default` for master-wallet signing |
+| `SODEX_API_PRIVATE_KEY` | Private key for the registered API key, or the master wallet private key when signing without `X-API-Key` |
 | `SODEX_CHAIN_ID` | Default: `138565` |
+
+Close position, reduce leverage, and cancel order support two signing modes. To sign with the master wallet, omit `SODEX_API_KEY_NAME` so the backend omits the `X-API-Key` header. To sign with a registered API key, set `SODEX_API_KEY_NAME` to that key's SoDEX name and set `SODEX_API_PRIVATE_KEY` to the matching API key private key. Do not send `X-API-Key: default`; SoDEX treats the default/master signer as the no-header case.
 
 ### Supabase
 
@@ -654,7 +656,7 @@ The backend includes `backend/vercel.json` with:
 
 On Vercel, the in-process scheduler is disabled (`VERCEL=1`). Agent cycles are driven by cron instead.
 
-Set all environment variables from `.env.example` in your Vercel project settings.
+Set the variables from the tables above in your backend deployment environment. Do not upload `.env` or private keys to GitHub.
 
 ---
 
@@ -709,7 +711,7 @@ Unit tests cover:
 
 - Never commit `.env` or private keys. The repository `.gitignore` excludes them.
 - Use Supabase Row Level Security in production.
-- SoDEX API keys are revocable signing credentials — treat `SODEX_API_PRIVATE_KEY` as a secret.
+- SoDEX API keys are revocable signing credentials. Treat `SODEX_API_PRIVATE_KEY` as a secret. If using the master wallet signer, keep `SODEX_API_KEY_NAME` unset so `X-API-Key` is omitted.
 - Dashboard actions require explicit confirmation before signed writes.
 - Telegram bot signing keys can also be set at runtime via `/setkey` (stored locally in `.sodex_key`).
 

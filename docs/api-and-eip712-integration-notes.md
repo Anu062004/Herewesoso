@@ -1,6 +1,6 @@
 # API and EIP-712 Integration Notes
 
-Last reviewed: 2026-06-02
+Last reviewed: 2026-06-07
 
 This file summarizes the important implementation details from the SoDEX Trading API, SoDEX/SoSoValue Market Data API, SoSoValue GitBook API docs, and the provided Notion Common APIs link.
 
@@ -64,6 +64,8 @@ Important rule:
 - Registered API key signs normal trading actions such as `newOrder`, `cancelOrder`, `updateLeverage`, `updateMargin`, `transferAsset`, and `scheduleCancel`.
 
 The `X-API-Key` header carries the API key name, not the API key public address and never the private key.
+
+Gold & Grith deployment note: close-position, reduce-leverage, and cancel-order actions support two signing modes. Registered API-key signing sends `X-API-Key` with the key name, such as `webkey`, and signs with that key's private key. Master-wallet signing omits `X-API-Key` entirely and signs with the master wallet private key. Do not send `X-API-Key: default`; SoDEX treats the default/master signer as the no-header case. If SoDEX returns `API key error: API key not found`, first check that the deployed backend is not sending an old key name like `api-key-01` or `default`.
 
 ### Nonce Rules
 
@@ -460,7 +462,7 @@ For each alert, include:
 ## Practical Next Step Checklist
 
 - [ ] Choose one product name and update UI/repo/submission consistently.
-- [ ] Add `SODEX_API_KEY_NAME`, `SODEX_API_PRIVATE_KEY`, `SODEX_ACCOUNT_ID`, `SODEX_ENV`.
+- [ ] Add `SODEX_API_KEY_NAME`, `SODEX_API_PRIVATE_KEY`, `SODEX_ACCOUNT_ID`, `SODEX_ENV`; for API-key signing, verify the private key derives the registered API key public address; for master signing, leave `SODEX_API_KEY_NAME` unset.
 - [ ] Implement SoDEX EIP-712 signer for perps testnet.
 - [ ] Implement nonce manager.
 - [ ] Add reduce-leverage execution.

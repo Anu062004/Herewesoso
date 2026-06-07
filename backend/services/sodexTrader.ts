@@ -210,6 +210,24 @@ function configuredApiKeyName(): string | null {
   return configured;
 }
 
+function describeApiKey(entry: PerpsApiKey): string {
+  return entry?.name && entry?.publicKey ? `${entry.name} (${entry.publicKey})` : entry?.name || 'unnamed';
+}
+
+function describeAvailableApiKeys(apiKeys: PerpsApiKey[]): string {
+  const nonDefault = apiKeys.filter((entry) => entry?.name && entry.name !== 'default');
+
+  if (nonDefault.length === 0) {
+    return 'No non-default trading API keys are registered on this account.';
+  }
+
+  return `Registered trading API keys: ${nonDefault.map(describeApiKey).join(', ')}.`;
+}
+
+function isDefaultApiKeyName(value: string | null): boolean {
+  return !value || value.toLowerCase() === 'default';
+}
+
 async function fetchAccountApiKeys(accountAddress: string): Promise<PerpsApiKey[]> {
   const apiKeyResponse = await client.get<PerpsRestResponse<PerpsApiKeysResponse['data']>>(
     `${PERPS_BASE}/accounts/${accountAddress}/api-keys`
@@ -223,21 +241,38 @@ function resolveApiKeyNameFromList(
   signerAddress: string,
   configuredName: string | null
 ): string | undefined {
+  const normalizedSigner = normalizeAddress(signerAddress);
   const matchingSignerKey = apiKeys.find((entry) =>
-    normalizeAddress(entry?.publicKey || '') === normalizeAddress(signerAddress)
+    normalizeAddress(entry?.publicKey || '') === normalizedSigner
   );
 
   if (configuredName) {
     const configuredKey = apiKeys.find((entry) => entry?.name === configuredName);
 
-    if (
-      configuredKey &&
-      (!configuredKey.publicKey || configuredKey === matchingSignerKey)
-    ) {
+    if (configuredKey && !configuredKey.publicKey) {
+      return configuredName;
+    }
+
+    if (configuredKey && normalizeAddress(configuredKey.publicKey || '') === normalizedSigner) {
+      if (configuredKey.name === 'default') {
+        return undefined;
+      }
+
       return configuredName;
     }
 
     if (matchingSignerKey?.name) {
+      if (matchingSignerKey.name === 'default') {
+        if (isDefaultApiKeyName(configuredName)) {
+          return undefined;
+        }
+
+        throw new Error(
+          `Configured API key "${configuredName}" does not match signer ${signerAddress}. ` +
+            'The signer is the master/default wallet, so omit SODEX_API_KEY_NAME or set it to "default".'
+        );
+      }
+
       console.warn(
         `[SoDEX Trader] Configured API key "${configuredName}" was not registered for signer ${signerAddress}. ` +
           `Using registered key "${matchingSignerKey.name}" instead.`
@@ -245,10 +280,25 @@ function resolveApiKeyNameFromList(
       return matchingSignerKey.name;
     }
 
-    return configuredName;
+    const configuredKeyText = configuredKey
+      ? `Configured API key "${configuredName}" belongs to ${configuredKey.publicKey}, but the configured private key derives ${signerAddress}.`
+      : `Configured API key "${configuredName}" is not registered on this SoDEX account.`;
+
+    throw new Error(`${configuredKeyText} ${describeAvailableApiKeys(apiKeys)}`);
   }
 
-  return matchingSignerKey?.name;
+  if (matchingSignerKey?.name) {
+    if (matchingSignerKey.name === 'default') {
+      return undefined;
+    }
+
+    return matchingSignerKey.name;
+  }
+
+  throw new Error(
+    `No registered SoDEX API key matches the configured signer ${signerAddress}. ` +
+      `${describeAvailableApiKeys(apiKeys)}`
+  );
 }
 
 async function resolveTradingContext(wallet: SodexWallet, symbol: string): Promise<TradingContext> {
@@ -274,25 +324,35 @@ async function resolveTradingContext(wallet: SodexWallet, symbol: string): Promi
     throw new Error(`Could not resolve SoDEX symbol ID for ${symbol}.`);
   }
 
-  let apiKeyName = envApiKeyName || (signerMatchesAccount ? 'default' : undefined);
+  let apiKeyName: string | undefined;
 
-  if (apiKeyName || !signerMatchesAccount) {
+  if (signerMatchesAccount && isDefaultApiKeyName(envApiKeyName)) {
+    apiKeyName = undefined;
+  } else {
     try {
       const apiKeys = await fetchAccountApiKeys(accountAddress);
-      apiKeyName = resolveApiKeyNameFromList(apiKeys, wallet.address, apiKeyName || null) || apiKeyName;
+      apiKeyName = resolveApiKeyNameFromList(apiKeys, wallet.address, envApiKeyName);
     } catch (error: any) {
-      if (!apiKeyName) {
+      if (envApiKeyName && !signerMatchesAccount && error?.response) {
+        console.warn(
+          `[SoDEX Trader] Could not verify configured API key "${envApiKeyName}"; using it anyway: ${extractErrorMessage(error)}`
+        );
+        apiKeyName = envApiKeyName;
+      } else {
         throw error;
       }
-
-      console.warn(
-        `[SoDEX Trader] Could not verify configured API key "${apiKeyName}"; using it anyway: ${extractErrorMessage(error)}`
-      );
     }
   }
 
-  if (!apiKeyName && !signerMatchesAccount) {
-    throw new Error('No SoDEX API key is registered for this wallet.');
+  if (signerMatchesAccount && apiKeyName) {
+    if (isDefaultApiKeyName(apiKeyName)) {
+      apiKeyName = undefined;
+    } else {
+      throw new Error(
+        `Configured API key "${apiKeyName}" cannot be used with the master wallet signer. ` +
+          'Set SODEX_API_PRIVATE_KEY to the matching registered API key private key, or omit SODEX_API_KEY_NAME to sign as the master wallet.'
+      );
+    }
   }
 
   const symbolConfig =
