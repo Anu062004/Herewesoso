@@ -22,7 +22,7 @@ function buildDescription(
   }
 
   if (action === 'CLOSE_POSITION') {
-    return `This will close your ${symbol} position when execution is added in Wave 2.`;
+    return `This will submit a reduce-only market close for your ${symbol} position on SoDEX testnet.`;
   }
 
   return '';
@@ -51,7 +51,7 @@ export default function ExecuteModal({
           {buildDescription(action, symbol, currentLeverage, targetLeverage)}
         </p>
         <p className="mt-3 rounded-2xl border border-caution/20 bg-caution/10 px-4 py-3 text-sm text-caution">
-          Confirming will only queue the action in Wave 1. EIP-712 execution comes in Wave 2.
+          Testnet execution signs through the configured SoDEX key and sends the request to the live backend.
         </p>
 
         <div className="mt-6 flex gap-3">
@@ -61,7 +61,7 @@ export default function ExecuteModal({
             disabled={isSubmitting}
             className="rounded-full bg-accent px-4 py-2 font-mono text-sm font-semibold text-black transition hover:bg-[#ff8f3a] disabled:cursor-not-allowed disabled:opacity-60"
           >
-            {isSubmitting ? 'Queueing...' : 'Confirm'}
+            {isSubmitting ? 'Submitting...' : 'Confirm'}
           </button>
           <button
             type="button"
