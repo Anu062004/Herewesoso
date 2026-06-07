@@ -1,0 +1,14 @@
+{
+  "scannedAt": "2026-06-07",
+  "framework": "Next.js 14 app router with Tailwind CSS 3",
+  "fontStack": "Bahnschrift/Aptos/Segoe UI with Cascadia Mono fallback",
+  "palette": "Locked black, graphite, warm orange, green, amber, red, and cyan CSS variables",
+  "motion": "No motion library; CSS motion only",
+  "spacing": "Existing named CSS scale based on compact 4px increments",
+  "preserve": [
+    "font stack",
+    "palette",
+    "spacing scale",
+    "dashboard routes and behavior"
+  ]
+}

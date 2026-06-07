@@ -1,0 +1,64 @@
+:root {
+  --color-paper: var(--bg-app);
+  --color-paper-2: var(--bg-surface);
+  --color-paper-3: var(--bg-panel);
+  --color-surface: var(--bg-card);
+  --color-surface-raised: var(--bg-elevated);
+  --color-rule: var(--border);
+  --color-rule-strong: var(--border-hover);
+  --color-ink: var(--text-1);
+  --color-ink-2: var(--text-2);
+  --color-muted: var(--text-3);
+  --color-accent: var(--brand);
+  --color-accent-ink: var(--bg-app);
+  --color-accent-soft: var(--brand-soft);
+  --color-positive: var(--green);
+  --color-warning: var(--amber);
+  --color-danger: var(--red);
+  --color-info: var(--cyan);
+  --color-focus: var(--text-1);
+  --color-line-glow: rgba(255, 107, 0, 0.38);
+  --color-grid-line: rgba(255, 255, 255, 0.035);
+  --color-surface-wash: rgba(255, 255, 255, 0.025);
+  --color-accent-wash: rgba(255, 107, 0, 0.075);
+  --color-positive-wash: rgba(22, 199, 132, 0.09);
+  --color-shadow: rgba(0, 0, 0, 0.34);
+
+  --font-display: var(--font-headline);
+  --font-body-copy: var(--font-body);
+  --font-code: var(--font-mono);
+
+  --space-3xs-token: var(--space-3xs);
+  --space-2xs-token: var(--space-2xs);
+  --space-xs-token: var(--space-xs);
+  --space-sm-token: var(--space-sm);
+  --space-md-token: var(--space-md);
+  --space-lg-token: var(--space-lg);
+  --space-xl-token: var(--space-xl);
+  --space-2xl-token: var(--space-2xl);
+  --space-3xl-token: var(--space-3xl);
+
+  --text-xs-token: 0.6875rem;
+  --text-sm-token: 0.8125rem;
+  --text-base-token: 0.9375rem;
+  --text-md-token: 1.0625rem;
+  --text-lg-token: 1.375rem;
+  --text-xl-token: 1.875rem;
+  --text-2xl-token: 2.5rem;
+  --text-display-token: clamp(3.25rem, 8vw, 7.5rem);
+
+  --ease-out-token: var(--ease-out);
+  --ease-in-token: var(--ease-in);
+  --ease-in-out-token: var(--ease-in-out);
+  --dur-short-token: var(--dur-short);
+  --dur-medium-token: var(--dur-medium);
+  --dur-long-token: 480ms;
+
+  --radius-sm-token: var(--radius-sm);
+  --radius-md-token: var(--radius-md);
+  --radius-lg-token: var(--radius-lg);
+  --radius-xl-token: var(--radius-xl);
+  --radius-pill-token: var(--radius-pill);
+  --rule-thin-token: 1px;
+  --rule-strong-token: 2px;
+}
