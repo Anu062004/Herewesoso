@@ -248,7 +248,7 @@ export default function HomePage() {
         <div className={styles.productShowcase}>
           <div className={styles.showcaseHeading}>
             <span>Inside the terminal</span>
-            <strong>One desk. Four live market views.</strong>
+            <strong>One desk. Five live market views.</strong>
           </div>
           <div className={styles.featureGrid}>
             {productFeatures.map((feature) => (
