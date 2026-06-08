@@ -125,6 +125,11 @@ export interface HealthStatus {
     connected: boolean;
     lastMessageSentAt: string | null;
   };
+  sodex?: {
+    tradingKeyConfigured: boolean;
+    walletAddress: string | null;
+    accountAddress: string | null;
+  };
 }
 
 export interface AgentRunSummary {

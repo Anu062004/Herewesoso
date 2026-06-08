@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { useState } from 'react';
 
-import { fetchPositions, queueDashboardAction } from '@/lib/api';
+import { fetchHealth, fetchPositions, queueDashboardAction } from '@/lib/api';
 import { formatPercent, formatPrice } from '@/lib/format';
 import {
   computeDistancePercent,
@@ -48,6 +48,8 @@ export default function PositionsPage() {
   const network = connection?.network || 'testnet';
   const networkLabel = network === 'mainnet' ? 'Mainnet' : 'Testnet';
   const mainnetReadOnly = network === 'mainnet';
+  const health = usePollingResource({ fetcher: fetchHealth, intervalMs: 60000 });
+  const tradingKeyConfigured = health.data?.sodex?.tradingKeyConfigured;
   const positions = usePollingResource({
     fetcher: fetchPositions,
     intervalMs: 30000,
@@ -71,6 +73,15 @@ export default function PositionsPage() {
           <span>Mainnet is read-only in this dashboard. Use the official SoDEX app to enable trading or submit orders.</span>
           <Link href="/dashboard/sodex/connect" className="text-[12px] text-[var(--text-1)] underline underline-offset-4">
             Manage connection
+          </Link>
+        </div>
+      ) : null}
+
+      {tradingKeyConfigured === false ? (
+        <div className="flex flex-col gap-2 rounded-[10px] border border-[rgba(220,38,38,0.24)] bg-[rgba(220,38,38,0.12)] px-4 py-3 text-[13px] text-[var(--red)] sm:flex-row sm:items-center sm:justify-between">
+          <span>The EC2 backend does not have a SoDEX API signing key configured. Closing and leverage changes cannot execute yet.</span>
+          <Link href="/dashboard/telegram" className="text-[12px] text-[var(--text-1)] underline underline-offset-4">
+            Check Telegram /setkey
           </Link>
         </div>
       ) : null}
@@ -158,7 +169,7 @@ export default function PositionsPage() {
                         <div className="flex items-center gap-2">
                           <button
                             type="button"
-                            disabled={mainnetReadOnly}
+                            disabled={mainnetReadOnly || tradingKeyConfigured === false}
                             onClick={() =>
                               setPendingAction({
                                 action: 'REDUCE_LEVERAGE',
@@ -173,7 +184,7 @@ export default function PositionsPage() {
                           </button>
                           <button
                             type="button"
-                            disabled={mainnetReadOnly}
+                            disabled={mainnetReadOnly || tradingKeyConfigured === false}
                             onClick={() =>
                               setPendingAction({
                                 action: 'CLOSE_POSITION',
@@ -205,11 +216,21 @@ export default function PositionsPage() {
             : `This will submit a reduce-only market close for ${pendingAction?.symbol} on SoDEX ${networkLabel.toLowerCase()}.`
         }
         confirmLabel={pendingAction?.action === 'REDUCE_LEVERAGE' ? 'Reduce' : 'Close'}
-        disclaimer={mainnetReadOnly ? 'Mainnet execution is blocked in this dashboard' : 'Testnet execution - signs through the configured SoDEX key'}
+        disclaimer={
+          mainnetReadOnly
+            ? 'Mainnet execution is blocked in this dashboard'
+            : tradingKeyConfigured === false
+              ? 'The backend SoDEX signer is not configured on EC2'
+              : 'Testnet execution - signs through the configured SoDEX key'
+        }
         onClose={() => setPendingAction(null)}
         onConfirm={async () => {
           if (!pendingAction) {
             return { message: 'No action configured.' };
+          }
+
+          if (tradingKeyConfigured === false) {
+            throw new Error('The EC2 backend does not have a SoDEX API signing key configured.');
           }
 
           const result = await queueDashboardAction({

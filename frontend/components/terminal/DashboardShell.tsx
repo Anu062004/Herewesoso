@@ -4,7 +4,7 @@ import type { FormEvent, ReactNode } from 'react';
 
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 
 import { fetchAgentRuns, fetchHealth, sendTelegramTest, triggerCycle } from '@/lib/api';
 import { formatDateTime, formatRelativeTime } from '@/lib/format';
@@ -41,20 +41,25 @@ interface NavItem {
   aliases: string[];
 }
 
-const NAV_ITEMS: NavItem[] = [
+const PRIMARY_NAV_ITEMS: NavItem[] = [
   { label: 'Dashboard', href: '/dashboard', icon: <DashboardIcon className="h-4 w-4" />, aliases: ['home', 'overview'] },
   { label: 'Narrative Scanner', href: '/dashboard/scanner', icon: <AntennaIcon className="h-4 w-4" />, aliases: ['scanner', 'narrative', 'alpha'] },
   { label: 'Liquidation Shield', href: '/dashboard/shield', icon: <ShieldIcon className="h-4 w-4" />, aliases: ['shield', 'liquidation', 'risk'] },
   { label: 'Positions', href: '/dashboard/positions', icon: <BriefcaseIcon className="h-4 w-4" />, aliases: ['position', 'portfolio'] },
+  { label: 'SoDEX Connect', href: '/dashboard/sodex/connect', icon: <AvatarIcon className="h-4 w-4" />, aliases: ['sodex', 'connect', 'wallet', 'login', 'mainnet', 'testnet'] },
+  { label: 'SoDEX Markets', href: '/dashboard/sodex/markets', icon: <CandleIcon className="h-4 w-4" />, aliases: ['markets', 'sodex', 'prices'] },
+];
+
+const MORE_NAV_ITEMS: NavItem[] = [
   { label: 'Alerts', href: '/dashboard/alerts', icon: <BellIcon className="h-4 w-4" />, aliases: ['alert', 'warning'] },
   { label: 'Trade Memos', href: '/dashboard/memos', icon: <NotesIcon className="h-4 w-4" />, aliases: ['memo', 'notes'] },
   { label: 'Macro', href: '/dashboard/macro', icon: <WorldIcon className="h-4 w-4" />, aliases: ['macro', 'calendar', 'fed'] },
-  { label: 'SoDEX Connect', href: '/dashboard/sodex/connect', icon: <AvatarIcon className="h-4 w-4" />, aliases: ['sodex', 'connect', 'wallet', 'login', 'mainnet', 'testnet'] },
-  { label: 'SoDEX Markets', href: '/dashboard/sodex/markets', icon: <CandleIcon className="h-4 w-4" />, aliases: ['markets', 'sodex', 'prices'] },
   { label: 'Signals', href: '/dashboard/signals', icon: <RadarIcon className="h-4 w-4" />, aliases: ['signals', 'heatmap'] },
   { label: 'NewsFeed', href: '/dashboard/news', icon: <WorldIcon className="h-4 w-4" />, aliases: ['news', 'feed', 'headlines'] },
   { label: 'Telegram Setup', href: '/dashboard/telegram', icon: <TelegramIcon className="h-4 w-4" />, aliases: ['telegram', 'bot', 'setup'] }
 ];
+
+const NAV_ITEMS: NavItem[] = [...PRIMARY_NAV_ITEMS, ...MORE_NAV_ITEMS];
 
 function isActive(pathname: string, href: string) {
   return href === '/dashboard' ? pathname === href : pathname.startsWith(href);
@@ -113,6 +118,7 @@ export default function DashboardShell({ children }: DashboardShellProps) {
   const router = useRouter();
   const sodexConnection = useSodexConnection();
   const [searchTerm, setSearchTerm] = useState('');
+  const [moreOpen, setMoreOpen] = useState(false);
   const [telegramOpen, setTelegramOpen] = useState(false);
   const [actionModal, setActionModal] = useState<{
     title: string;
@@ -137,6 +143,12 @@ export default function DashboardShell({ children }: DashboardShellProps) {
   const shieldSuccess = summary?.shieldSuccess !== false;
   const runStatus = String(lastRun?.status || 'idle').toLowerCase();
   const telegramTone = !health.data ? 'gray' : health.data.telegram.connected ? 'green' : 'red';
+  const sodexSignerReady = health.data?.sodex?.tradingKeyConfigured;
+  const hasActiveSecondaryNav = MORE_NAV_ITEMS.some((item) => isActive(pathname, item.href));
+
+  useEffect(() => {
+    setMoreOpen(false);
+  }, [pathname]);
 
   function handleSearch(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -159,6 +171,17 @@ export default function DashboardShell({ children }: DashboardShellProps) {
               <TapeItem label="Narrative" value={narrativeSuccess ? 'Scanner OK' : 'Check'} tone={narrativeSuccess ? 'green' : 'amber'} />
               <TapeItem label="Shield" value={shieldSuccess ? 'Risk OK' : 'Check'} tone={shieldSuccess ? 'green' : 'amber'} />
               <TapeItem label="Telegram" value={health.data?.telegram.connected ? 'Active' : 'Disconnected'} tone={health.data?.telegram.connected ? 'green' : 'red'} />
+              <TapeItem
+                label="SoDEX"
+                value={
+                  sodexSignerReady === undefined
+                    ? 'Signer Check'
+                    : sodexSignerReady
+                      ? 'Signer Ready'
+                      : 'Signer Missing'
+                }
+                tone={sodexSignerReady === false ? 'red' : sodexSignerReady ? 'green' : 'amber'}
+              />
               <TapeItem label="Last run" value={formatRelativeTime(lastRun?.created_at || null)} />
             </div>
           </div>
@@ -286,8 +309,8 @@ export default function DashboardShell({ children }: DashboardShellProps) {
           </header>
 
           <nav className="border-t border-[var(--border)] bg-[var(--bg-surface)]">
-            <div className="mx-auto flex max-w-[1520px] items-center gap-0.5 overflow-x-auto px-3 py-1.5 sm:px-5">
-              {NAV_ITEMS.map((item) => {
+            <div className="mx-auto flex max-w-[1520px] items-center gap-1 overflow-x-auto px-3 py-1.5 sm:px-5">
+              {PRIMARY_NAV_ITEMS.map((item) => {
                 const active = isActive(pathname, item.href);
 
                 return (
@@ -307,6 +330,54 @@ export default function DashboardShell({ children }: DashboardShellProps) {
                   </Link>
                 );
               })}
+
+              <div className="relative ml-auto">
+                <button
+                  type="button"
+                  onClick={() => setMoreOpen((open) => !open)}
+                  className={cx(
+                    'relative inline-flex h-10 shrink-0 items-center gap-2 rounded-[var(--radius-md)] px-3 text-[13px] font-medium transition-[color,background] duration-[var(--dur-short)]',
+                    hasActiveSecondaryNav || moreOpen
+                      ? 'bg-[var(--brand-soft)] text-[var(--text-1)]'
+                      : 'text-[var(--text-2)] hover:bg-[rgba(255,255,255,0.04)] hover:text-[var(--text-1)]'
+                  )}
+                  aria-expanded={moreOpen}
+                  aria-haspopup="menu"
+                >
+                  <NotesIcon className={hasActiveSecondaryNav || moreOpen ? 'h-4 w-4 text-[var(--brand)]' : 'h-4 w-4 text-[var(--text-3)]'} />
+                  <span>More</span>
+                </button>
+
+                {moreOpen ? (
+                  <div className="absolute right-0 top-[calc(100%+10px)] z-[var(--z-dropdown)] w-[268px] rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--bg-elevated)] p-2 shadow-[var(--shadow-md)]">
+                    <div className="px-3 pb-2 pt-1 text-[11px] font-medium uppercase tracking-[0.14em] text-[var(--text-3)]">
+                      Secondary sections
+                    </div>
+                    <div className="space-y-1">
+                      {MORE_NAV_ITEMS.map((item) => {
+                        const active = isActive(pathname, item.href);
+
+                        return (
+                          <Link
+                            key={item.href}
+                            href={item.href}
+                            onClick={() => setMoreOpen(false)}
+                            className={cx(
+                              'flex items-center gap-2 rounded-[var(--radius-md)] px-3 py-2 text-[13px] transition',
+                              active
+                                ? 'bg-[var(--brand-soft)] text-[var(--text-1)]'
+                                : 'text-[var(--text-2)] hover:bg-[rgba(255,255,255,0.04)] hover:text-[var(--text-1)]'
+                            )}
+                          >
+                            <span className={active ? 'text-[var(--brand)]' : 'text-[var(--text-3)]'}>{item.icon}</span>
+                            <span className="whitespace-nowrap">{item.label}</span>
+                          </Link>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ) : null}
+              </div>
             </div>
           </nav>
         </div>
