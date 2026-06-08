@@ -41,9 +41,19 @@ function parseCancelItems(payload: Record<string, unknown>) {
 router.post('/', async (req: Request, res: Response) => {
   const payload = (req.body || {}) as Record<string, unknown>;
   const action = isDashboardAction(payload.action) ? payload.action : 'QUEUE_ACTION';
+  const network = payload.network === 'mainnet' ? 'mainnet' : 'testnet';
   const symbol = typeof payload.symbol === 'string' && payload.symbol.trim() ? payload.symbol : 'BTC-USD';
   const currentLeverage = typeof payload.currentLeverage === 'number' ? payload.currentLeverage : null;
   const targetLeverage = typeof payload.targetLeverage === 'number' ? payload.targetLeverage : null;
+
+  if (network === 'mainnet') {
+    return res.status(403).json({
+      queued: false,
+      action,
+      symbol,
+      message: 'Mainnet execution is disabled in this dashboard. Use the official SoDEX mainnet app to enable trading and submit transactions.'
+    });
+  }
 
   if (!sodexTrader.hasKey()) {
     return res.json({

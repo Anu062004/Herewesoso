@@ -19,6 +19,9 @@ import type {
   SoDexMarket,
   TriggerCycleResponse
 } from '@/lib/types';
+import type { SodexConnection, SodexNetwork } from '@/lib/sodexConnection';
+
+import { buildSodexQuery, getSodexConnection } from '@/lib/sodexConnection';
 
 export type {
   AnalysisResult,
@@ -272,7 +275,7 @@ export async function fetchSignals() {
 }
 
 export async function fetchPositions() {
-  return requestJson<PositionsResponse>('/api/positions');
+  return requestJson<PositionsResponse>(`/api/positions${buildSodexQuery()}`);
 }
 
 export async function fetchAlerts() {
@@ -308,9 +311,24 @@ export async function queueDashboardAction(payload: {
   clOrdId?: string;
   cancels?: Array<{ orderId?: string | number; clOrdId?: string }>;
 }) {
+  const connection = getSodexConnection();
+
+  if (connection?.network === 'mainnet') {
+    return {
+      queued: false,
+      action: payload.action,
+      symbol: payload.symbol,
+      message: 'Mainnet execution is disabled in this dashboard. Use the official SoDEX mainnet app to submit transactions.'
+    } satisfies DashboardActionResponse;
+  }
+
   return requestJson<DashboardActionResponse>('/api/actions', {
     method: 'POST',
-    body: JSON.stringify(payload)
+    body: JSON.stringify({
+      ...payload,
+      network: connection?.network || 'testnet',
+      wallet: connection?.address
+    })
   });
 }
 
@@ -327,8 +345,20 @@ export async function cancelOrder(payload: {
 }
 
 export async function fetchSodexOpenOrders(symbol?: string) {
-  const suffix = symbol ? `?symbol=${encodeURIComponent(symbol)}` : '';
+  const suffix = buildSodexQuery({ symbol });
   return requestJson<unknown>(`/api/sodex/orders${suffix}`);
+}
+
+export async function connectSodex(payload: {
+  network: SodexNetwork;
+  address: string;
+  signature: string;
+  issuedAt: number;
+}) {
+  return requestJson<SodexConnection>('/api/sodex/connect', {
+    method: 'POST',
+    body: JSON.stringify(payload)
+  });
 }
 
 export async function sendTelegramTest() {
@@ -344,14 +374,14 @@ export async function runAnalysis(): Promise<AnalysisResult> {
 }
 
 export async function fetchSodexMarkets(symbol?: string) {
-  const suffix = symbol ? `?symbol=${encodeURIComponent(symbol)}` : '';
+  const suffix = buildSodexQuery({ symbol });
   const raw = await requestJson<unknown>(`/api/sodex/markets${suffix}`);
   return normalizeMarkets(raw);
 }
 
 export async function fetchSodexOrderbook(symbol: string, limit = 20) {
   const raw = await requestJson<unknown>(
-    `/api/sodex/orderbook/${encodeURIComponent(symbol)}?limit=${encodeURIComponent(String(limit))}`
+    `/api/sodex/orderbook/${encodeURIComponent(symbol)}${buildSodexQuery({ limit })}`
   );
 
   return normalizeOrderbook(symbol, raw);
@@ -359,7 +389,7 @@ export async function fetchSodexOrderbook(symbol: string, limit = 20) {
 
 export async function fetchSodexKlines(symbol: string, interval = '1h', limit = 80) {
   const raw = await requestJson<unknown>(
-    `/api/sodex/klines/${encodeURIComponent(symbol)}?interval=${encodeURIComponent(interval)}&limit=${encodeURIComponent(String(limit))}`
+    `/api/sodex/klines/${encodeURIComponent(symbol)}${buildSodexQuery({ interval, limit })}`
   );
 
   return normalizeKlines(symbol, interval, raw);

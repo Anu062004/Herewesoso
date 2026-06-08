@@ -62,6 +62,7 @@ export interface PositionsResponse {
   live: LiveAccountState | null;
   liveError?: string | null;
   history: PositionSnapshot[];
+  network?: 'testnet' | 'mainnet';
   updatedAt?: string;
   error?: string;
 }

@@ -4,6 +4,7 @@ import Link from 'next/link';
 
 import { fetchSodexMarkets } from '@/lib/api';
 import { formatCompactNumber, formatPrice } from '@/lib/format';
+import { useSodexConnection } from '@/lib/useSodexConnection';
 import { usePollingResource } from '@/lib/usePollingResource';
 
 import {
@@ -19,18 +20,25 @@ import {
 } from '@/components/terminal/ui';
 
 export default function SodexMarketsPage() {
-  const markets = usePollingResource({ fetcher: () => fetchSodexMarkets(), intervalMs: 30000 });
+  const connection = useSodexConnection();
+  const network = connection?.network || 'testnet';
+  const networkLabel = network === 'mainnet' ? 'Mainnet' : 'Testnet';
+  const markets = usePollingResource({ fetcher: () => fetchSodexMarkets(), intervalMs: 30000, key: network });
   const rows = markets.data?.markets || [];
 
   return (
     <div className="space-y-4">
       <PageHeader
         title="SoDEX Markets"
-        description="Available testnet markets, mark prices, and 24h movement."
+        description={`Available ${networkLabel.toLowerCase()} markets, mark prices, and 24h movement.`}
         right={<PollingIndicator freshness={markets.freshness} nextPollInMs={markets.nextPollInMs} />}
       />
 
       <div className="flex gap-2">
+        <Pill tone={network === 'mainnet' ? 'amber' : 'cyan'}>{networkLabel}</Pill>
+        <Link href="/dashboard/sodex/connect" className="inline-flex h-6 items-center rounded-md border border-[var(--border)] px-2 text-[11px] text-[var(--text-2)]">
+          Connect
+        </Link>
         <Pill tone="cyan">Markets</Pill>
         <Link href="/dashboard/sodex/orderbook" className="inline-flex h-6 items-center rounded-md border border-[var(--border)] px-2 text-[11px] text-[var(--text-2)]">
           Orderbook
@@ -54,7 +62,7 @@ export default function SodexMarketsPage() {
               <ErrorCard message={markets.error} onRetry={() => void markets.refresh()} />
             </div>
           ) : rows.length === 0 ? (
-            <EmptyState title="No SoDEX markets" description="Market metadata will appear here when the testnet feed responds." />
+            <EmptyState title="No SoDEX markets" description={`Market metadata will appear here when the ${networkLabel.toLowerCase()} feed responds.`} />
           ) : (
             <table className="min-w-full text-left">
               <thead className="bg-[var(--bg-panel)] text-[11px] text-[var(--text-3)]">

@@ -8,12 +8,15 @@ import { useMemo, useState } from 'react';
 
 import { fetchAgentRuns, fetchHealth, sendTelegramTest, triggerCycle } from '@/lib/api';
 import { formatDateTime, formatRelativeTime } from '@/lib/format';
+import { shortWallet } from '@/lib/sodexConnection';
 import { parseRunSummary } from '@/lib/terminal';
+import { useSodexConnection } from '@/lib/useSodexConnection';
 import { usePollingResource } from '@/lib/usePollingResource';
 
 import { ConfirmationModal } from '@/components/terminal/ConfirmationModal';
 import {
   AntennaIcon,
+  AvatarIcon,
   BellIcon,
   BriefcaseIcon,
   CandleIcon,
@@ -46,6 +49,7 @@ const NAV_ITEMS: NavItem[] = [
   { label: 'Alerts', href: '/dashboard/alerts', icon: <BellIcon className="h-4 w-4" />, aliases: ['alert', 'warning'] },
   { label: 'Trade Memos', href: '/dashboard/memos', icon: <NotesIcon className="h-4 w-4" />, aliases: ['memo', 'notes'] },
   { label: 'Macro', href: '/dashboard/macro', icon: <WorldIcon className="h-4 w-4" />, aliases: ['macro', 'calendar', 'fed'] },
+  { label: 'SoDEX Connect', href: '/dashboard/sodex/connect', icon: <AvatarIcon className="h-4 w-4" />, aliases: ['sodex', 'connect', 'wallet', 'login', 'mainnet', 'testnet'] },
   { label: 'SoDEX Markets', href: '/dashboard/sodex/markets', icon: <CandleIcon className="h-4 w-4" />, aliases: ['markets', 'sodex', 'prices'] },
   { label: 'Signals', href: '/dashboard/signals', icon: <RadarIcon className="h-4 w-4" />, aliases: ['signals', 'heatmap'] },
   { label: 'NewsFeed', href: '/dashboard/news', icon: <WorldIcon className="h-4 w-4" />, aliases: ['news', 'feed', 'headlines'] },
@@ -107,6 +111,7 @@ function TapeItem({
 export default function DashboardShell({ children }: DashboardShellProps) {
   const pathname = usePathname();
   const router = useRouter();
+  const sodexConnection = useSodexConnection();
   const [searchTerm, setSearchTerm] = useState('');
   const [telegramOpen, setTelegramOpen] = useState(false);
   const [actionModal, setActionModal] = useState<{
@@ -179,6 +184,19 @@ export default function DashboardShell({ children }: DashboardShellProps) {
             </form>
 
             <div className="order-2 grid w-full shrink-0 grid-cols-[auto_minmax(0,1fr)] items-center gap-2 sm:order-none sm:ml-auto sm:flex sm:w-auto sm:justify-start sm:gap-3">
+              <Link
+                href="/dashboard/sodex/connect"
+                className="inline-flex h-9 items-center gap-2 rounded-[var(--radius-md)] border border-[var(--border)] bg-[var(--bg-elevated)] px-3 text-[12px] text-[var(--text-2)] transition hover:border-[var(--border-hover)] hover:text-[var(--text-1)]"
+              >
+                <Dot tone={sodexConnection ? (sodexConnection.network === 'mainnet' ? 'amber' : 'cyan') : 'gray'} />
+                <span className="hidden lg:inline">
+                  {sodexConnection
+                    ? `${sodexConnection.network === 'mainnet' ? 'Mainnet' : 'Testnet'} ${shortWallet(sodexConnection.address)}`
+                    : 'Connect SoDEX'}
+                </span>
+                <AvatarIcon className="h-4 w-4 lg:hidden" />
+              </Link>
+
               <div className="relative">
                 <button
                   type="button"

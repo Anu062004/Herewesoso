@@ -9,6 +9,7 @@ import errorUtils = require('../utils/error');
 
 const { safeSelect } = supabaseService;
 const { getErrorMessage } = errorUtils;
+type SodexNetwork = 'testnet' | 'mainnet';
 
 interface LivePositionView {
   symbol: string;
@@ -32,8 +33,13 @@ interface LiveStateView {
 
 const router = express.Router();
 
+function parseNetwork(value: unknown): SodexNetwork {
+  return value === 'mainnet' ? 'mainnet' : 'testnet';
+}
+
 router.get('/', async (req: Request, res: Response) => {
   const wallet = typeof req.query.wallet === 'string' ? req.query.wallet : process.env.USER_WALLET_ADDRESS;
+  const network = parseNetwork(req.query.network);
 
   try {
     // live === null  → SoDEX API unreachable (frontend falls back to Supabase history)
@@ -43,7 +49,7 @@ router.get('/', async (req: Request, res: Response) => {
 
     if (wallet) {
       try {
-        const enriched = await sodex.getEnrichedPositions(wallet);
+        const enriched = await sodex.getEnrichedPositions(wallet, network);
         const accountState = enriched.accountState;
         live = {
           walletAddress: accountState?.walletAddress || wallet,
@@ -70,20 +76,26 @@ router.get('/', async (req: Request, res: Response) => {
       }
     }
 
-    const { data: history, error } = await safeSelect<PositionRiskSnapshot>('position_risks', (query: any) => {
-      let nextQuery = query.order('created_at', { ascending: false }).limit(10);
-      if (wallet) nextQuery = nextQuery.eq('wallet_address', wallet);
-      return nextQuery;
-    });
+    let historyData: unknown[] = [];
 
-    const historyData = (!error && history && history.length > 0)
-      ? history
-      : memoryStore.getPositionRisks();
+    // Stored risk snapshots predate network tagging, so only expose them on testnet.
+    if (network === 'testnet') {
+      const { data: history, error } = await safeSelect<PositionRiskSnapshot>('position_risks', (query: any) => {
+        let nextQuery = query.order('created_at', { ascending: false }).limit(10);
+        if (wallet) nextQuery = nextQuery.eq('wallet_address', wallet);
+        return nextQuery;
+      });
+
+      historyData = (!error && history && history.length > 0)
+        ? history
+        : memoryStore.getPositionRisks();
+    }
 
     return res.json({
       live,
       liveError,
       history: historyData,
+      network,
       updatedAt: new Date().toISOString()
     });
   } catch (error) {
@@ -92,6 +104,7 @@ router.get('/', async (req: Request, res: Response) => {
       live: null,
       liveError: getErrorMessage(error),
       history: [],
+      network,
       updatedAt: new Date().toISOString()
     });
   }

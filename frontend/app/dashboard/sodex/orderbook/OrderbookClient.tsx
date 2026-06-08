@@ -5,6 +5,7 @@ import { useState } from 'react';
 
 import { fetchSodexMarkets, fetchSodexOrderbook } from '@/lib/api';
 import { formatNumber, formatPrice } from '@/lib/format';
+import { useSodexConnection } from '@/lib/useSodexConnection';
 import { usePollingResource } from '@/lib/usePollingResource';
 
 import {
@@ -21,12 +22,15 @@ import {
 const FALLBACK_SYMBOLS = ['BTC-USD', 'ETH-USD', 'SOL-USD', 'DOGE-USD'];
 
 export default function OrderbookClient({ initialSymbol }: { initialSymbol: string }) {
+  const connection = useSodexConnection();
   const [symbol, setSymbol] = useState(initialSymbol || 'BTC-USD');
-  const markets = usePollingResource({ fetcher: () => fetchSodexMarkets(), intervalMs: 30000 });
+  const network = connection?.network || 'testnet';
+  const networkLabel = network === 'mainnet' ? 'Mainnet' : 'Testnet';
+  const markets = usePollingResource({ fetcher: () => fetchSodexMarkets(), intervalMs: 30000, key: network });
   const orderbook = usePollingResource({
     fetcher: () => fetchSodexOrderbook(symbol, 20),
     intervalMs: 5000,
-    key: symbol
+    key: `${network}:${symbol}`
   });
 
   const symbols = (markets.data?.markets || []).map((market) => market.symbol);
@@ -38,11 +42,15 @@ export default function OrderbookClient({ initialSymbol }: { initialSymbol: stri
     <div className="space-y-4">
       <PageHeader
         title="SoDEX Orderbook"
-        description="Live asks and bids for the selected market."
+        description={`Live ${networkLabel.toLowerCase()} asks and bids for the selected market.`}
         right={<PollingIndicator freshness={orderbook.freshness} nextPollInMs={orderbook.nextPollInMs} />}
       />
 
       <div className="flex flex-wrap items-center gap-3">
+        <Pill tone={network === 'mainnet' ? 'amber' : 'cyan'}>{networkLabel}</Pill>
+        <Link href="/dashboard/sodex/connect" className="inline-flex h-6 items-center rounded-md border border-[var(--border)] px-2 text-[11px] text-[var(--text-2)]">
+          Connect
+        </Link>
         <Link href="/dashboard/sodex/markets" className="inline-flex h-6 items-center rounded-md border border-[var(--border)] px-2 text-[11px] text-[var(--text-2)]">
           Markets
         </Link>

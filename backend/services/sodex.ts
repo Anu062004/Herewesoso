@@ -7,6 +7,10 @@ type RawRecord = Record<string, any>;
 
 const DEFAULT_PERPS = 'https://testnet-gw.sodex.dev/api/v1/perps';
 const DEFAULT_SPOT = 'https://testnet-gw.sodex.dev/api/v1/spot';
+const MAINNET_PERPS = 'https://mainnet-gw.sodex.dev/api/v1/perps';
+const MAINNET_SPOT = 'https://mainnet-gw.sodex.dev/api/v1/spot';
+
+type SodexNetwork = 'testnet' | 'mainnet';
 
 const client = axios.create({
   timeout: 15000,
@@ -15,11 +19,19 @@ const client = axios.create({
   }
 });
 
-function perpsBaseUrl(): string {
+function perpsBaseUrl(network: SodexNetwork = 'testnet'): string {
+  if (network === 'mainnet') {
+    return process.env.SODEX_MAINNET_PERPS || MAINNET_PERPS;
+  }
+
   return process.env.SODEX_TESTNET_PERPS || DEFAULT_PERPS;
 }
 
-function spotBaseUrl(): string {
+function spotBaseUrl(network: SodexNetwork = 'testnet'): string {
+  if (network === 'mainnet') {
+    return process.env.SODEX_MAINNET_SPOT || MAINNET_SPOT;
+  }
+
   return process.env.SODEX_TESTNET_SPOT || DEFAULT_SPOT;
 }
 
@@ -99,23 +111,23 @@ function normalizePositions(raw: RawRecord): EnrichedPosition[] {
 }
 
 const sodex = {
-  async getPositions(walletAddress: string) {
+  async getPositions(walletAddress: string, network: SodexNetwork = 'testnet') {
     if (!walletAddress) {
       throw new Error('walletAddress is required for getPositions().');
     }
 
-    return get(perpsBaseUrl(), `/accounts/${walletAddress}/positions`);
+    return get(perpsBaseUrl(network), `/accounts/${walletAddress}/positions`);
   },
 
-  async getEnrichedPositions(walletAddress: string): Promise<ShieldState> {
+  async getEnrichedPositions(walletAddress: string, network: SodexNetwork = 'testnet'): Promise<ShieldState> {
     if (!walletAddress) {
       throw new Error('walletAddress is required for getEnrichedPositions().');
     }
 
     const [positionsRaw, stateRaw, markPricesRaw] = await Promise.all([
-      get<RawRecord>(perpsBaseUrl(), `/accounts/${walletAddress}/positions`),
-      get<RawRecord>(perpsBaseUrl(), `/accounts/${walletAddress}/state`),
-      get<RawRecord>(perpsBaseUrl(), '/markets/mark-prices')
+      get<RawRecord>(perpsBaseUrl(network), `/accounts/${walletAddress}/positions`),
+      get<RawRecord>(perpsBaseUrl(network), `/accounts/${walletAddress}/state`),
+      get<RawRecord>(perpsBaseUrl(network), '/markets/mark-prices')
     ]);
 
     const positions = normalizePositions(positionsRaw);
@@ -144,24 +156,27 @@ const sodex = {
     };
   },
 
-  async getMarkPrices(symbol: string | null = null) {
-    return get(perpsBaseUrl(), '/markets/mark-prices', symbol ? { symbol } : undefined);
+  async getMarkPrices(symbol: string | null = null, network: SodexNetwork = 'testnet') {
+    return get(perpsBaseUrl(network), '/markets/mark-prices', symbol ? { symbol } : undefined);
   },
 
-  async getBalances(walletAddress: string) {
+  async getBalances(walletAddress: string, network: SodexNetwork = 'testnet') {
     if (!walletAddress) {
       throw new Error('walletAddress is required for getBalances().');
     }
 
-    return get(perpsBaseUrl(), `/accounts/${walletAddress}/balances`);
+    return get(perpsBaseUrl(network), `/accounts/${walletAddress}/balances`);
   },
 
-  async getAccountState(walletAddress: string): Promise<{ data: AccountState | null; raw: unknown }> {
+  async getAccountState(
+    walletAddress: string,
+    network: SodexNetwork = 'testnet'
+  ): Promise<{ data: AccountState | null; raw: unknown }> {
     if (!walletAddress) {
       throw new Error('walletAddress is required for getAccountState().');
     }
 
-    const raw = await get<RawRecord>(perpsBaseUrl(), `/accounts/${walletAddress}/state`);
+    const raw = await get<RawRecord>(perpsBaseUrl(network), `/accounts/${walletAddress}/state`);
 
     return {
       data: normalizeAccountState(raw),
@@ -169,44 +184,44 @@ const sodex = {
     };
   },
 
-  async getOrderbook(symbol: string, limit = 20) {
+  async getOrderbook(symbol: string, limit = 20, network: SodexNetwork = 'testnet') {
     if (!symbol) {
       throw new Error('symbol is required for getOrderbook().');
     }
 
-    return get(perpsBaseUrl(), `/markets/${symbol}/orderbook`, { limit });
+    return get(perpsBaseUrl(network), `/markets/${symbol}/orderbook`, { limit });
   },
 
-  async getKlines(symbol: string, interval = '1h', limit = 100) {
+  async getKlines(symbol: string, interval = '1h', limit = 100, network: SodexNetwork = 'testnet') {
     if (!symbol) {
       throw new Error('symbol is required for getKlines().');
     }
 
-    return get(perpsBaseUrl(), `/markets/${symbol}/klines`, { interval, limit });
+    return get(perpsBaseUrl(network), `/markets/${symbol}/klines`, { interval, limit });
   },
 
-  async getFundingHistory(walletAddress: string, symbol?: string) {
+  async getFundingHistory(walletAddress: string, symbol?: string, network: SodexNetwork = 'testnet') {
     if (!walletAddress) {
       throw new Error('walletAddress is required for getFundingHistory().');
     }
 
-    return get(perpsBaseUrl(), `/accounts/${walletAddress}/fundings`, symbol ? { symbol } : undefined);
+    return get(perpsBaseUrl(network), `/accounts/${walletAddress}/fundings`, symbol ? { symbol } : undefined);
   },
 
-  async getSymbols() {
-    return get(perpsBaseUrl(), '/markets/symbols');
+  async getSymbols(network: SodexNetwork = 'testnet') {
+    return get(perpsBaseUrl(network), '/markets/symbols');
   },
 
-  async getOpenOrders(walletAddress: string, symbol?: string) {
+  async getOpenOrders(walletAddress: string, symbol?: string, network: SodexNetwork = 'testnet') {
     if (!walletAddress) {
       throw new Error('walletAddress is required for getOpenOrders().');
     }
 
-    return get(perpsBaseUrl(), `/accounts/${walletAddress}/orders`, symbol ? { symbol } : undefined);
+    return get(perpsBaseUrl(network), `/accounts/${walletAddress}/orders`, symbol ? { symbol } : undefined);
   },
 
-  async getSpotMarkets() {
-    return get(spotBaseUrl(), '/markets');
+  async getSpotMarkets(network: SodexNetwork = 'testnet') {
+    return get(spotBaseUrl(network), '/markets');
   },
 
   normalizeAccountState,

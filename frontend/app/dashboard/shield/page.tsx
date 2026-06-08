@@ -10,6 +10,7 @@ import {
   resolvePositions,
   riskLabel
 } from '@/lib/terminal';
+import { useSodexConnection } from '@/lib/useSodexConnection';
 import { usePollingResource } from '@/lib/usePollingResource';
 
 import { ShieldIcon } from '@/components/terminal/icons';
@@ -26,7 +27,14 @@ import {
 } from '@/components/terminal/ui';
 
 export default function ShieldPage() {
-  const positions = usePollingResource({ fetcher: fetchPositions, intervalMs: 30000 });
+  const connection = useSodexConnection();
+  const network = connection?.network || 'testnet';
+  const networkLabel = network === 'mainnet' ? 'Mainnet' : 'Testnet';
+  const positions = usePollingResource({
+    fetcher: fetchPositions,
+    intervalMs: 30000,
+    key: `${network}:${connection?.address || 'env'}`
+  });
   const alerts = usePollingResource({ fetcher: fetchAlerts, intervalMs: 30000 });
   const positionsState = positions.data || { live: null, history: [] };
   const openPositions = resolvePositions(positionsState);
@@ -43,7 +51,7 @@ export default function ShieldPage() {
 
       <PageHeader
         title="Liquidation Shield"
-        description="Position-by-position liquidation distance monitoring with fallback protection."
+        description={`Position-by-position liquidation distance monitoring for the selected SoDEX ${networkLabel.toLowerCase()} account.`}
         right={<PollingIndicator freshness={positions.freshness} nextPollInMs={positions.nextPollInMs} />}
       />
 

@@ -19,6 +19,7 @@ import {
   sortMacroEvents,
   unreadAlertCount
 } from '@/lib/terminal';
+import { useSodexConnection } from '@/lib/useSodexConnection';
 import { usePollingResource } from '@/lib/usePollingResource';
 
 import { ConfirmationModal } from '@/components/terminal/ConfirmationModal';
@@ -65,8 +66,16 @@ function scoreTone(score: number) {
 }
 
 export default function DashboardPage() {
+  const sodexConnection = useSodexConnection();
+  const sodexNetwork = sodexConnection?.network || 'testnet';
+  const sodexNetworkLabel = sodexNetwork === 'mainnet' ? 'Mainnet' : 'Testnet';
+  const mainnetReadOnly = sodexNetwork === 'mainnet';
   const signals = usePollingResource({ fetcher: fetchSignals, intervalMs: 60000 });
-  const positions = usePollingResource({ fetcher: fetchPositions, intervalMs: 30000 });
+  const positions = usePollingResource({
+    fetcher: fetchPositions,
+    intervalMs: 30000,
+    key: `${sodexNetwork}:${sodexConnection?.address || 'env'}`
+  });
   const alerts = usePollingResource({ fetcher: fetchAlerts, intervalMs: 30000 });
   const macro = usePollingResource({ fetcher: fetchMacro, intervalMs: 300000 });
   const news = usePollingResource({
@@ -101,6 +110,12 @@ export default function DashboardPage() {
         </div>
       ) : null}
 
+      {mainnetReadOnly ? (
+        <div className="flex h-9 items-center rounded-[10px] border border-[rgba(245,158,11,0.24)] bg-[rgba(245,158,11,0.12)] px-4 text-[13px] text-[var(--amber)]">
+          Mainnet connection is read-only here. Trading actions stay on the official SoDEX app.
+        </div>
+      ) : null}
+
       <PageHeader title="Dashboard" description="Cross-market narrative, macro, and liquidation intelligence in one terminal view." />
 
       <div className="flex flex-wrap items-center gap-2">
@@ -120,7 +135,7 @@ export default function DashboardPage() {
           supporting={topSignal ? <span className="text-[var(--purple)]">{topSignal.sector}</span> : 'Awaiting signals'}
         />
         <MetricCard
-          label="SoDEX Testnet Positions"
+          label={`SoDEX ${sodexNetworkLabel} Positions`}
           value={openPositions.positions.length}
           supporting={`${openPositions.fallbackActive ? 'Fallback' : 'Live'} position view`}
         />
@@ -378,6 +393,7 @@ export default function DashboardPage() {
                       </div>
                       <div className="mt-3 flex flex-wrap gap-2">
                         <Button
+                          disabled={mainnetReadOnly}
                           onClick={() =>
                             setPendingAction({
                               action: 'REDUCE_LEVERAGE',
@@ -391,6 +407,7 @@ export default function DashboardPage() {
                           Reduce Leverage
                         </Button>
                         <Button
+                          disabled={mainnetReadOnly}
                           onClick={() =>
                             setPendingAction({
                               action: 'CLOSE_POSITION',
@@ -462,11 +479,11 @@ export default function DashboardPage() {
         title={pendingAction?.action === 'REDUCE_LEVERAGE' ? 'Reduce Leverage' : 'Close Position'}
         description={
           pendingAction?.action === 'REDUCE_LEVERAGE'
-            ? `This will reduce ${pendingAction?.symbol} from ${pendingAction?.currentLeverage}x to ${pendingAction?.targetLeverage}x on SoDEX testnet.`
-            : `This will submit a reduce-only market close for ${pendingAction?.symbol} on SoDEX testnet.`
+            ? `This will reduce ${pendingAction?.symbol} from ${pendingAction?.currentLeverage}x to ${pendingAction?.targetLeverage}x on SoDEX ${sodexNetworkLabel.toLowerCase()}.`
+            : `This will submit a reduce-only market close for ${pendingAction?.symbol} on SoDEX ${sodexNetworkLabel.toLowerCase()}.`
         }
         confirmLabel={pendingAction?.action === 'REDUCE_LEVERAGE' ? 'Reduce' : 'Close'}
-        disclaimer="Testnet execution - signs through the configured SoDEX key"
+        disclaimer={mainnetReadOnly ? 'Mainnet execution is blocked in this dashboard' : 'Testnet execution - signs through the configured SoDEX key'}
         onClose={() => setPendingAction(null)}
         onConfirm={async () => {
           if (!pendingAction) {

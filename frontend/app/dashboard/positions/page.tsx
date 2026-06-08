@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { useState } from 'react';
 
 import { fetchPositions, queueDashboardAction } from '@/lib/api';
@@ -12,6 +13,7 @@ import {
   riskLabel,
   scoreFromDistance
 } from '@/lib/terminal';
+import { useSodexConnection } from '@/lib/useSodexConnection';
 import { usePollingResource } from '@/lib/usePollingResource';
 
 import { ConfirmationModal } from '@/components/terminal/ConfirmationModal';
@@ -42,7 +44,15 @@ function isNoOpenPositionMessage(message: string | undefined) {
 }
 
 export default function PositionsPage() {
-  const positions = usePollingResource({ fetcher: fetchPositions, intervalMs: 30000 });
+  const connection = useSodexConnection();
+  const network = connection?.network || 'testnet';
+  const networkLabel = network === 'mainnet' ? 'Mainnet' : 'Testnet';
+  const mainnetReadOnly = network === 'mainnet';
+  const positions = usePollingResource({
+    fetcher: fetchPositions,
+    intervalMs: 30000,
+    key: `${network}:${connection?.address || 'env'}`
+  });
   const [pendingAction, setPendingAction] = useState<PendingAction>(null);
   const state = positions.data || { live: null, history: [] };
   const resolved = resolvePositions(state);
@@ -56,9 +66,18 @@ export default function PositionsPage() {
         </div>
       ) : null}
 
+      {mainnetReadOnly ? (
+        <div className="flex flex-col gap-2 rounded-[10px] border border-[rgba(245,158,11,0.24)] bg-[rgba(245,158,11,0.12)] px-4 py-3 text-[13px] text-[var(--amber)] sm:flex-row sm:items-center sm:justify-between">
+          <span>Mainnet is read-only in this dashboard. Use the official SoDEX app to enable trading or submit orders.</span>
+          <Link href="/dashboard/sodex/connect" className="text-[12px] text-[var(--text-1)] underline underline-offset-4">
+            Manage connection
+          </Link>
+        </div>
+      ) : null}
+
       <PageHeader
         title="Positions"
-        description="Polling every 30s"
+        description={`${networkLabel} account polling every 30s`}
         right={
           <div className="flex items-center gap-3">
             <PollingIndicator freshness={positions.freshness} nextPollInMs={positions.nextPollInMs} />
@@ -75,7 +94,7 @@ export default function PositionsPage() {
       />
 
       <Panel>
-        <PanelHeader title="Open Positions" accent="cyan" subtitle="Sticky header table" />
+        <PanelHeader title="Open Positions" accent="cyan" subtitle={`${networkLabel} account view`} />
         <div className="overflow-x-auto">
           {positions.loading ? (
             <div className="space-y-2 p-4">
@@ -139,6 +158,7 @@ export default function PositionsPage() {
                         <div className="flex items-center gap-2">
                           <button
                             type="button"
+                            disabled={mainnetReadOnly}
                             onClick={() =>
                               setPendingAction({
                                 action: 'REDUCE_LEVERAGE',
@@ -147,12 +167,13 @@ export default function PositionsPage() {
                                 targetLeverage: Math.max(Math.floor(position.leverage / 4), 5)
                               })
                             }
-                            className="inline-flex h-8 items-center rounded-md border border-[var(--border)] px-3 text-[12px] text-[var(--text-2)] transition hover:border-[var(--border-hover)] hover:text-[var(--text-1)]"
+                            className="inline-flex h-8 items-center rounded-md border border-[var(--border)] px-3 text-[12px] text-[var(--text-2)] transition hover:border-[var(--border-hover)] hover:text-[var(--text-1)] disabled:cursor-not-allowed disabled:opacity-45"
                           >
                             Reduce
                           </button>
                           <button
                             type="button"
+                            disabled={mainnetReadOnly}
                             onClick={() =>
                               setPendingAction({
                                 action: 'CLOSE_POSITION',
@@ -160,7 +181,7 @@ export default function PositionsPage() {
                                 currentLeverage: position.leverage
                               })
                             }
-                            className="inline-flex h-8 items-center rounded-md border border-[rgba(239,68,68,0.28)] px-3 text-[12px] text-[var(--red)] transition hover:border-[rgba(239,68,68,0.5)]"
+                            className="inline-flex h-8 items-center rounded-md border border-[rgba(239,68,68,0.28)] px-3 text-[12px] text-[var(--red)] transition hover:border-[rgba(239,68,68,0.5)] disabled:cursor-not-allowed disabled:opacity-45"
                           >
                             Close
                           </button>
@@ -180,11 +201,11 @@ export default function PositionsPage() {
         title={pendingAction?.action === 'REDUCE_LEVERAGE' ? 'Reduce Leverage' : 'Close Position'}
         description={
           pendingAction?.action === 'REDUCE_LEVERAGE'
-            ? `This will reduce ${pendingAction?.symbol} from ${pendingAction?.currentLeverage}x to ${pendingAction?.targetLeverage}x on SoDEX testnet.`
-            : `This will submit a reduce-only market close for ${pendingAction?.symbol} on SoDEX testnet.`
+            ? `This will reduce ${pendingAction?.symbol} from ${pendingAction?.currentLeverage}x to ${pendingAction?.targetLeverage}x on SoDEX ${networkLabel.toLowerCase()}.`
+            : `This will submit a reduce-only market close for ${pendingAction?.symbol} on SoDEX ${networkLabel.toLowerCase()}.`
         }
         confirmLabel={pendingAction?.action === 'REDUCE_LEVERAGE' ? 'Reduce' : 'Close'}
-        disclaimer="Testnet execution - signs through the configured SoDEX key"
+        disclaimer={mainnetReadOnly ? 'Mainnet execution is blocked in this dashboard' : 'Testnet execution - signs through the configured SoDEX key'}
         onClose={() => setPendingAction(null)}
         onConfirm={async () => {
           if (!pendingAction) {

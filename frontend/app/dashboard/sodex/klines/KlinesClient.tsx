@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useState } from 'react';
 
 import { fetchSodexKlines, fetchSodexMarkets } from '@/lib/api';
+import { useSodexConnection } from '@/lib/useSodexConnection';
 import { usePollingResource } from '@/lib/usePollingResource';
 
 import {
@@ -21,13 +22,16 @@ const INTERVALS = ['1m', '5m', '15m', '1h', '4h', '1d'];
 const FALLBACK_SYMBOLS = ['BTC-USD', 'ETH-USD', 'SOL-USD', 'DOGE-USD'];
 
 export default function KlinesClient({ initialSymbol }: { initialSymbol: string }) {
+  const connection = useSodexConnection();
   const [symbol, setSymbol] = useState(initialSymbol || 'BTC-USD');
   const [interval, setInterval] = useState('1h');
-  const markets = usePollingResource({ fetcher: () => fetchSodexMarkets(), intervalMs: 30000 });
+  const network = connection?.network || 'testnet';
+  const networkLabel = network === 'mainnet' ? 'Mainnet' : 'Testnet';
+  const markets = usePollingResource({ fetcher: () => fetchSodexMarkets(), intervalMs: 30000, key: network });
   const klines = usePollingResource({
     fetcher: () => fetchSodexKlines(symbol, interval, 60),
     intervalMs: 30000,
-    key: `${symbol}:${interval}`
+    key: `${network}:${symbol}:${interval}`
   });
 
   const symbols = (markets.data?.markets || []).map((market) => market.symbol);
@@ -37,11 +41,15 @@ export default function KlinesClient({ initialSymbol }: { initialSymbol: string 
     <div className="space-y-4">
       <PageHeader
         title="SoDEX Klines"
-        description="Candlestick view in the same market terminal palette as the rest of the app."
+        description={`Candlestick view for the selected ${networkLabel.toLowerCase()} market.`}
         right={<PollingIndicator freshness={klines.freshness} nextPollInMs={klines.nextPollInMs} />}
       />
 
       <div className="flex flex-wrap items-center gap-3">
+        <Pill tone={network === 'mainnet' ? 'amber' : 'cyan'}>{networkLabel}</Pill>
+        <Link href="/dashboard/sodex/connect" className="inline-flex h-6 items-center rounded-md border border-[var(--border)] px-2 text-[11px] text-[var(--text-2)]">
+          Connect
+        </Link>
         <Link href="/dashboard/sodex/markets" className="inline-flex h-6 items-center rounded-md border border-[var(--border)] px-2 text-[11px] text-[var(--text-2)]">
           Markets
         </Link>
