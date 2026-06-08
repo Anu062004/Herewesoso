@@ -48,7 +48,8 @@ const NAV_ITEMS: NavItem[] = [
   { label: 'Macro', href: '/dashboard/macro', icon: <WorldIcon className="h-4 w-4" />, aliases: ['macro', 'calendar', 'fed'] },
   { label: 'SoDEX Markets', href: '/dashboard/sodex/markets', icon: <CandleIcon className="h-4 w-4" />, aliases: ['markets', 'sodex', 'prices'] },
   { label: 'Signals', href: '/dashboard/signals', icon: <RadarIcon className="h-4 w-4" />, aliases: ['signals', 'heatmap'] },
-  { label: 'NewsFeed', href: '/dashboard/news', icon: <WorldIcon className="h-4 w-4" />, aliases: ['news', 'feed', 'headlines'] }
+  { label: 'NewsFeed', href: '/dashboard/news', icon: <WorldIcon className="h-4 w-4" />, aliases: ['news', 'feed', 'headlines'] },
+  { label: 'Telegram Setup', href: '/dashboard/telegram', icon: <TelegramIcon className="h-4 w-4" />, aliases: ['telegram', 'bot', 'setup'] }
 ];
 
 function isActive(pathname: string, href: string) {
@@ -204,6 +205,12 @@ export default function DashboardShell({ children }: DashboardShellProps) {
                         <div className="mt-1 text-[var(--text-1)]">{formatDateTime(health.data?.telegram.lastMessageSentAt || null)}</div>
                       </div>
                     </div>
+                    <Link
+                      href="/dashboard/telegram"
+                      className="mt-3 inline-flex h-8 w-full items-center justify-center rounded-[var(--radius-md)] border border-[var(--border)] bg-[var(--bg-panel)] px-3 text-[12px] text-[var(--text-2)] transition hover:border-[var(--border-hover)] hover:text-[var(--text-1)]"
+                    >
+                      Open setup guide
+                    </Link>
                     <Button
                       className="mt-4 h-8 w-full text-[12px]"
                       onClick={() => {
