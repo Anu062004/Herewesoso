@@ -249,6 +249,12 @@ export default function PositionsPage() {
             };
           }
 
+          if (!result.queued && /api key|signer/i.test(result.message)) {
+            throw new Error(
+              'SoDEX rejected the backend API key name or account registration. Re-check SODEX_API_KEY_NAME on EC2, or re-run /setkey with a key that is registered on the connected SoDEX account.'
+            );
+          }
+
           if (!result.queued) {
             throw new Error(result.message);
           }
