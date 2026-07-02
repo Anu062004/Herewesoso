@@ -2,7 +2,7 @@
 
 import type { ReactNode } from 'react';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 
 import { formatPrice } from '@/lib/format';
 
@@ -340,34 +340,132 @@ export function DataCellPrice({ value }: { value: number | null }) {
   return <span className="font-medium text-[var(--text-1)]">{formatPrice(value)}</span>;
 }
 
+type CandlestickPoint = {
+  time: number;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  volume?: number;
+};
+
+const DEFAULT_VISIBLE_CANDLES = 120;
+const MIN_VISIBLE_CANDLES = 24;
+
+function clampNumber(value: number, min: number, max: number) {
+  return Math.min(Math.max(value, min), max);
+}
+
+function compactTimeLabel(time: number) {
+  return new Intl.DateTimeFormat('en-US', {
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric'
+  }).format(new Date(time));
+}
+
+function detailedTimeLabel(time: number) {
+  return new Intl.DateTimeFormat('en-US', {
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit'
+  }).format(new Date(time));
+}
+
+function ChartButton({
+  children,
+  disabled,
+  label,
+  onClick
+}: {
+  children: ReactNode;
+  disabled?: boolean;
+  label: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      aria-label={label}
+      disabled={disabled}
+      onClick={onClick}
+      className="inline-flex h-8 min-w-8 items-center justify-center rounded-md border border-[var(--border)] bg-[var(--bg-card)] px-2 text-[12px] font-medium text-[var(--text-2)] transition hover:border-[var(--border-hover)] hover:text-[var(--text-1)] disabled:cursor-not-allowed disabled:opacity-35"
+    >
+      {children}
+    </button>
+  );
+}
+
 export function CandlestickChart({
   points,
   symbol,
   interval
 }: {
-  points: Array<{ time: number; open: number; high: number; low: number; close: number; volume?: number }>;
+  points: CandlestickPoint[];
   symbol?: string;
   interval?: string;
 }) {
   const [hoverIndex, setHoverIndex] = useState<number | null>(null);
+  const [visibleCount, setVisibleCount] = useState(DEFAULT_VISIBLE_CANDLES);
+  const [rightOffset, setRightOffset] = useState(0);
+  const [isDragging, setIsDragging] = useState(false);
+  const dragRef = useRef<{ x: number; rightOffset: number } | null>(null);
+
+  useEffect(() => {
+    setHoverIndex(null);
+    setRightOffset(0);
+    setVisibleCount(DEFAULT_VISIBLE_CANDLES);
+  }, [symbol, interval]);
+
+  useEffect(() => {
+    if (points.length === 0) {
+      setRightOffset(0);
+      return;
+    }
+
+    const minimumVisible = Math.min(MIN_VISIBLE_CANDLES, points.length);
+    setVisibleCount((current) => clampNumber(current, minimumVisible, points.length));
+  }, [points.length]);
+
+  useEffect(() => {
+    if (points.length === 0) {
+      return;
+    }
+
+    const safeVisibleCount = clampNumber(
+      visibleCount,
+      Math.min(MIN_VISIBLE_CANDLES, points.length),
+      points.length
+    );
+    setRightOffset((current) => clampNumber(current, 0, Math.max(0, points.length - safeVisibleCount)));
+  }, [points.length, visibleCount]);
+
   const chart = useMemo(() => {
-    const source = points.slice(-120);
     const width = 1180;
-    const height = 520;
+    const height = 540;
     const priceTop = 24;
     const priceBottom = 366;
     const volumeTop = 404;
-    const volumeBottom = 474;
+    const volumeBottom = 482;
     const left = 20;
-    const right = width - 86;
-    const bottom = 498;
-    const highs = source.map((point) => point.high);
-    const lows = source.map((point) => point.low);
-    const rawMax = Math.max(...highs);
-    const rawMin = Math.min(...lows);
+    const right = width - 92;
+    const bottom = 512;
+    const fullLength = points.length;
+    const minimumVisible = Math.min(MIN_VISIBLE_CANDLES, fullLength);
+    const safeVisibleCount = fullLength === 0
+      ? 0
+      : clampNumber(Math.round(visibleCount), minimumVisible, fullLength);
+    const maxRightOffset = Math.max(0, fullLength - safeVisibleCount);
+    const safeRightOffset = clampNumber(Math.round(rightOffset), 0, maxRightOffset);
+    const windowEnd = Math.max(0, fullLength - safeRightOffset);
+    const windowStart = Math.max(0, windowEnd - safeVisibleCount);
+    const source = points.slice(windowStart, windowEnd);
+    const rawMax = source.length > 0 ? Math.max(...source.map((point) => point.high)) : 1;
+    const rawMin = source.length > 0 ? Math.min(...source.map((point) => point.low)) : 0;
     const rawRange = rawMax - rawMin || Math.max(rawMax * 0.01, 1);
-    const max = rawMax + rawRange * 0.08;
-    const min = rawMin - rawRange * 0.08;
+    const max = rawMax + rawRange * 0.1;
+    const min = rawMin - rawRange * 0.1;
     const range = max - min || 1;
     const step = (right - left) / Math.max(source.length, 1);
     const maxVolume = Math.max(...source.map((point) => point.volume || 0), 1);
@@ -376,16 +474,15 @@ export function CandlestickChart({
     const xForIndex = (index: number) => left + step * index + step / 2;
     const ticks = Array.from({ length: 6 }).map((_, index) => {
       const value = min + (range / 5) * index;
-      return {
-        value,
-        y: priceToY(value)
-      };
+      return { value, y: priceToY(value) };
     }).reverse();
     const timeTicks = source.length <= 1
       ? []
-      : Array.from({ length: 6 })
-          .map((_, index) => Math.round((index / 5) * (source.length - 1)))
+      : Array.from({ length: 7 })
+          .map((_, index) => Math.round((index / 6) * (source.length - 1)))
           .filter((value, index, array) => array.indexOf(value) === index);
+    const windowStartPct = fullLength > 0 ? (windowStart / fullLength) * 100 : 0;
+    const windowWidthPct = fullLength > 0 ? Math.max(2, (source.length / fullLength) * 100) : 0;
 
     return {
       source,
@@ -403,9 +500,17 @@ export function CandlestickChart({
       volumeToHeight,
       xForIndex,
       ticks,
-      timeTicks
+      timeTicks,
+      fullLength,
+      safeVisibleCount,
+      safeRightOffset,
+      maxRightOffset,
+      windowStart,
+      windowEnd,
+      windowStartPct,
+      windowWidthPct
     };
-  }, [points]);
+  }, [points, rightOffset, visibleCount]);
 
   if (points.length === 0) {
     return (
@@ -421,23 +526,68 @@ export function CandlestickChart({
   const activePoint = chart.source[Math.max(0, Math.min(activeIndex, chart.source.length - 1))];
   const firstPoint = chart.source[0];
   const lastPoint = chart.source[chart.source.length - 1];
+  const isLive = chart.safeRightOffset === 0;
   const changePct = firstPoint ? ((lastPoint.close - firstPoint.open) / firstPoint.open) * 100 : 0;
   const activeChange = activePoint ? activePoint.close - activePoint.open : 0;
   const activeChangePct = activePoint ? (activeChange / activePoint.open) * 100 : 0;
   const lastPriceY = chart.priceToY(lastPoint.close);
   const lastPriceTone = lastPoint.close >= lastPoint.open ? 'var(--green)' : 'var(--red)';
+  const pageStep = Math.max(6, Math.round(chart.safeVisibleCount * 0.35));
+  const canPanOlder = chart.safeRightOffset < chart.maxRightOffset;
+  const canPanNewer = chart.safeRightOffset > 0;
+  const canZoomIn = chart.safeVisibleCount > Math.min(MIN_VISIBLE_CANDLES, chart.fullLength);
+  const canZoomOut = chart.safeVisibleCount < chart.fullLength;
+
+  const zoomTo = (nextVisibleCount: number, anchorRatio = 0.5) => {
+    if (chart.fullLength === 0) {
+      return;
+    }
+
+    const minimumVisible = Math.min(MIN_VISIBLE_CANDLES, chart.fullLength);
+    const nextVisible = clampNumber(Math.round(nextVisibleCount), minimumVisible, chart.fullLength);
+    const safeAnchorRatio = clampNumber(anchorRatio, 0, 1);
+    const anchorIndex = chart.windowStart + Math.max(0, chart.safeVisibleCount - 1) * safeAnchorRatio;
+    const nextStart = clampNumber(
+      Math.round(anchorIndex - Math.max(0, nextVisible - 1) * safeAnchorRatio),
+      0,
+      Math.max(0, chart.fullLength - nextVisible)
+    );
+
+    setVisibleCount(nextVisible);
+    setRightOffset(chart.fullLength - (nextStart + nextVisible));
+    setHoverIndex(null);
+  };
+
+  const panBy = (candles: number) => {
+    setRightOffset((current) => clampNumber(current + candles, 0, chart.maxRightOffset));
+    setHoverIndex(null);
+  };
+
+  const resetView = () => {
+    setVisibleCount(Math.min(DEFAULT_VISIBLE_CANDLES, chart.fullLength));
+    setRightOffset(0);
+    setHoverIndex(null);
+  };
+
+  const relativePosition = (clientX: number, rect: DOMRect) => {
+    return ((clientX - rect.left) / rect.width) * chart.width;
+  };
 
   return (
     <div className="overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--bg-card)]">
-      <div className="flex flex-col gap-3 border-b border-[var(--border)] bg-[var(--bg-panel)] px-4 py-3 lg:flex-row lg:items-center lg:justify-between">
+      <div className="flex flex-col gap-3 border-b border-[var(--border)] bg-[var(--bg-panel)] px-4 py-3 xl:flex-row xl:items-center xl:justify-between">
         <div className="flex flex-wrap items-center gap-2">
           <span className="text-[14px] font-semibold text-[var(--text-1)]">{symbol || 'Market'}</span>
           {interval ? <Pill tone="cyan">{interval}</Pill> : null}
           <Pill tone={changePct >= 0 ? 'green' : 'red'}>
             {changePct >= 0 ? '+' : ''}{changePct.toFixed(2)}%
           </Pill>
-          <span className="text-[12px] text-[var(--text-3)]">{chart.source.length} candles</span>
+          <Pill tone={isLive ? 'green' : 'amber'}>{isLive ? 'Live' : 'History'}</Pill>
+          <span className="text-[12px] text-[var(--text-3)]">
+            {chart.windowStart + 1}-{chart.windowEnd} / {chart.fullLength}
+          </span>
         </div>
+
         <div className="grid grid-cols-2 gap-x-5 gap-y-1 text-[11px] text-[var(--text-3)] sm:grid-cols-5">
           <span>O <strong className="font-medium text-[var(--text-1)]">{formatPrice(activePoint?.open)}</strong></span>
           <span>H <strong className="font-medium text-[var(--green)]">{formatPrice(activePoint?.high)}</strong></span>
@@ -447,21 +597,107 @@ export function CandlestickChart({
             {activeChange >= 0 ? '+' : ''}{activeChangePct.toFixed(2)}%
           </span>
         </div>
+
+        <div className="flex flex-wrap items-center gap-1.5">
+          <ChartButton label="Show older candles" disabled={!canPanOlder} onClick={() => panBy(pageStep)}>{'<'}</ChartButton>
+          <ChartButton label="Show newer candles" disabled={!canPanNewer} onClick={() => panBy(-pageStep)}>{'>'}</ChartButton>
+          <ChartButton label="Zoom in" disabled={!canZoomIn} onClick={() => zoomTo(chart.safeVisibleCount * 0.75)}>+</ChartButton>
+          <ChartButton label="Zoom out" disabled={!canZoomOut} onClick={() => zoomTo(chart.safeVisibleCount * 1.25)}>-</ChartButton>
+          <ChartButton label="Reset chart view" onClick={resetView}>
+            <RefreshIcon className="h-3.5 w-3.5" />
+          </ChartButton>
+          <button
+            type="button"
+            onClick={() => setRightOffset(0)}
+            disabled={isLive}
+            className="inline-flex h-8 items-center justify-center rounded-md border border-[rgba(34,197,94,0.3)] bg-[rgba(34,197,94,0.08)] px-3 text-[12px] font-medium text-[var(--green)] transition hover:bg-[rgba(34,197,94,0.14)] disabled:cursor-not-allowed disabled:opacity-45"
+          >
+            Live
+          </button>
+        </div>
+      </div>
+
+      <div className="border-b border-[var(--border)] bg-[var(--bg-panel)] px-4 py-2">
+        <div className="flex items-center gap-3">
+          <span className="text-[11px] text-[var(--text-3)]">History</span>
+          <input
+            type="range"
+            min={0}
+            max={chart.maxRightOffset}
+            value={chart.maxRightOffset - chart.safeRightOffset}
+            onChange={(event) => {
+              setRightOffset(chart.maxRightOffset - Number(event.target.value));
+              setHoverIndex(null);
+            }}
+            aria-label="Chart history position"
+            className="h-2 min-w-0 flex-1 accent-[var(--brand)]"
+          />
+          <span className="w-24 text-right text-[11px] tabular-nums text-[var(--text-3)]">{chart.safeVisibleCount} bars</span>
+        </div>
+        <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-[var(--bg-card)]">
+          <div
+            className="h-full rounded-full bg-[var(--brand)]"
+            style={{ marginLeft: `${chart.windowStartPct}%`, width: `${chart.windowWidthPct}%` }}
+          />
+        </div>
       </div>
 
       <div className="relative p-3">
         <svg
           viewBox={`0 0 ${chart.width} ${chart.height}`}
-          className="h-[520px] w-full select-none"
+          className={cx('h-[540px] w-full select-none', isDragging ? 'cursor-grabbing' : 'cursor-grab')}
           role="img"
           aria-label={`${symbol || 'Market'} ${interval || ''} candlestick chart`}
-          onMouseMove={(event) => {
-            const rect = event.currentTarget.getBoundingClientRect();
-            const relativeX = ((event.clientX - rect.left) / rect.width) * chart.width;
-            const index = Math.round((relativeX - chart.left - chart.step / 2) / chart.step);
-            setHoverIndex(Math.max(0, Math.min(index, chart.source.length - 1)));
+          style={{ touchAction: 'none' }}
+          onPointerDown={(event) => {
+            if (event.button !== 0) {
+              return;
+            }
+
+            dragRef.current = { x: event.clientX, rightOffset: chart.safeRightOffset };
+            setIsDragging(true);
+            setHoverIndex(null);
+            event.currentTarget.setPointerCapture(event.pointerId);
           }}
-          onMouseLeave={() => setHoverIndex(null)}
+          onPointerMove={(event) => {
+            const rect = event.currentTarget.getBoundingClientRect();
+            const relativeX = relativePosition(event.clientX, rect);
+
+            if (dragRef.current) {
+              const deltaSvg = ((event.clientX - dragRef.current.x) / rect.width) * chart.width;
+              const deltaCandles = Math.round(deltaSvg / Math.max(chart.step, 1));
+              setRightOffset(clampNumber(dragRef.current.rightOffset + deltaCandles, 0, chart.maxRightOffset));
+              setHoverIndex(null);
+              return;
+            }
+
+            const index = Math.round((relativeX - chart.left - chart.step / 2) / chart.step);
+            setHoverIndex(clampNumber(index, 0, chart.source.length - 1));
+          }}
+          onPointerUp={(event) => {
+            dragRef.current = null;
+            setIsDragging(false);
+            if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+              event.currentTarget.releasePointerCapture(event.pointerId);
+            }
+          }}
+          onPointerCancel={() => {
+            dragRef.current = null;
+            setIsDragging(false);
+          }}
+          onPointerLeave={() => {
+            if (!dragRef.current) {
+              setHoverIndex(null);
+            }
+          }}
+          onWheel={(event) => {
+            event.preventDefault();
+            const rect = event.currentTarget.getBoundingClientRect();
+            const relativeX = relativePosition(event.clientX, rect);
+            const anchorRatio = clampNumber((relativeX - chart.left) / Math.max(1, chart.right - chart.left), 0, 1);
+            const scale = event.deltaY < 0 ? 0.82 : 1.18;
+            zoomTo(chart.safeVisibleCount * scale, anchorRatio);
+          }}
         >
           <rect x="0" y="0" width={chart.width} height={chart.height} rx="12" fill="transparent" />
           {chart.ticks.map((tick) => (
@@ -474,24 +710,19 @@ export function CandlestickChart({
           ))}
 
           <line x1={chart.left} x2={chart.right} y1={lastPriceY} y2={lastPriceY} stroke={lastPriceTone} strokeWidth="1" strokeDasharray="6 6" opacity="0.85" />
-          <rect x={chart.right + 8} y={lastPriceY - 11} width="70" height="22" rx="5" fill={lastPriceTone} opacity="0.18" />
-          <text x={chart.right + 14} y={lastPriceY + 4} fill={lastPriceTone} fontSize="12" fontFamily="monospace">
+          <rect x={chart.right + 5} y={lastPriceY - 11} width="83" height="22" rx="5" fill={lastPriceTone} opacity="0.18" />
+          <text x={chart.right + 10} y={lastPriceY + 4} fill={lastPriceTone} fontSize="12" fontFamily="monospace">
             {formatPrice(lastPoint.close)}
           </text>
 
           {chart.timeTicks.map((index) => {
             const point = chart.source[index];
             const x = chart.xForIndex(index);
-            const label = new Intl.DateTimeFormat('en-US', {
-              month: 'short',
-              day: 'numeric',
-              hour: 'numeric'
-            }).format(new Date(point.time));
             return (
               <g key={`${point.time}-${index}`}>
                 <line x1={x} x2={x} y1={chart.priceTop} y2={chart.volumeBottom} stroke="var(--border)" strokeWidth="1" opacity="0.35" />
                 <text x={x} y={chart.bottom} textAnchor="middle" fill="var(--text-3)" fontSize="11" fontFamily="monospace">
-                  {label}
+                  {compactTimeLabel(point.time)}
                 </text>
               </g>
             );
@@ -559,14 +790,14 @@ export function CandlestickChart({
               <g>
                 <line x1={x} x2={x} y1={chart.priceTop} y2={chart.volumeBottom} stroke="var(--text-2)" strokeWidth="1" strokeDasharray="4 5" opacity="0.7" />
                 <line x1={chart.left} x2={chart.right} y1={y} y2={y} stroke="var(--text-2)" strokeWidth="1" strokeDasharray="4 5" opacity="0.55" />
-                <rect x={tooltipX} y={tooltipY} width="188" height="70" rx="8" fill="var(--bg-elevated)" stroke="var(--border-hover)" />
+                <rect x={tooltipX} y={tooltipY} width="196" height="72" rx="8" fill="var(--bg-elevated)" stroke="var(--border-hover)" />
                 <text x={tooltipX + 10} y={tooltipY + 18} fill="var(--text-1)" fontSize="12" fontFamily="monospace">
-                  {new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }).format(new Date(activePoint.time))}
+                  {detailedTimeLabel(activePoint.time)}
                 </text>
-                <text x={tooltipX + 10} y={tooltipY + 38} fill="var(--text-2)" fontSize="11" fontFamily="monospace">
+                <text x={tooltipX + 10} y={tooltipY + 39} fill="var(--text-2)" fontSize="11" fontFamily="monospace">
                   O {formatPrice(activePoint.open)}  H {formatPrice(activePoint.high)}
                 </text>
-                <text x={tooltipX + 10} y={tooltipY + 56} fill="var(--text-2)" fontSize="11" fontFamily="monospace">
+                <text x={tooltipX + 10} y={tooltipY + 58} fill="var(--text-2)" fontSize="11" fontFamily="monospace">
                   L {formatPrice(activePoint.low)}  C {formatPrice(activePoint.close)}
                 </text>
               </g>
@@ -574,8 +805,9 @@ export function CandlestickChart({
           })() : null}
         </svg>
 
-        <div className="mt-2 flex justify-end text-[11px] text-[var(--text-3)]">
-          <span>Last candle {new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }).format(new Date(lastPoint.time))}</span>
+        <div className="mt-2 flex flex-wrap items-center justify-between gap-2 text-[11px] text-[var(--text-3)]">
+          <span>{detailedTimeLabel(firstPoint.time)} - {detailedTimeLabel(lastPoint.time)}</span>
+          <span>Last visible candle {detailedTimeLabel(lastPoint.time)}</span>
         </div>
       </div>
     </div>

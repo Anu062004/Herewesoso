@@ -23,7 +23,7 @@ import {
 } from '@/components/terminal/ui';
 
 const INTERVALS = ['1m', '5m', '15m', '1h', '4h', '1d'];
-const CANDLE_LIMITS = [60, 120, 240];
+const CANDLE_LIMITS = [120, 240, 500];
 const FALLBACK_SYMBOLS = ['BTC-USD', 'ETH-USD', 'SOL-USD', 'DOGE-USD'];
 
 function pollingIntervalFor(interval: string) {
@@ -36,7 +36,7 @@ export default function KlinesClient({ initialSymbol }: { initialSymbol: string 
   const connection = useSodexConnection();
   const [symbol, setSymbol] = useState(initialSymbol || 'BTC-USD');
   const [interval, setInterval] = useState('1h');
-  const [limit, setLimit] = useState(120);
+  const [limit, setLimit] = useState(240);
   const network = connection?.network || 'testnet';
   const networkLabel = network === 'mainnet' ? 'Mainnet' : 'Testnet';
   const markets = usePollingResource({ fetcher: () => fetchSodexMarkets(), intervalMs: 30000, key: network });
@@ -145,7 +145,7 @@ export default function KlinesClient({ initialSymbol }: { initialSymbol: string 
         <PanelHeader
           title={`${symbol} Live Candles`}
           accent="blue"
-          subtitle={`${interval} interval · ${pollingIntervalFor(interval) / 1000}s refresh`}
+          subtitle={`${interval} interval - ${pollingIntervalFor(interval) / 1000}s refresh`}
           right={stats.latest ? <Pill tone={stats.candleChangePct === null ? 'gray' : stats.candleChangePct >= 0 ? 'green' : 'red'}>{formatPercent(stats.candleChangePct, 2)}</Pill> : null}
         />
         <div className="p-4">
