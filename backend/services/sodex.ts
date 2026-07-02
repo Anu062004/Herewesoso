@@ -221,7 +221,7 @@ const sodex = {
   },
 
   async getSpotMarkets(network: SodexNetwork = 'testnet') {
-    return get(spotBaseUrl(network), '/markets');
+    return get(spotBaseUrl(network), '/markets/symbols');
   },
 
   normalizeAccountState,

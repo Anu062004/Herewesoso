@@ -10,6 +10,7 @@ import {
   clearSodexConnection,
   saveSodexConnection,
   shortWallet,
+  SODEX_NETWORK_CONFIG,
   SODEX_APP_URLS
 } from '@/lib/sodexConnection';
 import type { SodexNetwork } from '@/lib/sodexConnection';
@@ -43,17 +44,21 @@ const NETWORKS: Array<{
     id: 'testnet',
     label: 'Testnet',
     eyebrow: 'Practice environment',
-    chainId: 138565,
+    chainId: SODEX_NETWORK_CONFIG.testnet.chainId,
     description: 'Use test funds to verify the full setup before working with real value.'
   },
   {
     id: 'mainnet',
     label: 'Mainnet',
     eyebrow: 'Live environment',
-    chainId: 286623,
+    chainId: SODEX_NETWORK_CONFIG.mainnet.chainId,
     description: 'Read your live account here. Trading remains on the official SoDEX app.'
   }
 ];
+
+function isWalletError(error: unknown): error is { code?: number | string; message?: string } {
+  return Boolean(error && typeof error === 'object');
+}
 
 function messageToHex(message: string) {
   return `0x${Array.from(new TextEncoder().encode(message))
@@ -68,6 +73,58 @@ function stateLabel(state: ConnectState) {
   if (state === 'success') return 'Connected';
   if (state === 'error') return 'Needs attention';
   return 'Ready to connect';
+}
+
+function isUnknownChainError(error: unknown) {
+  if (!isWalletError(error)) {
+    return false;
+  }
+
+  return error.code === 4902 || /unrecognized chain|unknown chain|not added/i.test(error.message || '');
+}
+
+function isUserRejected(error: unknown) {
+  if (!isWalletError(error)) {
+    return false;
+  }
+
+  return error.code === 4001 || /user rejected|user denied|rejected the request/i.test(error.message || '');
+}
+
+async function ensureWalletNetwork(provider: EthereumProvider, network: SodexNetwork) {
+  const config = SODEX_NETWORK_CONFIG[network];
+
+  try {
+    await provider.request({
+      method: 'wallet_switchEthereumChain',
+      params: [{ chainId: config.chainIdHex }]
+    });
+  } catch (switchError) {
+    if (isUserRejected(switchError)) {
+      throw new Error(`Switch to ${config.label} was rejected in the wallet.`);
+    }
+
+    if (!isUnknownChainError(switchError)) {
+      throw switchError;
+    }
+
+    await provider.request({
+      method: 'wallet_addEthereumChain',
+      params: [{
+        chainId: config.chainIdHex,
+        chainName: config.chainName,
+        nativeCurrency: config.nativeCurrency,
+        rpcUrls: config.rpcUrls,
+        blockExplorerUrls: config.blockExplorerUrls
+      }]
+    });
+  }
+
+  const activeChainId = await provider.request({ method: 'eth_chainId' });
+
+  if (typeof activeChainId === 'string' && activeChainId.toLowerCase() !== config.chainIdHex) {
+    throw new Error(`Wallet is still on chain ${activeChainId}. Switch to ${config.label} (${config.chainId}) and try again.`);
+  }
 }
 
 export default function SodexConnection() {
@@ -120,6 +177,9 @@ export default function SodexConnection() {
       if (!address) {
         throw new Error('The wallet did not return an account.');
       }
+
+      setMessage(`Switching wallet to ${SODEX_NETWORK_CONFIG[network].label}...`);
+      await ensureWalletNetwork(provider, network);
 
       const issuedAt = Date.now();
       const loginMessage = buildSodexLoginMessage(address, network, issuedAt);

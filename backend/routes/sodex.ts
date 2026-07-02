@@ -11,6 +11,16 @@ const { getErrorMessage } = errorUtils;
 const VALID_INTERVALS = new Set(['1m', '5m', '15m', '30m', '1h', '4h', '1d']);
 const LOGIN_WINDOW_MS = 5 * 60 * 1000;
 type SodexNetwork = 'testnet' | 'mainnet';
+type SmokeStatus = 'ok' | 'error' | 'skipped';
+
+interface SmokeCheck {
+  name: string;
+  status: SmokeStatus;
+  latencyMs?: number;
+  count?: number;
+  sample?: unknown;
+  error?: string;
+}
 
 const router = express.Router();
 
@@ -61,6 +71,54 @@ function parseInterval(value: unknown): string {
   return VALID_INTERVALS.has(value) ? value : '1h';
 }
 
+async function runSmokeCheck(
+  name: string,
+  task: () => Promise<unknown>,
+  summarize: (value: unknown) => Pick<SmokeCheck, 'count' | 'sample'> = () => ({})
+): Promise<SmokeCheck> {
+  const startedAt = Date.now();
+
+  try {
+    const value = await task();
+    return {
+      name,
+      status: 'ok',
+      latencyMs: Date.now() - startedAt,
+      ...summarize(value)
+    };
+  } catch (error) {
+    return {
+      name,
+      status: 'error',
+      latencyMs: Date.now() - startedAt,
+      error: getErrorMessage(error)
+    };
+  }
+}
+
+function summarizeEnvelope(value: unknown): Pick<SmokeCheck, 'count' | 'sample'> {
+  const payload = value && typeof value === 'object' ? value as Record<string, unknown> : {};
+  const data = payload.data;
+
+  if (Array.isArray(data)) {
+    return {
+      count: data.length,
+      sample: data[0] || null
+    };
+  }
+
+  if (data && typeof data === 'object') {
+    return {
+      count: Object.keys(data as Record<string, unknown>).length,
+      sample: data
+    };
+  }
+
+  return {
+    sample: value
+  };
+}
+
 router.get('/account', async (req: Request, res: Response) => {
   const wallet = getWallet(req);
   const network = parseNetwork(req.query.network);
@@ -76,6 +134,68 @@ router.get('/account', async (req: Request, res: Response) => {
     console.error('[SoDEX Route] /account error:', getErrorMessage(error));
     return res.status(500).json({ error: getErrorMessage(error) });
   }
+});
+
+router.get('/smoke', async (req: Request, res: Response) => {
+  const network = parseNetwork(req.query.network);
+  const symbol = parseSymbol(req.query.symbol) || 'BTC-USD';
+  const wallet = getWallet(req);
+  const checks: SmokeCheck[] = await Promise.all([
+    runSmokeCheck('perps.markPrices', () => sodex.getMarkPrices(symbol, network), summarizeEnvelope),
+    runSmokeCheck('perps.symbols', () => sodex.getSymbols(network), summarizeEnvelope),
+    runSmokeCheck('perps.orderbook', () => sodex.getOrderbook(symbol, 10, network), summarizeEnvelope),
+    runSmokeCheck('perps.klines', () => sodex.getKlines(symbol, '1h', 20, network), summarizeEnvelope),
+    runSmokeCheck('spot.markets', () => sodex.getSpotMarkets(network), summarizeEnvelope)
+  ]);
+
+  if (wallet) {
+    if (ethers.isAddress(wallet)) {
+      checks.push(await runSmokeCheck(
+        'account.state',
+        () => sodex.getAccountState(ethers.getAddress(wallet), network),
+        (value) => {
+          const result = value as { data?: AccountState | null };
+          return {
+            count: result.data ? 1 : 0,
+            sample: result.data
+              ? {
+                  accountId: result.data.accountId,
+                  accountValue: result.data.accountValue,
+                  positions: result.data.positions.length,
+                  balances: result.data.balances.length
+                }
+              : null
+          };
+        }
+      ));
+    } else {
+      checks.push({
+        name: 'account.state',
+        status: 'skipped',
+        error: 'wallet query parameter is not a valid EVM address.'
+      });
+    }
+  }
+
+  const required = checks.filter((check) => check.status !== 'skipped');
+  const ok = required.length > 0 && required.every((check) => check.status === 'ok');
+
+  return res.status(ok ? 200 : 502).json({
+    ok,
+    network,
+    symbol,
+    wallet: wallet || null,
+    endpoints: {
+      perps: network === 'mainnet'
+        ? process.env.SODEX_MAINNET_PERPS || 'https://mainnet-gw.sodex.dev/api/v1/perps'
+        : process.env.SODEX_TESTNET_PERPS || 'https://testnet-gw.sodex.dev/api/v1/perps',
+      spot: network === 'mainnet'
+        ? process.env.SODEX_MAINNET_SPOT || 'https://mainnet-gw.sodex.dev/api/v1/spot'
+        : process.env.SODEX_TESTNET_SPOT || 'https://testnet-gw.sodex.dev/api/v1/spot'
+    },
+    checks,
+    checkedAt: new Date().toISOString()
+  });
 });
 
 router.get('/markets', async (req: Request, res: Response) => {

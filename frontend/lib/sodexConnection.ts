@@ -1,5 +1,20 @@
 export type SodexNetwork = 'testnet' | 'mainnet';
 
+export interface SodexNetworkConfig {
+  id: SodexNetwork;
+  label: string;
+  chainId: number;
+  chainIdHex: `0x${string}`;
+  chainName: string;
+  rpcUrls: string[];
+  blockExplorerUrls: string[];
+  nativeCurrency: {
+    name: string;
+    symbol: string;
+    decimals: number;
+  };
+}
+
 export interface SodexConnection {
   connected: true;
   network: SodexNetwork;
@@ -14,6 +29,37 @@ export interface SodexConnection {
 
 const STORAGE_KEY = 'gold-grith:sodex-connection';
 const CHANGE_EVENT = 'gold-grith:sodex-connection-change';
+
+export const SODEX_NETWORK_CONFIG: Record<SodexNetwork, SodexNetworkConfig> = {
+  testnet: {
+    id: 'testnet',
+    label: 'ValueChain Testnet',
+    chainId: 138565,
+    chainIdHex: '0x21d45',
+    chainName: 'ValueChain Testnet',
+    rpcUrls: ['https://testnet-v2.valuechain.xyz'],
+    blockExplorerUrls: ['https://test-scan.valuechain.xyz'],
+    nativeCurrency: {
+      name: 'SOSO',
+      symbol: 'SOSO',
+      decimals: 18
+    }
+  },
+  mainnet: {
+    id: 'mainnet',
+    label: 'ValueChain',
+    chainId: 286623,
+    chainIdHex: '0x45f9f',
+    chainName: 'ValueChain',
+    rpcUrls: ['https://mainnet.valuechain.xyz'],
+    blockExplorerUrls: ['https://main-scan.valuechain.xyz'],
+    nativeCurrency: {
+      name: 'SOSO',
+      symbol: 'SOSO',
+      decimals: 18
+    }
+  }
+};
 
 export const SODEX_APP_URLS: Record<SodexNetwork, string> = {
   testnet: 'https://testnet.sodex.com',
