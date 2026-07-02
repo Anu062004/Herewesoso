@@ -8,6 +8,7 @@ import delayUtils = require('../utils/delay');
 import supabaseService = require('../services/supabase');
 import memoryStore = require('../services/memoryStore');
 import errorUtils = require('../utils/error');
+import performanceService = require('../services/performance');
 
 const { delay } = delayUtils;
 const { safeInsert, createAgentRun, completeAgentRun, failAgentRun } = supabaseService;
@@ -204,6 +205,7 @@ async function runNarrativeAgent(): Promise<NarrativeAgentResult> {
 
     memoryStore.pushSignals(scoresToStore);
     await safeInsert('narrative_scores', scoresToStore);
+    await performanceService.recordSignalOutcomes(scoresToStore);
 
     const duration = Date.now() - startTime;
     await completeAgentRun(runRecord?.id, {

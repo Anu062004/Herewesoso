@@ -358,6 +358,12 @@ Close position, reduce leverage, and cancel order support two signing modes. To 
 | `NEXT_PUBLIC_APP_URL` | `http://localhost:3000` | Frontend URL for Telegram deep links |
 | `NEXT_PUBLIC_API_BASE_URL` | `http://localhost:3001` | Backend URL for frontend |
 | `AUTO_EXECUTE` | `false` | Disable automatic trade execution |
+| `EXECUTION_MODE` | `testnet` | `dry_run`, `testnet`, or guarded `mainnet_canary` execution mode |
+| `KEY_PROVIDER` | `local_file` | `local_file` for testnet `/setkey`, `env`, `managed`, or `disabled` |
+| `MAX_NOTIONAL_USD` | `10000` | Hard policy cap for execution previews and confirmations |
+| `ALLOWED_SYMBOLS` | `BTC-USD,ETH-USD,SOL-USD` | Comma-separated execution allowlist |
+| `MAX_LEVERAGE` | `25` | Maximum leverage accepted by the execution policy |
+| `NARRATIVE_MODEL_VERSION` | `narrative-v1.0.0` | Version tag written into signal outcome rows |
 
 ---
 
@@ -441,6 +447,10 @@ CREATE INDEX idx_agent_runs_created ON agent_runs (created_at DESC);
 Supabase writes are wrapped in safe helpers — if the database is unavailable, agents log warnings and continue using in-memory fallbacks.
 
 ---
+
+### Wave 3 Evidence Tables
+
+Additional Supabase tables for signal outcomes, execution audit logs, performance snapshots, portfolio snapshots, and model versions are in [docs/wave3-schema.sql](docs/wave3-schema.sql). Run that SQL after the base tables above before enabling the Wave 3 proof dashboard.
 
 ## Running Locally
 

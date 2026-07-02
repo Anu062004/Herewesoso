@@ -7,6 +7,7 @@ import telegram = require('../services/telegram');
 import supabaseService = require('../services/supabase');
 import runtimeStatus = require('../services/runtimeStatus');
 import errorUtils = require('../utils/error');
+import performanceService = require('../services/performance');
 
 const { runNarrativeAgent } = narrativeAgent;
 const { runShieldAgent } = shieldAgent;

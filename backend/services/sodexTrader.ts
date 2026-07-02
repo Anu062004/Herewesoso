@@ -1,10 +1,8 @@
 import axios from 'axios';
-import fs = require('fs');
-import path = require('path');
 import sodexSigner = require('./sodexSigner');
+import keyProvider = require('./keyProvider');
 
 const PERPS_BASE = process.env.SODEX_TESTNET_PERPS || 'https://testnet-gw.sodex.dev/api/v1/perps';
-const KEY_FILE = path.join(__dirname, '../../.sodex_key');
 
 const client = axios.create({
   timeout: 10000,
@@ -464,6 +462,13 @@ async function postSigned<T>(
 
   const text = await response.text();
   const responseData = (text ? JSON.parse(text) : {}) as PerpsRestResponse<T>;
+  (responseData as PerpsRestResponse<T> & { signed?: Record<string, unknown> }).signed = {
+    payloadHash: signed.payloadHash,
+    nonce: signed.nonce,
+    chainId: signed.domain.chainId,
+    signerAddress: wallet.address,
+    actionType
+  };
 
   if (!response.ok) {
     const error: any = new Error(responseData.error || response.statusText || 'SoDEX signed request failed.');
@@ -543,23 +548,15 @@ async function submitLeverageUpdate(
 export function saveKey(privateKey: string): void {
   const normalized = privateKey.startsWith('0x') ? privateKey : `0x${privateKey}`;
   sodexSigner.createWallet(normalized);
-  fs.writeFileSync(KEY_FILE, normalized, { mode: 0o600 });
+  keyProvider.saveRuntimePrivateKey(normalized);
 }
 
 export function loadKey(): string | null {
-  try {
-    if (process.env.SODEX_API_PRIVATE_KEY) return process.env.SODEX_API_PRIVATE_KEY;
-    if (fs.existsSync(KEY_FILE)) return fs.readFileSync(KEY_FILE, 'utf8').trim();
-    return process.env.SODEX_PRIVATE_KEY || null;
-  } catch {
-    return null;
-  }
+  return keyProvider.loadPrivateKey();
 }
 
 export function removeKey(): void {
-  try {
-    if (fs.existsSync(KEY_FILE)) fs.unlinkSync(KEY_FILE);
-  } catch {}
+  keyProvider.removeRuntimePrivateKey();
 }
 
 export function hasKey(): boolean {
@@ -850,6 +847,10 @@ export async function reduceLeverage(symbol: string, newLeverage: number): Promi
   }
 }
 
+export function getKeyStatus() {
+  return keyProvider.getKeyStatus();
+}
+
 export const sodexTrader = {
   saveKey,
   loadKey,
@@ -857,6 +858,7 @@ export const sodexTrader = {
   hasKey,
   getWalletAddress,
   getAccountAddress,
+  getKeyStatus,
   placeOrder,
   cancelOrder,
   cancelOrders,

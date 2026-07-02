@@ -8,6 +8,7 @@ import riskCalculator = require('../utils/riskCalculator');
 import supabaseService = require('../services/supabase');
 import memoryStore = require('../services/memoryStore');
 import errorUtils = require('../utils/error');
+import performanceService = require('../services/performance');
 
 const { safeInsert, createAgentRun, completeAgentRun, failAgentRun } = supabaseService;
 const { getErrorMessage } = errorUtils;
@@ -377,6 +378,7 @@ async function runShieldAgent(): Promise<ShieldAgentResult> {
     if (riskSnapshots.length > 0) {
       memoryStore.pushPositionRisks(riskSnapshots);
       await safeInsert('position_risks', riskSnapshots);
+      await performanceService.recordPortfolioSnapshot(WALLET, shieldState, riskSnapshots);
     }
 
     const duration = Date.now() - startTime;

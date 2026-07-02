@@ -14,7 +14,8 @@ router.get('/', (_req: Request, res: Response) => {
     sodex: {
       tradingKeyConfigured: sodexTrader.hasKey(),
       walletAddress: sodexTrader.getWalletAddress(),
-      accountAddress: sodexTrader.getAccountAddress()
+      accountAddress: sodexTrader.getAccountAddress(),
+      keyStatus: sodexTrader.getKeyStatus()
     }
   });
 });

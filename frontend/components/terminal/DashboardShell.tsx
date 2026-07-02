@@ -51,6 +51,8 @@ const PRIMARY_NAV_ITEMS: NavItem[] = [
 ];
 
 const MORE_NAV_ITEMS: NavItem[] = [
+  { label: 'Performance', href: '/dashboard/performance', icon: <RadarIcon className="h-4 w-4" />, aliases: ['performance', 'evidence', 'proof', 'accuracy'] },
+  { label: 'Execution Audit', href: '/dashboard/executions', icon: <NotesIcon className="h-4 w-4" />, aliases: ['execution', 'audit', 'ledger', 'signed'] },
   { label: 'Alerts', href: '/dashboard/alerts', icon: <BellIcon className="h-4 w-4" />, aliases: ['alert', 'warning'] },
   { label: 'Trade Memos', href: '/dashboard/memos', icon: <NotesIcon className="h-4 w-4" />, aliases: ['memo', 'notes'] },
   { label: 'Macro', href: '/dashboard/macro', icon: <WorldIcon className="h-4 w-4" />, aliases: ['macro', 'calendar', 'fed'] },

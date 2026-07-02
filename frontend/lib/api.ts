@@ -4,6 +4,8 @@ import type {
   AnalysisSector,
   AnalysisResult,
   DashboardActionResponse,
+  ExecutionActionRow,
+  ExecutionSimulationResponse,
   DashboardData,
   HealthStatus,
   KlinePoint,
@@ -11,6 +13,7 @@ import type {
   MacroResponse,
   MemoRow,
   NewsResponse,
+  PerformanceResponse,
   PositionsResponse,
   SignalRow,
   SoDexKlinesResponse,
@@ -298,6 +301,14 @@ export async function fetchAgentRuns() {
   return requestJson<AgentRunsResponse>('/api/agent-runs');
 }
 
+export async function fetchPerformance() {
+  return requestJson<PerformanceResponse>('/api/performance');
+}
+
+export async function fetchExecutions(limit = 100) {
+  return requestJson<ExecutionActionRow[]>(`/api/executions?limit=${limit}`);
+}
+
 export async function triggerCycle() {
   return requestJson<TriggerCycleResponse>('/api/trigger', { method: 'POST' });
 }
@@ -322,7 +333,28 @@ export async function queueDashboardAction(payload: {
     } satisfies DashboardActionResponse;
   }
 
-  return requestJson<DashboardActionResponse>('/api/actions', {
+  return requestJson<DashboardActionResponse>('/api/actions/confirm', {
+    method: 'POST',
+    body: JSON.stringify({
+      ...payload,
+      network: connection?.network || 'testnet',
+      wallet: connection?.address
+    })
+  });
+}
+
+export async function simulateDashboardAction(payload: {
+  action: 'REDUCE_LEVERAGE' | 'CLOSE_POSITION' | 'CANCEL_ORDER' | 'QUEUE_ACTION';
+  symbol: string;
+  currentLeverage?: number;
+  targetLeverage?: number;
+  orderId?: string | number;
+  clOrdId?: string;
+  cancels?: Array<{ orderId?: string | number; clOrdId?: string }>;
+}) {
+  const connection = getSodexConnection();
+
+  return requestJson<ExecutionSimulationResponse>('/api/actions/simulate', {
     method: 'POST',
     body: JSON.stringify({
       ...payload,

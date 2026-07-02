@@ -15,6 +15,8 @@ import analyzeRoute = require('./routes/analyze');
 import sodexRoute = require('./routes/sodex');
 import newsRoute = require('./routes/news');
 import agentRunsRoute = require('./routes/agentRuns');
+import performanceRoute = require('./routes/performance');
+import executionsRoute = require('./routes/executions');
 
 const app = express();
 
@@ -24,6 +26,8 @@ app.use(express.json());
 app.use('/health', healthRoute);
 app.use('/api/health', healthRoute);
 app.use('/api/agent-runs', agentRunsRoute);
+app.use('/api/performance', performanceRoute);
+app.use('/api/executions', executionsRoute);
 app.use('/api/signals', signalsRoute);
 app.use('/api/positions', positionsRoute);
 app.use('/api/alerts', alertsRoute);

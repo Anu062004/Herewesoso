@@ -129,6 +129,14 @@ export interface HealthStatus {
     tradingKeyConfigured: boolean;
     walletAddress: string | null;
     accountAddress: string | null;
+    keyStatus?: {
+      configured: boolean;
+      provider: string;
+      source: string;
+      runtimeWritable: boolean;
+      mainnetSafe: boolean;
+      message: string;
+    };
   };
 }
 
@@ -249,6 +257,117 @@ export interface MacroResponse {
   error?: string;
 }
 
+
+export interface SignalOutcomeRow {
+  id?: string;
+  created_at?: string;
+  signal_at: string;
+  sector: string;
+  signal: SignalType;
+  combined_score: number;
+  model_version: string;
+  score_breakdown?: Record<string, number>;
+  forward_return_1h: number | null;
+  forward_return_6h: number | null;
+  forward_return_24h: number | null;
+  forward_return_7d: number | null;
+  benchmark_return_24h: number | null;
+  alpha_24h: number | null;
+  max_drawdown_24h: number | null;
+  outcome_status: 'PENDING' | 'READY' | 'INSUFFICIENT_DATA' | 'FAILED';
+  source_snapshot?: Record<string, unknown> | null;
+  resolved_at?: string | null;
+}
+
+export interface PortfolioSnapshotRow {
+  id?: string;
+  created_at?: string;
+  wallet_address: string;
+  account_value: number;
+  available_margin: number;
+  position_count: number;
+  gross_notional: number;
+  net_exposure: number;
+  max_risk_score: number;
+  liquidation_cluster_count: number;
+  recommended_action: string;
+  data?: Record<string, unknown> | null;
+}
+
+export interface ExecutionActionRow {
+  id?: string;
+  action_id: string;
+  created_at?: string;
+  updated_at?: string;
+  action_type: string;
+  symbol: string;
+  network: 'testnet' | 'mainnet';
+  execution_mode: 'dry_run' | 'testnet' | 'mainnet_canary';
+  status: 'SIMULATED' | 'CONFIRMED' | 'SUBMITTED' | 'SUCCEEDED' | 'FAILED' | 'REJECTED' | 'DRY_RUN';
+  requested_by?: string | null;
+  idempotency_key: string;
+  policy_snapshot?: Record<string, unknown>;
+  request_payload?: Record<string, unknown>;
+  signed_payload_hash?: string | null;
+  signer_address?: string | null;
+  sodex_response?: unknown;
+  error?: string | null;
+}
+
+export interface PerformanceResponse {
+  generatedAt: string;
+  summary: {
+    totalSignals: number;
+    validatedSignals: number;
+    pendingSignals: number;
+    winRate: number | null;
+    avgReturn24h: number | null;
+    benchmarkReturn24h: number | null;
+    alpha24h: number | null;
+    maxDrawdown24h: number | null;
+    modelVersions: string[];
+    readiness: { status: string; message: string };
+  };
+  bySignal: Array<{
+    signal: SignalType;
+    count: number;
+    validated: number;
+    hitRate: number | null;
+    avgReturn24h: number | null;
+    avgAlpha24h: number | null;
+  }>;
+  horizons: Array<{ horizon: string; avgReturn: number | null; sampleSize: number }>;
+  alertValidation: {
+    totalAlerts: number;
+    liquidationAlerts: number;
+    criticalAlerts: number;
+    avgRiskScore: number | null;
+    medianAlertLatencyMs: number | null;
+  };
+  execution: {
+    total: number;
+    submitted: number;
+    succeeded: number;
+    rejected: number;
+    successRate: number | null;
+  };
+  portfolio: PortfolioSnapshotRow | null;
+  recentOutcomes: SignalOutcomeRow[];
+  performanceSnapshots: Array<Record<string, unknown>>;
+  recentExecutions: ExecutionActionRow[];
+}
+
+export interface ExecutionSimulationResponse {
+  action: string;
+  symbol: string;
+  network: 'testnet' | 'mainnet';
+  allowed: boolean;
+  executionMode: string;
+  idempotencyKey: string;
+  checks: Array<{ name: string; passed: boolean; message: string }>;
+  keyStatus: Record<string, unknown>;
+  preview: Record<string, unknown>;
+}
 export interface TriggerCycleResponse {
   success?: boolean;
   skipped?: boolean;

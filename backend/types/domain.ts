@@ -1,6 +1,16 @@
 export type SignalType = 'STRONG_BUY' | 'BUY' | 'WATCH' | 'NEUTRAL' | 'AVOID';
 export type RiskLevel = 'SAFE' | 'CAUTION' | 'DANGER' | 'CRITICAL';
 export type AlertSeverity = 'INFO' | 'WARNING' | 'DANGER' | 'CRITICAL';
+export type SignalOutcomeStatus = 'PENDING' | 'READY' | 'INSUFFICIENT_DATA' | 'FAILED';
+export type ExecutionMode = 'dry_run' | 'testnet' | 'mainnet_canary';
+export type ExecutionStatus =
+  | 'SIMULATED'
+  | 'CONFIRMED'
+  | 'SUBMITTED'
+  | 'SUCCEEDED'
+  | 'FAILED'
+  | 'REJECTED'
+  | 'DRY_RUN';
 
 export interface Headline {
   title?: string;
@@ -68,6 +78,62 @@ export interface PositionRiskSnapshot {
   macro_threats: MacroThreat | null;
 }
 
+
+export interface SignalOutcomeRow {
+  id?: string;
+  created_at?: string;
+  signal_at: string;
+  sector: string;
+  signal: SignalType;
+  combined_score: number;
+  model_version: string;
+  score_breakdown: Record<string, number>;
+  forward_return_1h: number | null;
+  forward_return_6h: number | null;
+  forward_return_24h: number | null;
+  forward_return_7d: number | null;
+  benchmark_return_24h: number | null;
+  alpha_24h: number | null;
+  max_drawdown_24h: number | null;
+  outcome_status: SignalOutcomeStatus;
+  source_snapshot?: Record<string, unknown> | null;
+  resolved_at?: string | null;
+}
+
+export interface PortfolioSnapshotRow {
+  id?: string;
+  created_at?: string;
+  wallet_address: string;
+  account_value: number;
+  available_margin: number;
+  position_count: number;
+  gross_notional: number;
+  net_exposure: number;
+  max_risk_score: number;
+  liquidation_cluster_count: number;
+  recommended_action: string;
+  data?: Record<string, unknown> | null;
+}
+
+export interface ExecutionActionRow {
+  id?: string;
+  action_id: string;
+  created_at?: string;
+  updated_at?: string;
+  action_type: string;
+  symbol: string;
+  network: 'testnet' | 'mainnet';
+  execution_mode: ExecutionMode;
+  status: ExecutionStatus;
+  requested_by?: string | null;
+  idempotency_key: string;
+  policy_snapshot: Record<string, unknown>;
+  request_payload: Record<string, unknown>;
+  signed_payload_hash?: string | null;
+  signer_address?: string | null;
+  sodex_response?: unknown;
+  error?: string | null;
+}
 export interface EnrichedPosition {
   id?: string | number | null;
   symbol: string;
