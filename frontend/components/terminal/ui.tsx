@@ -2,6 +2,8 @@
 
 import type { ReactNode } from 'react';
 
+import { useMemo, useState } from 'react';
+
 import { formatPrice } from '@/lib/format';
 
 import { AlertTriangleIcon, CompassIcon, RefreshIcon } from '@/components/terminal/icons';
@@ -339,10 +341,72 @@ export function DataCellPrice({ value }: { value: number | null }) {
 }
 
 export function CandlestickChart({
-  points
+  points,
+  symbol,
+  interval
 }: {
-  points: Array<{ time: number; open: number; high: number; low: number; close: number }>;
+  points: Array<{ time: number; open: number; high: number; low: number; close: number; volume?: number }>;
+  symbol?: string;
+  interval?: string;
 }) {
+  const [hoverIndex, setHoverIndex] = useState<number | null>(null);
+  const chart = useMemo(() => {
+    const source = points.slice(-120);
+    const width = 1180;
+    const height = 520;
+    const priceTop = 24;
+    const priceBottom = 366;
+    const volumeTop = 404;
+    const volumeBottom = 474;
+    const left = 20;
+    const right = width - 86;
+    const bottom = 498;
+    const highs = source.map((point) => point.high);
+    const lows = source.map((point) => point.low);
+    const rawMax = Math.max(...highs);
+    const rawMin = Math.min(...lows);
+    const rawRange = rawMax - rawMin || Math.max(rawMax * 0.01, 1);
+    const max = rawMax + rawRange * 0.08;
+    const min = rawMin - rawRange * 0.08;
+    const range = max - min || 1;
+    const step = (right - left) / Math.max(source.length, 1);
+    const maxVolume = Math.max(...source.map((point) => point.volume || 0), 1);
+    const priceToY = (value: number) => priceBottom - ((value - min) / range) * (priceBottom - priceTop);
+    const volumeToHeight = (value: number) => ((value || 0) / maxVolume) * (volumeBottom - volumeTop);
+    const xForIndex = (index: number) => left + step * index + step / 2;
+    const ticks = Array.from({ length: 6 }).map((_, index) => {
+      const value = min + (range / 5) * index;
+      return {
+        value,
+        y: priceToY(value)
+      };
+    }).reverse();
+    const timeTicks = source.length <= 1
+      ? []
+      : Array.from({ length: 6 })
+          .map((_, index) => Math.round((index / 5) * (source.length - 1)))
+          .filter((value, index, array) => array.indexOf(value) === index);
+
+    return {
+      source,
+      width,
+      height,
+      priceTop,
+      priceBottom,
+      volumeTop,
+      volumeBottom,
+      left,
+      right,
+      bottom,
+      step,
+      priceToY,
+      volumeToHeight,
+      xForIndex,
+      ticks,
+      timeTicks
+    };
+  }, [points]);
+
   if (points.length === 0) {
     return (
       <EmptyState
@@ -353,44 +417,167 @@ export function CandlestickChart({
     );
   }
 
-  const width = 900;
-  const height = 360;
-  const padding = 28;
-  const highs = points.map((point) => point.high);
-  const lows = points.map((point) => point.low);
-  const max = Math.max(...highs);
-  const min = Math.min(...lows);
-  const range = max - min || 1;
-  const step = (width - padding * 2) / Math.max(points.length, 1);
-
-  const priceToY = (value: number) => height - padding - ((value - min) / range) * (height - padding * 2);
+  const activeIndex = hoverIndex ?? chart.source.length - 1;
+  const activePoint = chart.source[Math.max(0, Math.min(activeIndex, chart.source.length - 1))];
+  const firstPoint = chart.source[0];
+  const lastPoint = chart.source[chart.source.length - 1];
+  const changePct = firstPoint ? ((lastPoint.close - firstPoint.open) / firstPoint.open) * 100 : 0;
+  const activeChange = activePoint ? activePoint.close - activePoint.open : 0;
+  const activeChangePct = activePoint ? (activeChange / activePoint.open) * 100 : 0;
+  const lastPriceY = chart.priceToY(lastPoint.close);
+  const lastPriceTone = lastPoint.close >= lastPoint.open ? 'var(--green)' : 'var(--red)';
 
   return (
-    <div className="overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--bg-card)] p-4">
-      <svg viewBox={`0 0 ${width} ${height}`} className="h-[320px] w-full">
-        {[0.2, 0.4, 0.6, 0.8].map((stop) => {
-          const y = padding + stop * (height - padding * 2);
-          return <line key={stop} x1={padding} x2={width - padding} y1={y} y2={y} stroke="var(--border)" strokeWidth="1" />;
-        })}
-        {points.map((point, index) => {
-          const x = padding + step * index + step / 2;
-          const openY = priceToY(point.open);
-          const closeY = priceToY(point.close);
-          const highY = priceToY(point.high);
-          const lowY = priceToY(point.low);
-          const bullish = point.close >= point.open;
-          const color = bullish ? 'var(--green)' : 'var(--red)';
-          const bodyTop = Math.min(openY, closeY);
-          const bodyHeight = Math.max(2, Math.abs(closeY - openY));
+    <div className="overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--bg-card)]">
+      <div className="flex flex-col gap-3 border-b border-[var(--border)] bg-[var(--bg-panel)] px-4 py-3 lg:flex-row lg:items-center lg:justify-between">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-[14px] font-semibold text-[var(--text-1)]">{symbol || 'Market'}</span>
+          {interval ? <Pill tone="cyan">{interval}</Pill> : null}
+          <Pill tone={changePct >= 0 ? 'green' : 'red'}>
+            {changePct >= 0 ? '+' : ''}{changePct.toFixed(2)}%
+          </Pill>
+          <span className="text-[12px] text-[var(--text-3)]">{chart.source.length} candles</span>
+        </div>
+        <div className="grid grid-cols-2 gap-x-5 gap-y-1 text-[11px] text-[var(--text-3)] sm:grid-cols-5">
+          <span>O <strong className="font-medium text-[var(--text-1)]">{formatPrice(activePoint?.open)}</strong></span>
+          <span>H <strong className="font-medium text-[var(--green)]">{formatPrice(activePoint?.high)}</strong></span>
+          <span>L <strong className="font-medium text-[var(--red)]">{formatPrice(activePoint?.low)}</strong></span>
+          <span>C <strong className="font-medium text-[var(--text-1)]">{formatPrice(activePoint?.close)}</strong></span>
+          <span className={activeChange >= 0 ? 'text-[var(--green)]' : 'text-[var(--red)]'}>
+            {activeChange >= 0 ? '+' : ''}{activeChangePct.toFixed(2)}%
+          </span>
+        </div>
+      </div>
 
-          return (
-            <g key={`${point.time}-${index}`}>
-              <line x1={x} x2={x} y1={highY} y2={lowY} stroke={color} strokeWidth="1.5" />
-              <rect x={x - Math.max(3, step * 0.26)} y={bodyTop} width={Math.max(6, step * 0.52)} height={bodyHeight} rx="1" fill={color} />
+      <div className="relative p-3">
+        <svg
+          viewBox={`0 0 ${chart.width} ${chart.height}`}
+          className="h-[520px] w-full select-none"
+          role="img"
+          aria-label={`${symbol || 'Market'} ${interval || ''} candlestick chart`}
+          onMouseMove={(event) => {
+            const rect = event.currentTarget.getBoundingClientRect();
+            const relativeX = ((event.clientX - rect.left) / rect.width) * chart.width;
+            const index = Math.round((relativeX - chart.left - chart.step / 2) / chart.step);
+            setHoverIndex(Math.max(0, Math.min(index, chart.source.length - 1)));
+          }}
+          onMouseLeave={() => setHoverIndex(null)}
+        >
+          <rect x="0" y="0" width={chart.width} height={chart.height} rx="12" fill="transparent" />
+          {chart.ticks.map((tick) => (
+            <g key={tick.value}>
+              <line x1={chart.left} x2={chart.right} y1={tick.y} y2={tick.y} stroke="var(--border)" strokeWidth="1" opacity="0.75" />
+              <text x={chart.right + 12} y={tick.y + 4} fill="var(--text-3)" fontSize="12" fontFamily="monospace">
+                {formatPrice(tick.value)}
+              </text>
             </g>
-          );
-        })}
-      </svg>
+          ))}
+
+          <line x1={chart.left} x2={chart.right} y1={lastPriceY} y2={lastPriceY} stroke={lastPriceTone} strokeWidth="1" strokeDasharray="6 6" opacity="0.85" />
+          <rect x={chart.right + 8} y={lastPriceY - 11} width="70" height="22" rx="5" fill={lastPriceTone} opacity="0.18" />
+          <text x={chart.right + 14} y={lastPriceY + 4} fill={lastPriceTone} fontSize="12" fontFamily="monospace">
+            {formatPrice(lastPoint.close)}
+          </text>
+
+          {chart.timeTicks.map((index) => {
+            const point = chart.source[index];
+            const x = chart.xForIndex(index);
+            const label = new Intl.DateTimeFormat('en-US', {
+              month: 'short',
+              day: 'numeric',
+              hour: 'numeric'
+            }).format(new Date(point.time));
+            return (
+              <g key={`${point.time}-${index}`}>
+                <line x1={x} x2={x} y1={chart.priceTop} y2={chart.volumeBottom} stroke="var(--border)" strokeWidth="1" opacity="0.35" />
+                <text x={x} y={chart.bottom} textAnchor="middle" fill="var(--text-3)" fontSize="11" fontFamily="monospace">
+                  {label}
+                </text>
+              </g>
+            );
+          })}
+
+          <line x1={chart.left} x2={chart.right} y1={chart.volumeTop - 15} y2={chart.volumeTop - 15} stroke="var(--border)" strokeWidth="1" />
+          <text x={chart.left} y={chart.volumeTop - 22} fill="var(--text-3)" fontSize="11" fontFamily="monospace">
+            Volume
+          </text>
+
+          {chart.source.map((point, index) => {
+            const x = chart.xForIndex(index);
+            const bullish = point.close >= point.open;
+            const color = bullish ? 'var(--green)' : 'var(--red)';
+            const volumeHeight = chart.volumeToHeight(point.volume || 0);
+
+            return (
+              <rect
+                key={`volume-${point.time}-${index}`}
+                x={x - Math.max(2, chart.step * 0.24)}
+                y={chart.volumeBottom - volumeHeight}
+                width={Math.max(3, chart.step * 0.48)}
+                height={Math.max(1, volumeHeight)}
+                rx="1"
+                fill={color}
+                opacity="0.22"
+              />
+            );
+          })}
+
+          {chart.source.map((point, index) => {
+            const x = chart.xForIndex(index);
+            const openY = chart.priceToY(point.open);
+            const closeY = chart.priceToY(point.close);
+            const highY = chart.priceToY(point.high);
+            const lowY = chart.priceToY(point.low);
+            const bullish = point.close >= point.open;
+            const color = bullish ? 'var(--green)' : 'var(--red)';
+            const bodyTop = Math.min(openY, closeY);
+            const bodyHeight = Math.max(2, Math.abs(closeY - openY));
+            const candleWidth = Math.max(4, Math.min(15, chart.step * 0.58));
+            const selected = index === hoverIndex;
+
+            return (
+              <g key={`${point.time}-${index}`} opacity={hoverIndex === null || selected ? 1 : 0.58}>
+                <line x1={x} x2={x} y1={highY} y2={lowY} stroke={color} strokeWidth={selected ? '2.2' : '1.5'} />
+                <rect
+                  x={x - candleWidth / 2}
+                  y={bodyTop}
+                  width={candleWidth}
+                  height={bodyHeight}
+                  rx="1.5"
+                  fill={color}
+                />
+              </g>
+            );
+          })}
+
+          {hoverIndex !== null && activePoint ? (() => {
+            const x = chart.xForIndex(hoverIndex);
+            const y = chart.priceToY(activePoint.close);
+            const tooltipX = x > chart.right - 190 ? x - 202 : x + 14;
+            const tooltipY = y < 90 ? y + 18 : y - 82;
+            return (
+              <g>
+                <line x1={x} x2={x} y1={chart.priceTop} y2={chart.volumeBottom} stroke="var(--text-2)" strokeWidth="1" strokeDasharray="4 5" opacity="0.7" />
+                <line x1={chart.left} x2={chart.right} y1={y} y2={y} stroke="var(--text-2)" strokeWidth="1" strokeDasharray="4 5" opacity="0.55" />
+                <rect x={tooltipX} y={tooltipY} width="188" height="70" rx="8" fill="var(--bg-elevated)" stroke="var(--border-hover)" />
+                <text x={tooltipX + 10} y={tooltipY + 18} fill="var(--text-1)" fontSize="12" fontFamily="monospace">
+                  {new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }).format(new Date(activePoint.time))}
+                </text>
+                <text x={tooltipX + 10} y={tooltipY + 38} fill="var(--text-2)" fontSize="11" fontFamily="monospace">
+                  O {formatPrice(activePoint.open)}  H {formatPrice(activePoint.high)}
+                </text>
+                <text x={tooltipX + 10} y={tooltipY + 56} fill="var(--text-2)" fontSize="11" fontFamily="monospace">
+                  L {formatPrice(activePoint.low)}  C {formatPrice(activePoint.close)}
+                </text>
+              </g>
+            );
+          })() : null}
+        </svg>
+
+        <div className="mt-2 flex justify-end text-[11px] text-[var(--text-3)]">
+          <span>Last candle {new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }).format(new Date(lastPoint.time))}</span>
+        </div>
+      </div>
     </div>
   );
 }
