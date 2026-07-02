@@ -44,6 +44,8 @@ export function usePollingResource<T>({
   }, [fetcher]);
 
   useEffect(() => {
+    mountedRef.current = true;
+
     return () => {
       mountedRef.current = false;
     };

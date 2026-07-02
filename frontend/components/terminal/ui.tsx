@@ -1,10 +1,18 @@
 'use client';
 
 import type { ReactNode } from 'react';
+import type {
+  CandlestickData,
+  HistogramData,
+  IChartApi,
+  ISeriesApi,
+  MouseEventParams,
+  UTCTimestamp
+} from 'lightweight-charts';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 
-import { formatPrice } from '@/lib/format';
+import { formatCompactNumber, formatPrice } from '@/lib/format';
 
 import { AlertTriangleIcon, CompassIcon, RefreshIcon } from '@/components/terminal/icons';
 
@@ -350,18 +358,19 @@ type CandlestickPoint = {
 };
 
 const DEFAULT_VISIBLE_CANDLES = 120;
-const MIN_VISIBLE_CANDLES = 24;
+const PRICE_UP = '#16c784';
+const PRICE_DOWN = '#ea3943';
+const GRID_COLOR = 'rgba(148, 163, 184, 0.12)';
+const TEXT_MUTED = '#8f98a8';
 
-function clampNumber(value: number, min: number, max: number) {
-  return Math.min(Math.max(value, min), max);
+type ActiveCandle = CandlestickPoint & { color: string };
+
+function toChartTimestamp(time: number): UTCTimestamp {
+  return Math.floor(time > 1_000_000_000_000 ? time / 1000 : time) as UTCTimestamp;
 }
 
-function compactTimeLabel(time: number) {
-  return new Intl.DateTimeFormat('en-US', {
-    month: 'short',
-    day: 'numeric',
-    hour: 'numeric'
-  }).format(new Date(time));
+function toDateMs(time: UTCTimestamp) {
+  return Number(time) * 1000;
 }
 
 function detailedTimeLabel(time: number) {
@@ -373,28 +382,56 @@ function detailedTimeLabel(time: number) {
   }).format(new Date(time));
 }
 
-function ChartButton({
-  children,
-  disabled,
-  label,
-  onClick
-}: {
-  children: ReactNode;
-  disabled?: boolean;
-  label: string;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      aria-label={label}
-      disabled={disabled}
-      onClick={onClick}
-      className="inline-flex h-8 min-w-8 items-center justify-center rounded-md border border-[var(--border)] bg-[var(--bg-card)] px-2 text-[12px] font-medium text-[var(--text-2)] transition hover:border-[var(--border-hover)] hover:text-[var(--text-1)] disabled:cursor-not-allowed disabled:opacity-35"
-    >
-      {children}
-    </button>
-  );
+function normalizeChartData(points: CandlestickPoint[]) {
+  const rows = points
+    .filter((point) =>
+      Number.isFinite(point.time) &&
+      Number.isFinite(point.open) &&
+      Number.isFinite(point.high) &&
+      Number.isFinite(point.low) &&
+      Number.isFinite(point.close)
+    )
+    .map((point) => ({
+      ...point,
+      time: toChartTimestamp(point.time)
+    }))
+    .sort((left, right) => Number(left.time) - Number(right.time));
+
+  const deduped = new Map<number, CandlestickPoint & { time: UTCTimestamp }>();
+  rows.forEach((point) => deduped.set(Number(point.time), point));
+
+  const normalized = Array.from(deduped.values());
+  const candles: CandlestickData<UTCTimestamp>[] = normalized.map((point) => ({
+    time: point.time,
+    open: point.open,
+    high: point.high,
+    low: point.low,
+    close: point.close
+  }));
+  const volumes: HistogramData<UTCTimestamp>[] = normalized.map((point) => ({
+    time: point.time,
+    value: point.volume || 0,
+    color: point.close >= point.open ? 'rgba(22, 199, 132, 0.35)' : 'rgba(234, 57, 67, 0.35)'
+  }));
+  const byTime = new Map<number, ActiveCandle>();
+  normalized.forEach((point) => {
+    byTime.set(Number(point.time), {
+      time: toDateMs(point.time),
+      open: point.open,
+      high: point.high,
+      low: point.low,
+      close: point.close,
+      volume: point.volume,
+      color: point.close >= point.open ? PRICE_UP : PRICE_DOWN
+    });
+  });
+
+  return {
+    candles,
+    volumes,
+    byTime,
+    latest: normalized.length > 0 ? byTime.get(Number(normalized[normalized.length - 1].time)) || null : null
+  };
 }
 
 export function CandlestickChart({
@@ -406,111 +443,222 @@ export function CandlestickChart({
   symbol?: string;
   interval?: string;
 }) {
-  const [hoverIndex, setHoverIndex] = useState<number | null>(null);
-  const [visibleCount, setVisibleCount] = useState(DEFAULT_VISIBLE_CANDLES);
-  const [rightOffset, setRightOffset] = useState(0);
-  const [isDragging, setIsDragging] = useState(false);
-  const dragRef = useRef<{ x: number; rightOffset: number } | null>(null);
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const chartRef = useRef<IChartApi | null>(null);
+  const candleSeriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null);
+  const volumeSeriesRef = useRef<ISeriesApi<'Histogram'> | null>(null);
+  const rangeKeyRef = useRef<string>('');
+  const [chartReady, setChartReady] = useState(0);
+  const chartData = useMemo(() => normalizeChartData(points), [points]);
+  const chartDataRef = useRef(chartData);
+  const [activePoint, setActivePoint] = useState<ActiveCandle | null>(chartData.latest);
 
   useEffect(() => {
-    setHoverIndex(null);
-    setRightOffset(0);
-    setVisibleCount(DEFAULT_VISIBLE_CANDLES);
-  }, [symbol, interval]);
+    setActivePoint(chartData.latest);
+  }, [chartData.latest, symbol, interval]);
 
   useEffect(() => {
-    if (points.length === 0) {
-      setRightOffset(0);
-      return;
+    chartDataRef.current = chartData;
+  }, [chartData]);
+
+  useEffect(() => {
+    let disposed = false;
+    let resizeObserver: ResizeObserver | null = null;
+    let crosshairHandler: ((param: MouseEventParams) => void) | null = null;
+
+    async function mountChart() {
+      const {
+        CandlestickSeries,
+        ColorType,
+        CrosshairMode,
+        HistogramSeries,
+        LineStyle,
+        PriceScaleMode,
+        createChart
+      } = await import('lightweight-charts');
+
+      if (disposed || !containerRef.current) {
+        return;
+      }
+
+      const chart = createChart(containerRef.current, {
+        autoSize: true,
+        height: 640,
+        layout: {
+          background: { type: ColorType.Solid, color: '#050505' },
+          textColor: TEXT_MUTED,
+          fontFamily: 'JetBrains Mono, ui-monospace, SFMono-Regular, Menlo, monospace',
+          attributionLogo: false
+        },
+        grid: {
+          vertLines: { color: GRID_COLOR, style: LineStyle.Solid },
+          horzLines: { color: GRID_COLOR, style: LineStyle.Solid }
+        },
+        crosshair: {
+          mode: CrosshairMode.Normal,
+          vertLine: {
+            color: 'rgba(226, 232, 240, 0.55)',
+            labelBackgroundColor: '#111827',
+            style: LineStyle.LargeDashed
+          },
+          horzLine: {
+            color: 'rgba(226, 232, 240, 0.55)',
+            labelBackgroundColor: '#111827',
+            style: LineStyle.LargeDashed
+          }
+        },
+        localization: {
+          priceFormatter: (price: number) => formatPrice(price)
+        },
+        rightPriceScale: {
+          autoScale: true,
+          borderVisible: false,
+          mode: PriceScaleMode.Normal,
+          scaleMargins: {
+            top: 0.06,
+            bottom: 0.24
+          }
+        },
+        timeScale: {
+          borderVisible: false,
+          timeVisible: true,
+          secondsVisible: false,
+          rightOffset: 8,
+          barSpacing: 9,
+          minBarSpacing: 3,
+          fixLeftEdge: false,
+          fixRightEdge: false
+        },
+        handleScroll: {
+          mouseWheel: true,
+          pressedMouseMove: true,
+          horzTouchDrag: true,
+          vertTouchDrag: false
+        },
+        handleScale: {
+          axisDoubleClickReset: true,
+          axisPressedMouseMove: true,
+          mouseWheel: true,
+          pinch: true
+        },
+        kineticScroll: {
+          mouse: true,
+          touch: true
+        }
+      });
+
+      const candleSeries = chart.addSeries(CandlestickSeries, {
+        upColor: PRICE_UP,
+        downColor: PRICE_DOWN,
+        borderUpColor: PRICE_UP,
+        borderDownColor: PRICE_DOWN,
+        wickUpColor: PRICE_UP,
+        wickDownColor: PRICE_DOWN,
+        borderVisible: false,
+        priceLineVisible: true,
+        lastValueVisible: true,
+        priceFormat: {
+          type: 'price',
+          precision: 2,
+          minMove: 0.01
+        }
+      });
+
+      const volumeSeries = chart.addSeries(HistogramSeries, {
+        priceScaleId: 'volume',
+        priceFormat: { type: 'volume' },
+        lastValueVisible: false,
+        priceLineVisible: false
+      });
+
+      chart.priceScale('volume').applyOptions({
+        borderVisible: false,
+        scaleMargins: {
+          top: 0.78,
+          bottom: 0
+        }
+      });
+
+      crosshairHandler = (param) => {
+        const candle = candleSeriesRef.current
+          ? param.seriesData.get(candleSeriesRef.current) as CandlestickData<UTCTimestamp> | undefined
+          : undefined;
+
+        if (candle) {
+          const currentData = chartDataRef.current;
+          const matched = currentData.byTime.get(Number(candle.time));
+          setActivePoint(matched || {
+            time: toDateMs(candle.time),
+            open: candle.open,
+            high: candle.high,
+            low: candle.low,
+            close: candle.close,
+            color: candle.close >= candle.open ? PRICE_UP : PRICE_DOWN
+          });
+          return;
+        }
+
+        setActivePoint(chartDataRef.current.latest);
+      };
+
+      chart.subscribeCrosshairMove(crosshairHandler);
+      resizeObserver = new ResizeObserver((entries) => {
+        const entry = entries[0];
+        if (!entry) {
+          return;
+        }
+
+        chart.applyOptions({
+          width: Math.floor(entry.contentRect.width),
+          height: Math.max(520, Math.floor(entry.contentRect.height))
+        });
+      });
+      resizeObserver.observe(containerRef.current);
+
+      chartRef.current = chart;
+      candleSeriesRef.current = candleSeries;
+      volumeSeriesRef.current = volumeSeries;
+      setChartReady((current) => current + 1);
     }
 
-    const minimumVisible = Math.min(MIN_VISIBLE_CANDLES, points.length);
-    setVisibleCount((current) => clampNumber(current, minimumVisible, points.length));
-  }, [points.length]);
+    void mountChart();
 
-  useEffect(() => {
-    if (points.length === 0) {
-      return;
-    }
-
-    const safeVisibleCount = clampNumber(
-      visibleCount,
-      Math.min(MIN_VISIBLE_CANDLES, points.length),
-      points.length
-    );
-    setRightOffset((current) => clampNumber(current, 0, Math.max(0, points.length - safeVisibleCount)));
-  }, [points.length, visibleCount]);
-
-  const chart = useMemo(() => {
-    const width = 1180;
-    const height = 540;
-    const priceTop = 24;
-    const priceBottom = 366;
-    const volumeTop = 404;
-    const volumeBottom = 482;
-    const left = 20;
-    const right = width - 92;
-    const bottom = 512;
-    const fullLength = points.length;
-    const minimumVisible = Math.min(MIN_VISIBLE_CANDLES, fullLength);
-    const safeVisibleCount = fullLength === 0
-      ? 0
-      : clampNumber(Math.round(visibleCount), minimumVisible, fullLength);
-    const maxRightOffset = Math.max(0, fullLength - safeVisibleCount);
-    const safeRightOffset = clampNumber(Math.round(rightOffset), 0, maxRightOffset);
-    const windowEnd = Math.max(0, fullLength - safeRightOffset);
-    const windowStart = Math.max(0, windowEnd - safeVisibleCount);
-    const source = points.slice(windowStart, windowEnd);
-    const rawMax = source.length > 0 ? Math.max(...source.map((point) => point.high)) : 1;
-    const rawMin = source.length > 0 ? Math.min(...source.map((point) => point.low)) : 0;
-    const rawRange = rawMax - rawMin || Math.max(rawMax * 0.01, 1);
-    const max = rawMax + rawRange * 0.1;
-    const min = rawMin - rawRange * 0.1;
-    const range = max - min || 1;
-    const step = (right - left) / Math.max(source.length, 1);
-    const maxVolume = Math.max(...source.map((point) => point.volume || 0), 1);
-    const priceToY = (value: number) => priceBottom - ((value - min) / range) * (priceBottom - priceTop);
-    const volumeToHeight = (value: number) => ((value || 0) / maxVolume) * (volumeBottom - volumeTop);
-    const xForIndex = (index: number) => left + step * index + step / 2;
-    const ticks = Array.from({ length: 6 }).map((_, index) => {
-      const value = min + (range / 5) * index;
-      return { value, y: priceToY(value) };
-    }).reverse();
-    const timeTicks = source.length <= 1
-      ? []
-      : Array.from({ length: 7 })
-          .map((_, index) => Math.round((index / 6) * (source.length - 1)))
-          .filter((value, index, array) => array.indexOf(value) === index);
-    const windowStartPct = fullLength > 0 ? (windowStart / fullLength) * 100 : 0;
-    const windowWidthPct = fullLength > 0 ? Math.max(2, (source.length / fullLength) * 100) : 0;
-
-    return {
-      source,
-      width,
-      height,
-      priceTop,
-      priceBottom,
-      volumeTop,
-      volumeBottom,
-      left,
-      right,
-      bottom,
-      step,
-      priceToY,
-      volumeToHeight,
-      xForIndex,
-      ticks,
-      timeTicks,
-      fullLength,
-      safeVisibleCount,
-      safeRightOffset,
-      maxRightOffset,
-      windowStart,
-      windowEnd,
-      windowStartPct,
-      windowWidthPct
+    return () => {
+      disposed = true;
+      if (resizeObserver) {
+        resizeObserver.disconnect();
+      }
+      if (chartRef.current && crosshairHandler) {
+        chartRef.current.unsubscribeCrosshairMove(crosshairHandler);
+      }
+      chartRef.current?.remove();
+      chartRef.current = null;
+      candleSeriesRef.current = null;
+      volumeSeriesRef.current = null;
     };
-  }, [points, rightOffset, visibleCount]);
+  }, []);
+
+  useEffect(() => {
+    const chart = chartRef.current;
+    const candleSeries = candleSeriesRef.current;
+    const volumeSeries = volumeSeriesRef.current;
+
+    if (!chart || !candleSeries || !volumeSeries || chartData.candles.length === 0) {
+      return;
+    }
+
+    candleSeries.setData(chartData.candles);
+    volumeSeries.setData(chartData.volumes);
+    setActivePoint(chartData.latest);
+
+    const rangeKey = `${symbol || 'Market'}:${interval || 'interval'}`;
+    if (rangeKeyRef.current !== rangeKey) {
+      const to = chartData.candles.length + 8;
+      const from = Math.max(0, chartData.candles.length - DEFAULT_VISIBLE_CANDLES);
+      chart.timeScale().setVisibleLogicalRange({ from, to });
+      rangeKeyRef.current = rangeKey;
+    }
+  }, [chartData, chartReady, interval, symbol]);
 
   if (points.length === 0) {
     return (
@@ -522,293 +670,66 @@ export function CandlestickChart({
     );
   }
 
-  const activeIndex = hoverIndex ?? chart.source.length - 1;
-  const activePoint = chart.source[Math.max(0, Math.min(activeIndex, chart.source.length - 1))];
-  const firstPoint = chart.source[0];
-  const lastPoint = chart.source[chart.source.length - 1];
-  const isLive = chart.safeRightOffset === 0;
-  const changePct = firstPoint ? ((lastPoint.close - firstPoint.open) / firstPoint.open) * 100 : 0;
-  const activeChange = activePoint ? activePoint.close - activePoint.open : 0;
-  const activeChangePct = activePoint ? (activeChange / activePoint.open) * 100 : 0;
-  const lastPriceY = chart.priceToY(lastPoint.close);
-  const lastPriceTone = lastPoint.close >= lastPoint.open ? 'var(--green)' : 'var(--red)';
-  const pageStep = Math.max(6, Math.round(chart.safeVisibleCount * 0.35));
-  const canPanOlder = chart.safeRightOffset < chart.maxRightOffset;
-  const canPanNewer = chart.safeRightOffset > 0;
-  const canZoomIn = chart.safeVisibleCount > Math.min(MIN_VISIBLE_CANDLES, chart.fullLength);
-  const canZoomOut = chart.safeVisibleCount < chart.fullLength;
-
-  const zoomTo = (nextVisibleCount: number, anchorRatio = 0.5) => {
-    if (chart.fullLength === 0) {
-      return;
-    }
-
-    const minimumVisible = Math.min(MIN_VISIBLE_CANDLES, chart.fullLength);
-    const nextVisible = clampNumber(Math.round(nextVisibleCount), minimumVisible, chart.fullLength);
-    const safeAnchorRatio = clampNumber(anchorRatio, 0, 1);
-    const anchorIndex = chart.windowStart + Math.max(0, chart.safeVisibleCount - 1) * safeAnchorRatio;
-    const nextStart = clampNumber(
-      Math.round(anchorIndex - Math.max(0, nextVisible - 1) * safeAnchorRatio),
-      0,
-      Math.max(0, chart.fullLength - nextVisible)
-    );
-
-    setVisibleCount(nextVisible);
-    setRightOffset(chart.fullLength - (nextStart + nextVisible));
-    setHoverIndex(null);
-  };
-
-  const panBy = (candles: number) => {
-    setRightOffset((current) => clampNumber(current + candles, 0, chart.maxRightOffset));
-    setHoverIndex(null);
-  };
-
-  const resetView = () => {
-    setVisibleCount(Math.min(DEFAULT_VISIBLE_CANDLES, chart.fullLength));
-    setRightOffset(0);
-    setHoverIndex(null);
-  };
-
-  const relativePosition = (clientX: number, rect: DOMRect) => {
-    return ((clientX - rect.left) / rect.width) * chart.width;
-  };
+  const latestPoint = chartData.latest;
+  const displayPoint = activePoint || latestPoint;
+  const change = displayPoint ? displayPoint.close - displayPoint.open : 0;
+  const changePct = displayPoint ? (change / displayPoint.open) * 100 : 0;
+  const changeColor = change >= 0 ? PRICE_UP : PRICE_DOWN;
 
   return (
-    <div className="overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--bg-card)]">
-      <div className="flex flex-col gap-3 border-b border-[var(--border)] bg-[var(--bg-panel)] px-4 py-3 xl:flex-row xl:items-center xl:justify-between">
-        <div className="flex flex-wrap items-center gap-2">
+    <div className="overflow-hidden rounded-lg border border-[var(--border)] bg-[#050505]">
+      <div className="flex flex-col gap-3 border-b border-[var(--border)] bg-[#090909] px-4 py-3 xl:flex-row xl:items-center xl:justify-between">
+        <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
           <span className="text-[14px] font-semibold text-[var(--text-1)]">{symbol || 'Market'}</span>
-          {interval ? <Pill tone="cyan">{interval}</Pill> : null}
-          <Pill tone={changePct >= 0 ? 'green' : 'red'}>
-            {changePct >= 0 ? '+' : ''}{changePct.toFixed(2)}%
-          </Pill>
-          <Pill tone={isLive ? 'green' : 'amber'}>{isLive ? 'Live' : 'History'}</Pill>
-          <span className="text-[12px] text-[var(--text-3)]">
-            {chart.windowStart + 1}-{chart.windowEnd} / {chart.fullLength}
+          <span className="rounded border border-[var(--border)] px-2 py-0.5 text-[11px] font-medium text-[var(--text-2)]">
+            {interval || '1h'}
           </span>
+          {displayPoint ? (
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[12px] text-[var(--text-3)]">
+              <span>O <strong className="font-medium text-[var(--text-1)]">{formatPrice(displayPoint.open)}</strong></span>
+              <span>H <strong className="font-medium text-[var(--green)]">{formatPrice(displayPoint.high)}</strong></span>
+              <span>L <strong className="font-medium text-[var(--red)]">{formatPrice(displayPoint.low)}</strong></span>
+              <span>C <strong className="font-medium text-[var(--text-1)]">{formatPrice(displayPoint.close)}</strong></span>
+              <span style={{ color: changeColor }}>
+                {change >= 0 ? '+' : ''}{change.toFixed(2)} ({changePct >= 0 ? '+' : ''}{changePct.toFixed(2)}%)
+              </span>
+              <span>Vol <strong className="font-medium text-[var(--text-1)]">{formatCompactNumber(displayPoint.volume || 0, 2)}</strong></span>
+            </div>
+          ) : null}
         </div>
 
-        <div className="grid grid-cols-2 gap-x-5 gap-y-1 text-[11px] text-[var(--text-3)] sm:grid-cols-5">
-          <span>O <strong className="font-medium text-[var(--text-1)]">{formatPrice(activePoint?.open)}</strong></span>
-          <span>H <strong className="font-medium text-[var(--green)]">{formatPrice(activePoint?.high)}</strong></span>
-          <span>L <strong className="font-medium text-[var(--red)]">{formatPrice(activePoint?.low)}</strong></span>
-          <span>C <strong className="font-medium text-[var(--text-1)]">{formatPrice(activePoint?.close)}</strong></span>
-          <span className={activeChange >= 0 ? 'text-[var(--green)]' : 'text-[var(--red)]'}>
-            {activeChange >= 0 ? '+' : ''}{activeChangePct.toFixed(2)}%
-          </span>
-        </div>
-
-        <div className="flex flex-wrap items-center gap-1.5">
-          <ChartButton label="Show older candles" disabled={!canPanOlder} onClick={() => panBy(pageStep)}>{'<'}</ChartButton>
-          <ChartButton label="Show newer candles" disabled={!canPanNewer} onClick={() => panBy(-pageStep)}>{'>'}</ChartButton>
-          <ChartButton label="Zoom in" disabled={!canZoomIn} onClick={() => zoomTo(chart.safeVisibleCount * 0.75)}>+</ChartButton>
-          <ChartButton label="Zoom out" disabled={!canZoomOut} onClick={() => zoomTo(chart.safeVisibleCount * 1.25)}>-</ChartButton>
-          <ChartButton label="Reset chart view" onClick={resetView}>
-            <RefreshIcon className="h-3.5 w-3.5" />
-          </ChartButton>
+        <div className="flex items-center gap-2">
           <button
             type="button"
-            onClick={() => setRightOffset(0)}
-            disabled={isLive}
-            className="inline-flex h-8 items-center justify-center rounded-md border border-[rgba(34,197,94,0.3)] bg-[rgba(34,197,94,0.08)] px-3 text-[12px] font-medium text-[var(--green)] transition hover:bg-[rgba(34,197,94,0.14)] disabled:cursor-not-allowed disabled:opacity-45"
+            onClick={() => chartRef.current?.timeScale().resetTimeScale()}
+            className="inline-flex h-8 items-center rounded-md border border-[var(--border)] bg-[var(--bg-card)] px-3 text-[12px] font-medium text-[var(--text-2)] transition hover:border-[var(--border-hover)] hover:text-[var(--text-1)]"
+          >
+            Reset
+          </button>
+          <button
+            type="button"
+            onClick={() => chartRef.current?.timeScale().scrollToRealTime()}
+            className="inline-flex h-8 items-center rounded-md border border-[rgba(34,197,94,0.3)] bg-[rgba(34,197,94,0.08)] px-3 text-[12px] font-medium text-[var(--green)] transition hover:bg-[rgba(34,197,94,0.14)]"
           >
             Live
           </button>
         </div>
       </div>
 
-      <div className="border-b border-[var(--border)] bg-[var(--bg-panel)] px-4 py-2">
-        <div className="flex items-center gap-3">
-          <span className="text-[11px] text-[var(--text-3)]">History</span>
-          <input
-            type="range"
-            min={0}
-            max={chart.maxRightOffset}
-            value={chart.maxRightOffset - chart.safeRightOffset}
-            onChange={(event) => {
-              setRightOffset(chart.maxRightOffset - Number(event.target.value));
-              setHoverIndex(null);
-            }}
-            aria-label="Chart history position"
-            className="h-2 min-w-0 flex-1 accent-[var(--brand)]"
-          />
-          <span className="w-24 text-right text-[11px] tabular-nums text-[var(--text-3)]">{chart.safeVisibleCount} bars</span>
-        </div>
-        <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-[var(--bg-card)]">
-          <div
-            className="h-full rounded-full bg-[var(--brand)]"
-            style={{ marginLeft: `${chart.windowStartPct}%`, width: `${chart.windowWidthPct}%` }}
-          />
-        </div>
-      </div>
-
-      <div className="relative p-3">
-        <svg
-          viewBox={`0 0 ${chart.width} ${chart.height}`}
-          className={cx('h-[540px] w-full select-none', isDragging ? 'cursor-grabbing' : 'cursor-grab')}
-          role="img"
-          aria-label={`${symbol || 'Market'} ${interval || ''} candlestick chart`}
-          style={{ touchAction: 'none' }}
-          onPointerDown={(event) => {
-            if (event.button !== 0) {
-              return;
-            }
-
-            dragRef.current = { x: event.clientX, rightOffset: chart.safeRightOffset };
-            setIsDragging(true);
-            setHoverIndex(null);
-            event.currentTarget.setPointerCapture(event.pointerId);
-          }}
-          onPointerMove={(event) => {
-            const rect = event.currentTarget.getBoundingClientRect();
-            const relativeX = relativePosition(event.clientX, rect);
-
-            if (dragRef.current) {
-              const deltaSvg = ((event.clientX - dragRef.current.x) / rect.width) * chart.width;
-              const deltaCandles = Math.round(deltaSvg / Math.max(chart.step, 1));
-              setRightOffset(clampNumber(dragRef.current.rightOffset + deltaCandles, 0, chart.maxRightOffset));
-              setHoverIndex(null);
-              return;
-            }
-
-            const index = Math.round((relativeX - chart.left - chart.step / 2) / chart.step);
-            setHoverIndex(clampNumber(index, 0, chart.source.length - 1));
-          }}
-          onPointerUp={(event) => {
-            dragRef.current = null;
-            setIsDragging(false);
-            if (event.currentTarget.hasPointerCapture(event.pointerId)) {
-              event.currentTarget.releasePointerCapture(event.pointerId);
-            }
-          }}
-          onPointerCancel={() => {
-            dragRef.current = null;
-            setIsDragging(false);
-          }}
-          onPointerLeave={() => {
-            if (!dragRef.current) {
-              setHoverIndex(null);
-            }
-          }}
-          onWheel={(event) => {
-            event.preventDefault();
-            const rect = event.currentTarget.getBoundingClientRect();
-            const relativeX = relativePosition(event.clientX, rect);
-            const anchorRatio = clampNumber((relativeX - chart.left) / Math.max(1, chart.right - chart.left), 0, 1);
-            const scale = event.deltaY < 0 ? 0.82 : 1.18;
-            zoomTo(chart.safeVisibleCount * scale, anchorRatio);
-          }}
-        >
-          <rect x="0" y="0" width={chart.width} height={chart.height} rx="12" fill="transparent" />
-          {chart.ticks.map((tick) => (
-            <g key={tick.value}>
-              <line x1={chart.left} x2={chart.right} y1={tick.y} y2={tick.y} stroke="var(--border)" strokeWidth="1" opacity="0.75" />
-              <text x={chart.right + 12} y={tick.y + 4} fill="var(--text-3)" fontSize="12" fontFamily="monospace">
-                {formatPrice(tick.value)}
-              </text>
-            </g>
-          ))}
-
-          <line x1={chart.left} x2={chart.right} y1={lastPriceY} y2={lastPriceY} stroke={lastPriceTone} strokeWidth="1" strokeDasharray="6 6" opacity="0.85" />
-          <rect x={chart.right + 5} y={lastPriceY - 11} width="83" height="22" rx="5" fill={lastPriceTone} opacity="0.18" />
-          <text x={chart.right + 10} y={lastPriceY + 4} fill={lastPriceTone} fontSize="12" fontFamily="monospace">
-            {formatPrice(lastPoint.close)}
-          </text>
-
-          {chart.timeTicks.map((index) => {
-            const point = chart.source[index];
-            const x = chart.xForIndex(index);
-            return (
-              <g key={`${point.time}-${index}`}>
-                <line x1={x} x2={x} y1={chart.priceTop} y2={chart.volumeBottom} stroke="var(--border)" strokeWidth="1" opacity="0.35" />
-                <text x={x} y={chart.bottom} textAnchor="middle" fill="var(--text-3)" fontSize="11" fontFamily="monospace">
-                  {compactTimeLabel(point.time)}
-                </text>
-              </g>
-            );
-          })}
-
-          <line x1={chart.left} x2={chart.right} y1={chart.volumeTop - 15} y2={chart.volumeTop - 15} stroke="var(--border)" strokeWidth="1" />
-          <text x={chart.left} y={chart.volumeTop - 22} fill="var(--text-3)" fontSize="11" fontFamily="monospace">
-            Volume
-          </text>
-
-          {chart.source.map((point, index) => {
-            const x = chart.xForIndex(index);
-            const bullish = point.close >= point.open;
-            const color = bullish ? 'var(--green)' : 'var(--red)';
-            const volumeHeight = chart.volumeToHeight(point.volume || 0);
-
-            return (
-              <rect
-                key={`volume-${point.time}-${index}`}
-                x={x - Math.max(2, chart.step * 0.24)}
-                y={chart.volumeBottom - volumeHeight}
-                width={Math.max(3, chart.step * 0.48)}
-                height={Math.max(1, volumeHeight)}
-                rx="1"
-                fill={color}
-                opacity="0.22"
-              />
-            );
-          })}
-
-          {chart.source.map((point, index) => {
-            const x = chart.xForIndex(index);
-            const openY = chart.priceToY(point.open);
-            const closeY = chart.priceToY(point.close);
-            const highY = chart.priceToY(point.high);
-            const lowY = chart.priceToY(point.low);
-            const bullish = point.close >= point.open;
-            const color = bullish ? 'var(--green)' : 'var(--red)';
-            const bodyTop = Math.min(openY, closeY);
-            const bodyHeight = Math.max(2, Math.abs(closeY - openY));
-            const candleWidth = Math.max(4, Math.min(15, chart.step * 0.58));
-            const selected = index === hoverIndex;
-
-            return (
-              <g key={`${point.time}-${index}`} opacity={hoverIndex === null || selected ? 1 : 0.58}>
-                <line x1={x} x2={x} y1={highY} y2={lowY} stroke={color} strokeWidth={selected ? '2.2' : '1.5'} />
-                <rect
-                  x={x - candleWidth / 2}
-                  y={bodyTop}
-                  width={candleWidth}
-                  height={bodyHeight}
-                  rx="1.5"
-                  fill={color}
-                />
-              </g>
-            );
-          })}
-
-          {hoverIndex !== null && activePoint ? (() => {
-            const x = chart.xForIndex(hoverIndex);
-            const y = chart.priceToY(activePoint.close);
-            const tooltipX = x > chart.right - 190 ? x - 202 : x + 14;
-            const tooltipY = y < 90 ? y + 18 : y - 82;
-            return (
-              <g>
-                <line x1={x} x2={x} y1={chart.priceTop} y2={chart.volumeBottom} stroke="var(--text-2)" strokeWidth="1" strokeDasharray="4 5" opacity="0.7" />
-                <line x1={chart.left} x2={chart.right} y1={y} y2={y} stroke="var(--text-2)" strokeWidth="1" strokeDasharray="4 5" opacity="0.55" />
-                <rect x={tooltipX} y={tooltipY} width="196" height="72" rx="8" fill="var(--bg-elevated)" stroke="var(--border-hover)" />
-                <text x={tooltipX + 10} y={tooltipY + 18} fill="var(--text-1)" fontSize="12" fontFamily="monospace">
-                  {detailedTimeLabel(activePoint.time)}
-                </text>
-                <text x={tooltipX + 10} y={tooltipY + 39} fill="var(--text-2)" fontSize="11" fontFamily="monospace">
-                  O {formatPrice(activePoint.open)}  H {formatPrice(activePoint.high)}
-                </text>
-                <text x={tooltipX + 10} y={tooltipY + 58} fill="var(--text-2)" fontSize="11" fontFamily="monospace">
-                  L {formatPrice(activePoint.low)}  C {formatPrice(activePoint.close)}
-                </text>
-              </g>
-            );
-          })() : null}
-        </svg>
-
-        <div className="mt-2 flex flex-wrap items-center justify-between gap-2 text-[11px] text-[var(--text-3)]">
-          <span>{detailedTimeLabel(firstPoint.time)} - {detailedTimeLabel(lastPoint.time)}</span>
-          <span>Last visible candle {detailedTimeLabel(lastPoint.time)}</span>
-        </div>
+      <div className="relative">
+        <div
+          ref={containerRef}
+          className="h-[640px] w-full"
+          aria-label={`${symbol || 'Market'} ${interval || ''} TradingView style candlestick chart`}
+        />
+        {latestPoint ? (
+          <div className="pointer-events-none absolute left-4 top-4 rounded border border-[rgba(148,163,184,0.18)] bg-[rgba(5,5,5,0.72)] px-3 py-2 text-[11px] text-[var(--text-3)] backdrop-blur">
+            <div className="font-medium text-[var(--text-1)]">{detailedTimeLabel(displayPoint?.time || latestPoint.time)}</div>
+            <div className="mt-1">
+              Last <span style={{ color: latestPoint.color }}>{formatPrice(latestPoint.close)}</span>
+            </div>
+          </div>
+        ) : null}
       </div>
     </div>
   );
