@@ -267,6 +267,27 @@ router.get('/klines/:symbol', async (req: Request, res: Response) => {
   }
 });
 
+router.get('/login-challenge', (req: Request, res: Response) => {
+  const network = parseNetwork(req.query.network);
+  const address = typeof req.query.address === 'string' ? req.query.address.trim() : '';
+
+  if (!ethers.isAddress(address)) {
+    return res.status(400).json({ error: 'A valid EVM wallet address is required.' });
+  }
+
+  const checksumAddress = ethers.getAddress(address);
+  const issuedAt = Date.now();
+
+  return res.json({
+    network,
+    chainId: network === 'mainnet' ? 286623 : 138565,
+    address: checksumAddress,
+    issuedAt,
+    expiresAt: issuedAt + LOGIN_WINDOW_MS,
+    message: buildLoginMessage(checksumAddress.toLowerCase(), network, issuedAt)
+  });
+});
+
 router.post('/connect', async (req: Request, res: Response) => {
   const payload = (req.body || {}) as Record<string, unknown>;
   const network = parseNetwork(payload.network);

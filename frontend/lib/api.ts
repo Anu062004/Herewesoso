@@ -393,6 +393,20 @@ export async function connectSodex(payload: {
   });
 }
 
+export interface SodexLoginChallenge {
+  network: SodexNetwork;
+  chainId: number;
+  address: string;
+  issuedAt: number;
+  expiresAt: number;
+  message: string;
+}
+
+export async function fetchSodexLoginChallenge(network: SodexNetwork, address: string) {
+  const query = new URLSearchParams({ network, address });
+  return requestJson<SodexLoginChallenge>(`/api/sodex/login-challenge?${query.toString()}`);
+}
+
 export async function sendTelegramTest() {
   return requestJson<{ message: string }>('/api/test-telegram', {
     method: 'POST'

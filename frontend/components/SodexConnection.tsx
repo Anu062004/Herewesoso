@@ -3,10 +3,9 @@
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
 
-import { connectSodex } from '@/lib/api';
+import { connectSodex, fetchSodexLoginChallenge } from '@/lib/api';
 import { formatPrice } from '@/lib/format';
 import {
-  buildSodexLoginMessage,
   clearSodexConnection,
   saveSodexConnection,
   shortWallet,
@@ -181,13 +180,13 @@ export default function SodexConnection() {
       setMessage(`Switching wallet to ${SODEX_NETWORK_CONFIG[network].label}...`);
       await ensureWalletNetwork(provider, network);
 
-      const issuedAt = Date.now();
-      const loginMessage = buildSodexLoginMessage(address, network, issuedAt);
+      setMessage('Preparing secure SoDEX login challenge...');
+      const loginChallenge = await fetchSodexLoginChallenge(network, address);
 
       setState('signature');
       const signature = (await provider.request({
         method: 'personal_sign',
-        params: [messageToHex(loginMessage), address]
+        params: [messageToHex(loginChallenge.message), address]
       })) as string;
 
       setState('verification');
@@ -195,7 +194,7 @@ export default function SodexConnection() {
         network,
         address,
         signature,
-        issuedAt
+        issuedAt: loginChallenge.issuedAt
       });
 
       saveSodexConnection(result);
