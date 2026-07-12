@@ -93,6 +93,21 @@ test('signSodexAction creates recoverable EIP-712 signature with SoDEX header pr
   );
 });
 
+test('signSodexAction uses the SoDEX mainnet domain for mainnet requests', async () => {
+  const wallet = sodexSigner.createWallet(PRIVATE_KEY);
+  const signed = await sodexSigner.signSodexAction({
+    privateKey: PRIVATE_KEY,
+    marketType: 'perps',
+    actionType: 'newOrder',
+    params: sampleOrderRequest(),
+    baseUrl: 'https://mainnet-gw.sodex.dev/api/v1/perps',
+    nonce: 1760373925002n
+  });
+
+  assert.equal(signed.domain.chainId, 286623);
+  assert.equal(sodexSigner.recoverSodexSigner(signed), wallet.address);
+});
+
 test('nonce manager increases monotonically per signer', () => {
   nonceManager.resetNonceState();
 

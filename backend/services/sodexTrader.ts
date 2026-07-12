@@ -2,7 +2,13 @@ import axios from 'axios';
 import sodexSigner = require('./sodexSigner');
 import keyProvider = require('./keyProvider');
 
-const PERPS_BASE = process.env.SODEX_TESTNET_PERPS || 'https://testnet-gw.sodex.dev/api/v1/perps';
+export type SodexTradingNetwork = 'testnet' | 'mainnet';
+
+function perpsBase(network: SodexTradingNetwork = 'testnet'): string {
+  return network === 'mainnet'
+    ? process.env.SODEX_MAINNET_PERPS || 'https://mainnet-gw.sodex.dev/api/v1/perps'
+    : process.env.SODEX_TESTNET_PERPS || 'https://testnet-gw.sodex.dev/api/v1/perps';
+}
 
 const client = axios.create({
   timeout: 10000,
@@ -226,9 +232,9 @@ function isDefaultApiKeyName(value: string | null): boolean {
   return !value || value.toLowerCase() === 'default';
 }
 
-async function fetchAccountApiKeys(accountAddress: string): Promise<PerpsApiKey[]> {
+async function fetchAccountApiKeys(accountAddress: string, baseUrl: string): Promise<PerpsApiKey[]> {
   const apiKeyResponse = await client.get<PerpsRestResponse<PerpsApiKeysResponse['data']>>(
-    `${PERPS_BASE}/accounts/${accountAddress}/api-keys`
+    `${baseUrl}/accounts/${accountAddress}/api-keys`
   );
 
   return apiKeyResponse.data?.data || [];
@@ -299,14 +305,14 @@ function resolveApiKeyNameFromList(
   );
 }
 
-async function resolveTradingContext(wallet: SodexWallet, symbol: string): Promise<TradingContext> {
+async function resolveTradingContext(wallet: SodexWallet, symbol: string, baseUrl: string): Promise<TradingContext> {
   const accountAddress = configuredAccountAddress(wallet.address);
   const envAccountID = trimToNull(process.env.SODEX_ACCOUNT_ID);
   const envApiKeyName = configuredApiKeyName();
 
   const [stateResponse, symbolResponse] = await Promise.all([
-    client.get<PerpsRestResponse<PerpsStateResponse['data']>>(`${PERPS_BASE}/accounts/${accountAddress}/state`),
-    client.get<PerpsRestResponse<PerpsSymbolResponse['data']>>(`${PERPS_BASE}/markets/symbols`, {
+    client.get<PerpsRestResponse<PerpsStateResponse['data']>>(`${baseUrl}/accounts/${accountAddress}/state`),
+    client.get<PerpsRestResponse<PerpsSymbolResponse['data']>>(`${baseUrl}/markets/symbols`, {
       params: { symbol }
     })
   ]);
@@ -328,7 +334,7 @@ async function resolveTradingContext(wallet: SodexWallet, symbol: string): Promi
     apiKeyName = undefined;
   } else {
     try {
-      const apiKeys = await fetchAccountApiKeys(accountAddress);
+      const apiKeys = await fetchAccountApiKeys(accountAddress, baseUrl);
       apiKeyName = resolveApiKeyNameFromList(apiKeys, wallet.address, envApiKeyName);
     } catch (error: any) {
       if (envApiKeyName && !signerMatchesAccount && error?.response) {
@@ -365,7 +371,7 @@ async function resolveTradingContext(wallet: SodexWallet, symbol: string): Promi
   };
 }
 
-async function fetchClosePricing(symbol: string): Promise<{
+async function fetchClosePricing(symbol: string, baseUrl: string): Promise<{
   tickSize: string;
   markPrice: number;
   bidPrice: number | null;
@@ -374,10 +380,10 @@ async function fetchClosePricing(symbol: string): Promise<{
   sellLimitDownRatio: number;
 }> {
   const [symbolResponse, tickerResponse] = await Promise.all([
-    client.get<PerpsRestResponse<PerpsSymbolResponse['data']>>(`${PERPS_BASE}/markets/symbols`, {
+    client.get<PerpsRestResponse<PerpsSymbolResponse['data']>>(`${baseUrl}/markets/symbols`, {
       params: { symbol }
     }),
-    client.get<PerpsRestResponse<PerpsTickerResponse['data']>>(`${PERPS_BASE}/markets/tickers`, {
+    client.get<PerpsRestResponse<PerpsTickerResponse['data']>>(`${baseUrl}/markets/tickers`, {
       params: { symbol }
     })
   ]);
@@ -408,8 +414,8 @@ async function fetchClosePricing(symbol: string): Promise<{
   };
 }
 
-async function buildCloseLimitPrice(symbol: string, side: 'BUY' | 'SELL'): Promise<string> {
-  const pricing = await fetchClosePricing(symbol);
+async function buildCloseLimitPrice(symbol: string, side: 'BUY' | 'SELL', baseUrl: string): Promise<string> {
+  const pricing = await fetchClosePricing(symbol, baseUrl);
   const referenceBid = pricing.bidPrice || pricing.markPrice;
   const referenceAsk = pricing.askPrice || pricing.markPrice;
 
@@ -432,6 +438,7 @@ async function postSigned<T>(
   actionType: SignedActionType,
   endpoint: string,
   body: SignedRequestBody,
+  baseUrl: string,
   method: 'POST' | 'DELETE' = 'POST'
 ): Promise<PerpsRestResponse<T>> {
   const signed = await sodexSigner.signSodexAction({
@@ -439,7 +446,7 @@ async function postSigned<T>(
     marketType: 'perps',
     actionType,
     params: body,
-    baseUrl: PERPS_BASE
+    baseUrl
   });
   const signedHeaders: Record<string, string> = {
     'Content-Type': 'application/json',
@@ -454,7 +461,7 @@ async function postSigned<T>(
   }
 
   const requestBody = JSON.stringify(body);
-  const response = await fetch(`${PERPS_BASE}${endpoint}`, {
+  const response = await fetch(`${baseUrl}${endpoint}`, {
     method,
     headers: signedHeaders,
     body: requestBody
@@ -511,7 +518,8 @@ async function submitLeverageUpdate(
   wallet: SodexWallet,
   context: TradingContext,
   symbol: string,
-  newLeverage: number
+  newLeverage: number,
+  baseUrl: string
 ): Promise<OrderResult> {
   const body: UpdateLeverageRequest = {
     accountID: context.accountID,
@@ -521,7 +529,7 @@ async function submitLeverageUpdate(
   };
 
   try {
-    const response = await postSigned(wallet, context, 'updateLeverage', '/trade/leverage', body);
+    const response = await postSigned(wallet, context, 'updateLeverage', '/trade/leverage', body, baseUrl);
 
     if (response.code === 0) {
       return {
@@ -614,7 +622,7 @@ export interface OrderResult {
   raw?: unknown;
 }
 
-export async function closePosition(symbol: string, sizeHint = ''): Promise<OrderResult> {
+export async function closePosition(symbol: string, sizeHint = '', network: SodexTradingNetwork = 'testnet'): Promise<OrderResult> {
   const key = loadKey();
   if (!key) return { success: false, message: 'No SoDEX API signing key set. Use SODEX_API_PRIVATE_KEY or /setkey to add one.' };
 
@@ -624,7 +632,7 @@ export async function closePosition(symbol: string, sizeHint = ''): Promise<Orde
 
   try {
     const sodex = require('./sodex');
-    const enriched = await sodex.getEnrichedPositions(configuredAccountAddress(wallet.address));
+    const enriched = await sodex.getEnrichedPositions(configuredAccountAddress(wallet.address), network);
     const position = (enriched.positions || []).find((entry: any) => entry.symbol === symbol);
 
     if (position && Number(position.positionSize) !== 0) {
@@ -643,7 +651,7 @@ export async function closePosition(symbol: string, sizeHint = ''): Promise<Orde
   let price: string;
 
   try {
-    price = await buildCloseLimitPrice(symbol, side);
+    price = await buildCloseLimitPrice(symbol, side, perpsBase(network));
   } catch (error: any) {
     return {
       success: false,
@@ -659,20 +667,21 @@ export async function closePosition(symbol: string, sizeHint = ''): Promise<Orde
     timeInForce: 'IOC',
     quantity,
     reduceOnly: true
-  });
+  }, network);
 }
 
-export async function placeOrder(params: PlaceOrderParams): Promise<OrderResult> {
+export async function placeOrder(params: PlaceOrderParams, network: SodexTradingNetwork = 'testnet'): Promise<OrderResult> {
   const key = loadKey();
   if (!key) return { success: false, message: 'No SoDEX API signing key set. Use SODEX_API_PRIVATE_KEY or /setkey to add one.' };
 
   const wallet = sodexSigner.createWallet(key);
 
   try {
-    const context = await resolveTradingContext(wallet, params.symbol);
+    const baseUrl = perpsBase(network);
+    const context = await resolveTradingContext(wallet, params.symbol, baseUrl);
 
     if (typeof params.leverage === 'number' && Number.isFinite(params.leverage)) {
-      const leverageResult = await submitLeverageUpdate(wallet, context, params.symbol, params.leverage);
+      const leverageResult = await submitLeverageUpdate(wallet, context, params.symbol, params.leverage, baseUrl);
       if (!leverageResult.success) {
         return leverageResult;
       }
@@ -691,7 +700,8 @@ export async function placeOrder(params: PlaceOrderParams): Promise<OrderResult>
       context,
       'newOrder',
       '/trade/orders',
-      body
+      body,
+      baseUrl
     );
 
     if (response.code === 0) {
@@ -753,7 +763,7 @@ function buildCancelItem(symbolID: number, item: CancelOrderItem): CancelItemPay
   };
 }
 
-export async function cancelOrders(params: CancelOrdersParams): Promise<OrderResult> {
+export async function cancelOrders(params: CancelOrdersParams, network: SodexTradingNetwork = 'testnet'): Promise<OrderResult> {
   const key = loadKey();
   if (!key) {
     return { success: false, message: 'No SoDEX API signing key set. Use SODEX_API_PRIVATE_KEY or /setkey to add one.' };
@@ -770,7 +780,8 @@ export async function cancelOrders(params: CancelOrdersParams): Promise<OrderRes
   const wallet = sodexSigner.createWallet(key);
 
   try {
-    const context = await resolveTradingContext(wallet, params.symbol);
+    const baseUrl = perpsBase(network);
+    const context = await resolveTradingContext(wallet, params.symbol, baseUrl);
     const cancels = params.cancels.map((item) => buildCancelItem(context.symbolID, item));
     const body: CancelOrderRequest = {
       accountID: context.accountID,
@@ -779,7 +790,7 @@ export async function cancelOrders(params: CancelOrdersParams): Promise<OrderRes
 
     const response = await postSigned<
       Array<{ code?: number; orderID?: number | string; error?: string; clOrdID?: string }>
-    >(wallet, context, 'cancelOrder', '/trade/orders', body, 'DELETE');
+    >(wallet, context, 'cancelOrder', '/trade/orders', body, baseUrl, 'DELETE');
 
     if (response.code === 0) {
       const results = Array.isArray(response.data) ? response.data : [];
@@ -822,22 +833,23 @@ export async function cancelOrders(params: CancelOrdersParams): Promise<OrderRes
   }
 }
 
-export async function cancelOrder(params: CancelOrderParams): Promise<OrderResult> {
+export async function cancelOrder(params: CancelOrderParams, network: SodexTradingNetwork = 'testnet'): Promise<OrderResult> {
   return cancelOrders({
     symbol: params.symbol,
     cancels: [{ orderId: params.orderId, clOrdId: params.clOrdId }]
-  });
+  }, network);
 }
 
-export async function reduceLeverage(symbol: string, newLeverage: number): Promise<OrderResult> {
+export async function reduceLeverage(symbol: string, newLeverage: number, network: SodexTradingNetwork = 'testnet'): Promise<OrderResult> {
   const key = loadKey();
   if (!key) return { success: false, message: 'No SoDEX API signing key set. Use SODEX_API_PRIVATE_KEY or /setkey to add one.' };
 
   const wallet = sodexSigner.createWallet(key);
 
   try {
-    const context = await resolveTradingContext(wallet, symbol);
-    return submitLeverageUpdate(wallet, context, symbol, newLeverage);
+    const baseUrl = perpsBase(network);
+    const context = await resolveTradingContext(wallet, symbol, baseUrl);
+    return submitLeverageUpdate(wallet, context, symbol, newLeverage, baseUrl);
   } catch (error: any) {
     return {
       success: false,

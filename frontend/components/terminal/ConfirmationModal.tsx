@@ -22,7 +22,7 @@ export function ConfirmationModal({
   title,
   description,
   confirmLabel = 'Confirm',
-  disclaimer = 'Wave 1 - No real signing',
+  disclaimer = 'Review before confirming',
   onClose,
   onConfirm
 }: ConfirmationModalProps) {

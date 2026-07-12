@@ -288,7 +288,7 @@ export default function DashboardShell({ children }: DashboardShellProps) {
                     title: 'Trigger Manual Run',
                     description: 'Queue an orchestrator cycle for Narrative Scanner and Liquidation Shield modules.',
                     confirmLabel: 'Confirm',
-                    disclaimer: 'Wave 1 - No real signing',
+                    disclaimer: 'Operational action only — no trade is submitted',
                     onConfirm: async () => {
                       const result = await triggerCycle();
                       await runs.refresh();
