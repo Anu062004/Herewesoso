@@ -56,7 +56,15 @@ router.get('/', async (_req: Request, res: Response) => {
     const indices = rows(response?.data).map(normalizeIndex);
     return res.json({ indices, count: indices.length, updatedAt: new Date().toISOString(), unavailable: indices.length === 0 });
   } catch (error) {
-    return res.status(500).json({ error: getErrorMessage(error), indices: [] });
+    const message = getErrorMessage(error);
+    console.warn('[Indices Route] Index list unavailable:', message);
+    return res.json({
+      indices: [],
+      count: 0,
+      updatedAt: new Date().toISOString(),
+      unavailable: true,
+      message: message.includes('429') ? 'SoSoValue rate limit reached. The index feed will retry automatically.' : message
+    });
   }
 });
 
@@ -69,7 +77,16 @@ router.get('/:identifier/history', async (req: Request, res: Response) => {
     const points = rows(response?.data).map(normalizePoint).filter(Boolean).sort((a: any, b: any) => a.time - b.time);
     return res.json({ identifier, days, points, updatedAt: new Date().toISOString(), unavailable: points.length === 0 });
   } catch (error) {
-    return res.status(500).json({ error: getErrorMessage(error), identifier, points: [] });
+    const message = getErrorMessage(error);
+    console.warn(`[Indices Route] History unavailable for ${identifier}:`, message);
+    return res.json({
+      identifier,
+      days,
+      points: [],
+      updatedAt: new Date().toISOString(),
+      unavailable: true,
+      message: message.includes('429') ? 'SoSoValue rate limit reached. Index history will retry automatically.' : message
+    });
   }
 });
 
