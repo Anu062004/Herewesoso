@@ -20,6 +20,7 @@ import executionsRoute = require('./routes/executions');
 import narrativePreferencesRoute = require('./routes/narrativePreferences');
 import narrativeFeedbackRoute = require('./routes/narrativeFeedback');
 import narrativeAskRoute = require('./routes/narrativeAsk');
+import indicesRoute = require('./routes/indices');
 
 const app = express();
 
@@ -47,5 +48,6 @@ app.use('/api/actions', actionsRoute);
 app.use('/api/analyze', analyzeRoute);
 app.use('/api/sodex', sodexRoute);
 app.use('/api/news', newsRoute);
+app.use('/api/indices', indicesRoute);
 
 export default app;

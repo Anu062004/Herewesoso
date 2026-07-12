@@ -514,6 +514,36 @@ export async function fetchSodexKlines(symbol: string, interval = '1h', limit = 
   return normalizeKlines(symbol, interval, raw);
 }
 
+export interface SosoIndex {
+  id: string;
+  symbol: string;
+  name: string;
+  price: number | null;
+  change24h: number | null;
+  roi7d: number | null;
+  roi1m: number | null;
+  roi3m: number | null;
+  roi1y: number | null;
+  ytd: number | null;
+  marketCap: number | null;
+  description: string | null;
+}
+
+export interface IndexPoint { time: number; value: number }
+
+export async function fetchSosoIndices() {
+  return requestFallback<{ indices: SosoIndex[]; count: number; updatedAt: string; unavailable?: boolean }>('/api/indices', {
+    indices: [], count: 0, updatedAt: new Date().toISOString(), unavailable: true
+  });
+}
+
+export async function fetchSosoIndexHistory(identifier: string, days = 90) {
+  return requestFallback<{ identifier: string; points: IndexPoint[]; updatedAt: string; unavailable?: boolean }>(
+    `/api/indices/${encodeURIComponent(identifier)}/history?days=${days}`,
+    { identifier, points: [], updatedAt: new Date().toISOString(), unavailable: true }
+  );
+}
+
 export async function fetchNews(limit = 30): Promise<NewsResponse> {
   return requestFallback<NewsResponse>(`/api/news?limit=${limit}`, {
     success: false,
