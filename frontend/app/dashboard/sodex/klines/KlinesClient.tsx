@@ -7,6 +7,7 @@ import { fetchSodexKlines, fetchSodexMarkets } from '@/lib/api';
 import { formatCompactNumber, formatDateTime, formatPercent, formatPrice } from '@/lib/format';
 import { useSodexConnection } from '@/lib/useSodexConnection';
 import { usePollingResource } from '@/lib/usePollingResource';
+import { analyzeChart } from '@/lib/chartNarrative';
 
 import {
   CandlestickChart,
@@ -37,6 +38,7 @@ export default function KlinesClient({ initialSymbol }: { initialSymbol: string 
   const [symbol, setSymbol] = useState(initialSymbol || 'BTC-USD');
   const [interval, setInterval] = useState('1h');
   const [limit, setLimit] = useState(240);
+  const [showNarrative, setShowNarrative] = useState(false);
   const network = connection?.network || 'testnet';
   const networkLabel = network === 'mainnet' ? 'Mainnet' : 'Testnet';
   const markets = usePollingResource({ fetcher: () => fetchSodexMarkets(), intervalMs: 30000, key: network });
@@ -62,6 +64,7 @@ export default function KlinesClient({ initialSymbol }: { initialSymbol: string 
 
     return { latest, high, low, volume, candleChangePct, rangeChangePct };
   }, [points]);
+  const chartNarrative = useMemo(() => analyzeChart(points), [points]);
 
   return (
     <div className="space-y-4">
@@ -104,6 +107,13 @@ export default function KlinesClient({ initialSymbol }: { initialSymbol: string 
                 </option>
               ))}
             </select>
+            <button
+              type="button"
+              onClick={() => setShowNarrative((value) => !value)}
+              className={showNarrative ? 'h-9 rounded-md border border-[rgba(8,145,178,.4)] bg-[rgba(8,145,178,.12)] px-3 text-[12px] font-medium text-[var(--cyan)]' : 'h-9 rounded-md border border-[var(--border)] bg-[var(--bg-card)] px-3 text-[12px] text-[var(--text-2)]'}
+            >
+              {showNarrative ? 'Hide Graph Analysis' : 'Analyse Graph Narrative'}
+            </button>
 
             <div className="flex flex-wrap gap-2">
               {INTERVALS.map((value) => {
@@ -190,10 +200,35 @@ export default function KlinesClient({ initialSymbol }: { initialSymbol: string 
               </div>
 
               <CandlestickChart points={points} symbol={symbol} interval={interval} />
+              {showNarrative ? (
+                chartNarrative ? (
+                  <div className="rounded-[10px] border border-[rgba(8,145,178,.26)] bg-[rgba(8,145,178,.06)] p-4">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <div className="text-[14px] font-semibold text-[var(--text-1)]">Chart Narrative</div>
+                      <Pill tone={chartNarrative.trend === 'BULLISH' ? 'green' : chartNarrative.trend === 'BEARISH' ? 'red' : 'amber'}>{chartNarrative.trend}</Pill>
+                      <Pill tone="gray">{chartNarrative.momentum} momentum</Pill>
+                      <Pill tone="cyan">{chartNarrative.confidence}% confidence</Pill>
+                    </div>
+                    <p className="mt-3 text-[13px] leading-6 text-[var(--text-2)]">{chartNarrative.narrative}</p>
+                    <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+                      <NarrativeMetric label="Range change" value={formatPercent(chartNarrative.changePct, 2)} />
+                      <NarrativeMetric label="Volatility" value={formatPercent(chartNarrative.volatilityPct, 2)} />
+                      <NarrativeMetric label="Support" value={formatPrice(chartNarrative.support)} />
+                      <NarrativeMetric label="Resistance" value={formatPrice(chartNarrative.resistance)} />
+                      <NarrativeMetric label="Volume ratio" value={chartNarrative.volumeRatio === null ? 'Unavailable' : `${chartNarrative.volumeRatio.toFixed(2)}x`} />
+                    </div>
+                    <p className="mt-3 text-[10px] text-[var(--text-3)]">{chartNarrative.disclaimer}</p>
+                  </div>
+                ) : <EmptyState title="Not enough chart data" description="At least eight valid candles are required to create a graph narrative." />
+              ) : null}
             </div>
           )}
         </div>
       </Panel>
     </div>
   );
+}
+
+function NarrativeMetric({ label, value }: { label: string; value: string }) {
+  return <div className="rounded-lg border border-[var(--border)] bg-[var(--bg-panel)] p-3"><div className="text-[10px] text-[var(--text-3)]">{label}</div><div className="mt-1 text-[13px] font-semibold text-[var(--text-1)]">{value}</div></div>;
 }

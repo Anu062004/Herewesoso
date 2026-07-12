@@ -350,6 +350,13 @@ const ssiPaths = [
   '/ssi/list',
   '/indices/list'
 ];
+const ssiHistoryPaths = [
+  process.env.SOSOVALUE_SSI_HISTORY_PATH,
+  '/sosovalue-index/history',
+  '/sosovalue-index/market-data',
+  '/ssi/history',
+  '/indices/history'
+];
 const fundraisingPaths = [
   process.env.SOSOVALUE_FUNDRAISING_PATH,
   '/fundraising/list',
@@ -426,6 +433,19 @@ const sosovalue = {
       unavailableMessage: 'SoSoValue index endpoint is unavailable.',
       defaultData: []
     });
+  },
+
+  async getSSIHistory(identifier: string, days = 90): Promise<SosoResponse<unknown>> {
+    return getWithFallback<SosoResponse<unknown>>(
+      ssiHistoryPaths,
+      { id: identifier, index_id: identifier, symbol: identifier, days: String(days) },
+      {
+        name: 'SoSoValue index history',
+        allowUnavailable: true,
+        unavailableMessage: 'SoSoValue index history endpoint is unavailable.',
+        defaultData: []
+      }
+    );
   },
 
   async getFundraising(): Promise<SosoResponse<unknown>> {

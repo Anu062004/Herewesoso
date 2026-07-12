@@ -18,6 +18,7 @@ import {
   SkeletonBlock,
   ValueChange
 } from '@/components/terminal/ui';
+import SosoIndexMarkets from '@/components/markets/SosoIndexMarkets';
 
 export default function SodexMarketsPage() {
   const connection = useSodexConnection();
@@ -103,6 +104,8 @@ export default function SodexMarketsPage() {
           )}
         </div>
       </Panel>
+
+      <SosoIndexMarkets />
     </div>
   );
 }
