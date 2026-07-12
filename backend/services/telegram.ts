@@ -30,6 +30,12 @@ interface NarrativeSignalInput {
   macroScore: number;
   topHeadline: string;
   reasoning: string;
+  lifecycleStage?: string;
+  confidence?: number;
+  velocityScore?: number;
+  crowdingScore?: number;
+  marketConfirmationScore?: number;
+  catalyst?: string;
 }
 
 interface MacroWarningInput {
@@ -163,20 +169,29 @@ const telegram = {
     etfScore,
     macroScore,
     topHeadline,
-    reasoning
+    reasoning,
+    lifecycleStage,
+    confidence,
+    velocityScore,
+    crowdingScore,
+    marketConfirmationScore,
+    catalyst
   }: NarrativeSignalInput): TelegramAlertResult {
     return {
       alertType: 'NARRATIVE_SIGNAL',
       severity: getSeverityFromSignal(signal),
-      title: `${signal} signal for ${sector}`,
+      title: `${lifecycleStage || signal} narrative for ${sector}`,
       message: [
-        `NARRATIVE SIGNAL - ${signal}`,
+        `NARRATIVE RADAR - ${lifecycleStage || signal}`,
         '',
         `Sector: ${sector}`,
         `Combined Score: ${combinedScore}/100`,
-        `Narrative: ${narrativeScore}/100`,
-        `ETF Flows: ${etfScore}/100`,
-        `Macro: ${macroScore}/100`,
+        `Confidence: ${confidence ?? narrativeScore}/100`,
+        `Velocity: ${velocityScore ?? narrativeScore}/100`,
+        `Market Confirmation: ${marketConfirmationScore ?? 50}/100`,
+        `Crowding: ${crowdingScore ?? 0}/100`,
+        `Global Context: ETF ${etfScore}/100 | Macro ${macroScore}/100`,
+        `Catalyst: ${catalyst || 'Organic attention'}`,
         '',
         'Headline:',
         topHeadline,

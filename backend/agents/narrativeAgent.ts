@@ -9,9 +9,11 @@ import supabaseService = require('../services/supabase');
 import memoryStore = require('../services/memoryStore');
 import errorUtils = require('../utils/error');
 import performanceService = require('../services/performance');
+import sodex = require('../services/sodex');
+import { analyzeNarrative, assetsForSector, NARRATIVE_MODEL_VERSION, type MarketConfirmation } from '../services/narrativeEngine';
 
 const { delay } = delayUtils;
-const { safeInsert, createAgentRun, completeAgentRun, failAgentRun } = supabaseService;
+const { safeInsert, safeSelect, createAgentRun, completeAgentRun, failAgentRun } = supabaseService;
 const { getErrorMessage } = errorUtils;
 
 interface NarrativeAgentResult {
@@ -28,13 +30,63 @@ function getNumericValue(value: unknown): number {
 }
 
 async function fetchNarrativeInputs() {
-  const news = await sosovalue.getNews(50);
+  const news = await sosovalue.getNews(100);
   await delay(500);
   const etfHistory = await sosovalue.getETFSummaryHistory(7);
   await delay(500);
   const macroEvents = await sosovalue.getMacroEvents();
 
   return { news, etfHistory, macroEvents };
+}
+
+function marketPoints(input: unknown): Array<{ close: number; volume: number }> {
+  const source = Array.isArray(input)
+    ? input
+    : Array.isArray((input as { data?: unknown })?.data)
+      ? (input as { data: unknown[] }).data
+      : [];
+  return source.map((entry) => {
+    if (Array.isArray(entry)) return { close: Number(entry[4] || 0), volume: Number(entry[5] || 0) };
+    const row = (entry || {}) as Record<string, unknown>;
+    return { close: Number(row.close ?? row.c ?? 0), volume: Number(row.volume ?? row.v ?? 0) };
+  }).filter((point) => point.close > 0);
+}
+
+async function getMarketConfirmation(sector: string): Promise<MarketConfirmation> {
+  const symbol = assetsForSector(sector)[0];
+  if (!symbol) return { score: 50, return6h: 0, return24h: 0, volumeRatio: 1, available: false };
+  try {
+    const network = process.env.SIGNAL_OUTCOME_NETWORK === 'mainnet' ? 'mainnet' : 'testnet';
+    const raw = await sodex.getKlines(symbol, '1h', 30, network);
+    const points = marketPoints(raw);
+    if (points.length < 7) return { score: 50, return6h: 0, return24h: 0, volumeRatio: 1, available: false };
+    const latest = points[points.length - 1];
+    const sixHour = points[Math.max(0, points.length - 7)];
+    const day = points[Math.max(0, points.length - 25)];
+    const return6h = ((latest.close - sixHour.close) / sixHour.close) * 100;
+    const return24h = ((latest.close - day.close) / day.close) * 100;
+    const previousVolumes = points.slice(-25, -1).map((point) => point.volume).filter((value) => value > 0);
+    const averageVolume = previousVolumes.length ? previousVolumes.reduce((a, b) => a + b, 0) / previousVolumes.length : latest.volume;
+    const volumeRatio = averageVolume > 0 ? latest.volume / averageVolume : 1;
+    const score = Math.max(0, Math.min(100, Math.round(50 + return6h * 4 + return24h * 2 + (volumeRatio - 1) * 12)));
+    return { score, return6h, return24h, volumeRatio, available: true };
+  } catch {
+    return { score: 50, return6h: 0, return24h: 0, volumeRatio: 1, available: false };
+  }
+}
+
+async function alertAllowed(score: NarrativeScoreRow): Promise<boolean> {
+  const wallet = String(process.env.USER_WALLET_ADDRESS || process.env.SODEX_ACCOUNT_ADDRESS || '').toLowerCase();
+  if (!wallet) return true;
+  const { data } = await safeSelect<any>('narrative_preferences', (query: any) =>
+    query.eq('wallet_address', wallet).limit(1)
+  );
+  const preference = data[0];
+  if (!preference) return true;
+  const stages = Array.isArray(preference.stages) ? preference.stages : ['EMERGING', 'ACCELERATING'];
+  return stages.includes(score.lifecycle_stage) &&
+    (score.confidence || 0) >= Number(preference.min_confidence ?? 60) &&
+    (score.crowding_score || 0) <= Number(preference.max_crowding ?? 65);
 }
 
 async function runNarrativeAgent(): Promise<NarrativeAgentResult> {
@@ -53,49 +105,46 @@ async function runNarrativeAgent(): Promise<NarrativeAgentResult> {
     );
     const upcoming = (Array.isArray(macroEvents?.data) ? macroEvents.data : []) as MacroEvent[];
 
-    const SECTOR_KEYS: Record<string, string[]> = {
-      DeFi: ['defi','yield','liquidity','amm','tvl','lending','swap','dex'],
-      AI:   ['ai','artificial intelligence','agent','llm','machine learning','gpt','openai'],
-      RWA:  ['rwa','real world asset','tokenized','treasury','bond','real estate'],
-      L1:   ['layer 1','bitcoin','ethereum','solana','avalanche','consensus','validator'],
-      L2:   ['layer 2','rollup','optimism','arbitrum','base','scaling','zk','polygon'],
-      GameFi:['gaming','gamefi','play to earn','nft game','metaverse','game'],
-      DePIN: ['depin','physical infrastructure','helium','render','iot','mining'],
-      Meme:  ['meme','doge','shib','pepe','community','viral','pump']
-    };
-
-    function sectorHeadlines(hl: Headline[], sector: string): Headline[] {
-      const keys = SECTOR_KEYS[sector] || [sector.toLowerCase()];
-      const rel = hl.filter(h => {
-        const t = [h?.title,h?.summary].filter(Boolean).join(' ').toLowerCase();
-        return keys.some(k => t.includes(k));
-      });
-      return [...rel, ...hl.filter(h => !rel.includes(h))].slice(0, 5);
-    }
-
-    const sectorScores: NarrativeScoreRow[] = SECTORS.map((sector) => {
-      const narrativeScore = narrativeScorer.scoreNarrativeLayer(headlines, sector);
+    const macroScore = narrativeScorer.scoreMacroLayer(upcoming);
+    const marketConfirmations = await Promise.all(SECTORS.map((sector) => getMarketConfirmation(sector)));
+    const sectorScores: NarrativeScoreRow[] = SECTORS.map((sector, index) => {
+      const analysis = analyzeNarrative(headlines, sector, marketConfirmations[index]);
+      const narrativeScore = analysis.attentionScore;
       const etfScore = narrativeScorer.scoreETFLayer(etfNetFlow);
-      const macroScore = narrativeScorer.scoreMacroLayer(upcoming);
-      const { combined, signal } = narrativeScorer.generateSignal(narrativeScore, etfScore, macroScore);
-      const relevant = sectorHeadlines(headlines, sector);
 
       return {
         sector,
         score_narrative: narrativeScore,
         score_etf_flow: etfScore,
         score_macro: macroScore,
-        combined_score: combined,
-        signal,
-        top_headlines: relevant
-          .map(h => String(h.title || '').trim())
-          .filter(t => t.length > 5)
-          .slice(0, 3)
+        combined_score: analysis.opportunityScore,
+        signal: analysis.legacySignal,
+        top_headlines: analysis.evidence.matchedHeadlines.map((headline) => headline.title).slice(0, 3),
+        lifecycle_stage: analysis.lifecycleStage,
+        sub_narrative: analysis.subNarrative,
+        confidence: analysis.confidence,
+        velocity_score: analysis.velocityScore,
+        acceleration_score: analysis.accelerationScore,
+        source_breadth_score: analysis.sourceBreadthScore,
+        source_quality_score: analysis.sourceQualityScore,
+        catalyst_score: analysis.catalystScore,
+        sentiment_score: analysis.sentimentScore,
+        novelty_score: analysis.noveltyScore,
+        market_confirmation_score: analysis.marketConfirmationScore,
+        crowding_score: analysis.crowdingScore,
+        contradiction_score: analysis.contradictionScore,
+        global_context: { etfFlow7Day: etfNetFlow, etfScore, macroScore, upcomingEventCount: upcoming.length },
+        evidence: analysis.evidence as unknown as Record<string, unknown>,
+        model_version: NARRATIVE_MODEL_VERSION
       };
     });
 
     const strongSignals = sectorScores
-      .filter((score) => score.signal === 'STRONG_BUY' || score.signal === 'BUY')
+      .filter((score) =>
+        score.signal === 'STRONG_BUY' ||
+        score.signal === 'BUY' ||
+        ((score.lifecycle_stage === 'EMERGING' || score.lifecycle_stage === 'ACCELERATING') && (score.confidence || 0) >= 55)
+      )
       .sort((left, right) => right.combined_score - left.combined_score);
 
     // Generate reasoning for top signal + any BUY signals (up to 3)
@@ -111,7 +160,7 @@ async function runNarrativeAgent(): Promise<NarrativeAgentResult> {
       try {
         const reasoning = await claude.generateNarrativeMemo({
           sector: sig.sector,
-          headlines: sectorHeadlines(headlines, sig.sector),
+          headlines: headlines.filter((headline) => sig.top_headlines.includes(String(headline.title || '').trim())).slice(0, 5),
           etfFlow: etfNetFlow,
           macroEvents: upcoming,
           scores: { combined: sig.combined_score, signal: sig.signal }
@@ -164,16 +213,25 @@ async function runNarrativeAgent(): Promise<NarrativeAgentResult> {
         }
       });
 
-      const alertResult = await telegram.sendNarrativeSignal({
+      const alertInput = {
         sector: topSignal.sector,
         signal: topSignal.signal,
         combinedScore: topSignal.combined_score,
         narrativeScore: topSignal.score_narrative,
         etfScore: topSignal.score_etf_flow,
         macroScore: topSignal.score_macro,
-        topHeadline: String(headlines[0]?.title || 'No headline available'),
-        reasoning
-      });
+        topHeadline: topSignal.top_headlines[0] || 'No matched headline available',
+        reasoning,
+        lifecycleStage: topSignal.lifecycle_stage,
+        confidence: topSignal.confidence,
+        velocityScore: topSignal.velocity_score,
+        crowdingScore: topSignal.crowding_score,
+        marketConfirmationScore: topSignal.market_confirmation_score,
+        catalyst: String((topSignal.evidence as Record<string, unknown> | undefined)?.primaryCatalyst || 'Organic attention')
+      };
+      const alertResult = await alertAllowed(topSignal)
+        ? await telegram.sendNarrativeSignal(alertInput)
+        : telegram.buildNarrativeSignal(alertInput);
 
       memoryStore.pushAlert({
         alert_type: alertResult.alertType,

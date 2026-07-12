@@ -14,6 +14,31 @@ export interface SignalRow {
   signal: SignalType;
   top_headlines?: string[];
   reasoning?: string | null;
+  lifecycle_stage?: 'EMERGING' | 'ACCELERATING' | 'ESTABLISHED' | 'CROWDED' | 'FADING' | 'REVERSING';
+  sub_narrative?: string;
+  confidence?: number;
+  velocity_score?: number;
+  acceleration_score?: number;
+  source_breadth_score?: number;
+  source_quality_score?: number;
+  catalyst_score?: number;
+  sentiment_score?: number;
+  novelty_score?: number;
+  market_confirmation_score?: number;
+  crowding_score?: number;
+  contradiction_score?: number;
+  global_context?: Record<string, unknown>;
+  evidence?: {
+    matchedHeadlines?: Array<{ title: string; source: string; publishedAt: string | null; catalyst: string; sentiment: number }>;
+    uniqueSources?: string[];
+    leadingAssets?: string[];
+    primaryCatalyst?: string;
+    invalidation?: string;
+    counts?: { hour1: number; hours6: number; hours24: number };
+    modelVersion?: string;
+    portfolioRelevance?: Record<string, unknown>;
+  };
+  model_version?: string;
 }
 
 export interface PositionSnapshot {

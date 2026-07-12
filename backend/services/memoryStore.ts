@@ -28,6 +28,22 @@ export interface SignalEntry {
   signal: string;
   reasoning?: string | null;
   top_headlines?: string[];
+  lifecycle_stage?: string;
+  sub_narrative?: string;
+  confidence?: number;
+  velocity_score?: number;
+  acceleration_score?: number;
+  source_breadth_score?: number;
+  source_quality_score?: number;
+  catalyst_score?: number;
+  sentiment_score?: number;
+  novelty_score?: number;
+  market_confirmation_score?: number;
+  crowding_score?: number;
+  contradiction_score?: number;
+  global_context?: Record<string, unknown>;
+  evidence?: Record<string, unknown>;
+  model_version?: string;
   created_at: string;
 }
 
