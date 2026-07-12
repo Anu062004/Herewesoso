@@ -13,16 +13,24 @@ async function handler(req: NextRequest, { params }: { params: { path: string[] 
   try {
     const upstream = await fetch(url, {
       method: req.method,
-      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        Accept: 'application/json',
+        ...(req.headers.get('cookie') ? { Cookie: req.headers.get('cookie') as string } : {}),
+        'X-Forwarded-Proto': req.nextUrl.protocol.replace(':', '')
+      },
       body,
       cache: 'no-store',
     });
 
     const text = await upstream.text();
-    return new NextResponse(text, {
+    const response = new NextResponse(text, {
       status: upstream.status,
       headers: { 'Content-Type': 'application/json' },
     });
+    const setCookie = upstream.headers.get('set-cookie');
+    if (setCookie) response.headers.set('Set-Cookie', setCookie);
+    return response;
   } catch (err: any) {
     return NextResponse.json({ error: err.message }, { status: 502 });
   }
@@ -30,3 +38,4 @@ async function handler(req: NextRequest, { params }: { params: { path: string[] 
 
 export const GET = handler;
 export const POST = handler;
+export const DELETE = handler;

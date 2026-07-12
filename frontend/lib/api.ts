@@ -47,6 +47,7 @@ function resolvePath(path: string) {
 async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${API_BASE}${resolvePath(path)}`, {
     cache: 'no-store',
+    credentials: 'include',
     headers: {
       Accept: 'application/json',
       ...(init?.body ? { 'Content-Type': 'application/json' } : {}),
@@ -385,7 +386,7 @@ export async function connectSodex(payload: {
   network: SodexNetwork;
   address: string;
   signature: string;
-  issuedAt: number;
+  challengeId: string;
 }) {
   return requestJson<SodexConnection>('/api/sodex/connect', {
     method: 'POST',
@@ -394,6 +395,7 @@ export async function connectSodex(payload: {
 }
 
 export interface SodexLoginChallenge {
+  challengeId: string;
   network: SodexNetwork;
   chainId: number;
   address: string;
@@ -405,6 +407,14 @@ export interface SodexLoginChallenge {
 export async function fetchSodexLoginChallenge(network: SodexNetwork, address: string) {
   const query = new URLSearchParams({ network, address });
   return requestJson<SodexLoginChallenge>(`/api/sodex/login-challenge?${query.toString()}`);
+}
+
+export async function fetchSodexSession() {
+  return requestJson<SodexConnection>('/api/sodex/session');
+}
+
+export async function disconnectSodex() {
+  return requestJson<{ disconnected: true }>('/api/sodex/disconnect', { method: 'POST' });
 }
 
 export async function sendTelegramTest() {

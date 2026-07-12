@@ -25,6 +25,7 @@ export interface SodexConnection {
   availableMargin: number;
   accountError?: string | null;
   connectedAt: string;
+  sessionExpiresAt?: string;
 }
 
 const STORAGE_KEY = 'gold-grith:sodex-connection';
@@ -63,7 +64,7 @@ export const SODEX_NETWORK_CONFIG: Record<SodexNetwork, SodexNetworkConfig> = {
 
 export const SODEX_APP_URLS: Record<SodexNetwork, string> = {
   testnet: 'https://testnet.sodex.com',
-  mainnet: 'https://sodex.com/m/trade/futures/BTC-USD'
+  mainnet: 'https://sodex.com/'
 };
 
 function isConnection(value: unknown): value is SodexConnection {
@@ -112,17 +113,6 @@ export function subscribeSodexConnection(listener: () => void) {
     window.removeEventListener(CHANGE_EVENT, listener);
     window.removeEventListener('storage', listener);
   };
-}
-
-export function buildSodexLoginMessage(address: string, network: SodexNetwork, issuedAt: number) {
-  return [
-    'Gold & Grith SoDEX login',
-    `Wallet: ${address.toLowerCase()}`,
-    `Environment: ${network}`,
-    `Issued at: ${issuedAt}`,
-    '',
-    'This signature proves wallet ownership. It does not authorize a trade or transfer.'
-  ].join('\n');
 }
 
 export function buildSodexQuery(params: Record<string, string | number | undefined> = {}) {

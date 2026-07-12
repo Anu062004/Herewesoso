@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
 
-import { connectSodex, fetchSodexLoginChallenge } from '@/lib/api';
+import { connectSodex, disconnectSodex, fetchSodexLoginChallenge, fetchSodexSession } from '@/lib/api';
 import { formatPrice } from '@/lib/format';
 import {
   clearSodexConnection,
@@ -134,6 +134,25 @@ export default function SodexConnection() {
   const [copied, setCopied] = useState(false);
 
   useEffect(() => {
+    let active = true;
+
+    void fetchSodexSession()
+      .then((session) => {
+        if (!active) return;
+        saveSodexConnection(session);
+        setNetwork(session.network);
+        setState('success');
+      })
+      .catch(() => {
+        if (!active) return;
+        clearSodexConnection();
+        setState('idle');
+      });
+
+    return () => { active = false; };
+  }, []);
+
+  useEffect(() => {
     if (connection) {
       setNetwork(connection.network);
       setState('success');
@@ -148,6 +167,7 @@ export default function SodexConnection() {
 
     const handleAccountsChanged = (accounts: string[]) => {
       if (connection && accounts[0]?.toLowerCase() !== connection.address.toLowerCase()) {
+        void disconnectSodex().catch(() => undefined);
         clearSodexConnection();
         setState('idle');
         setMessage('The active wallet changed. Sign in again to refresh the SoDEX connection.');
@@ -194,7 +214,7 @@ export default function SodexConnection() {
         network,
         address,
         signature,
-        issuedAt: loginChallenge.issuedAt
+        challengeId: loginChallenge.challengeId
       });
 
       saveSodexConnection(result);
@@ -210,7 +230,12 @@ export default function SodexConnection() {
     }
   }
 
-  function handleDisconnect() {
+  async function handleDisconnect() {
+    try {
+      await disconnectSodex();
+    } catch {
+      // Clear the local display even if the expired server cookie is already gone.
+    }
     clearSodexConnection();
     setState('idle');
     setMessage('Dashboard connection removed. Your wallet remains unchanged.');
@@ -300,7 +325,7 @@ export default function SodexConnection() {
                   {connection && connection.network === network ? (
                     <>
                       <Button onClick={() => void handleCopy()}>{copied ? 'Copied' : 'Copy address'}</Button>
-                      <Button onClick={handleDisconnect}>Disconnect</Button>
+                      <Button onClick={() => void handleDisconnect()}>Disconnect</Button>
                     </>
                   ) : (
                     <Button tone="primary" disabled={busy} onClick={() => void handleConnect()}>
@@ -322,6 +347,20 @@ export default function SodexConnection() {
               >
                 {state === 'error' ? <AlertTriangleIcon className="mt-0.5 h-4 w-4 shrink-0" /> : <CheckIcon className="mt-0.5 h-4 w-4 shrink-0 text-[var(--green)]" />}
                 <span>{message}</span>
+              </div>
+            ) : null}
+
+            {!connection ? (
+              <div className="mt-4 flex flex-wrap items-center gap-2 text-[12px] text-[var(--text-3)]">
+                <span>Don&apos;t have a SoDEX account?</span>
+                <a
+                  href={SODEX_APP_URLS[network]}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="font-medium text-[var(--brand)] transition hover:brightness-125"
+                >
+                  Create one on SoDEX
+                </a>
               </div>
             ) : null}
           </div>

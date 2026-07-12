@@ -6,9 +6,9 @@ import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { useEffect, useMemo, useRef, useState } from 'react';
 
-import { fetchAgentRuns, fetchHealth, sendTelegramTest, triggerCycle } from '@/lib/api';
+import { fetchAgentRuns, fetchHealth, fetchSodexSession, sendTelegramTest, triggerCycle } from '@/lib/api';
 import { formatDateTime, formatRelativeTime } from '@/lib/format';
-import { shortWallet } from '@/lib/sodexConnection';
+import { clearSodexConnection, saveSodexConnection, shortWallet } from '@/lib/sodexConnection';
 import { parseRunSummary } from '@/lib/terminal';
 import { useSodexConnection } from '@/lib/useSodexConnection';
 import { usePollingResource } from '@/lib/usePollingResource';
@@ -152,6 +152,17 @@ export default function DashboardShell({ children }: DashboardShellProps) {
   useEffect(() => {
     setMoreOpen(false);
   }, [pathname]);
+
+  useEffect(() => {
+    if (pathname === '/dashboard/sodex/connect') return;
+
+    void fetchSodexSession()
+      .then((session) => saveSodexConnection(session))
+      .catch(() => {
+        clearSodexConnection();
+        router.replace('/dashboard/sodex/connect');
+      });
+  }, [pathname, router]);
 
   useEffect(() => {
     if (!moreOpen) return;

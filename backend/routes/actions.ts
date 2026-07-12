@@ -5,6 +5,7 @@ import express from 'express';
 import sodexTrader = require('../services/sodexTrader');
 import executionLedger = require('../services/executionLedger');
 import executionPolicy = require('../services/executionPolicy');
+import walletAuth = require('../services/walletAuth');
 
 const router = express.Router();
 
@@ -76,6 +77,11 @@ function parsePayload(input: unknown): ParsedActionPayload {
 
 function requestedBy(req: Request, payload: ParsedActionPayload) {
   return payload.wallet || req.ip || null;
+}
+
+function sessionOwnsExecutionAccount(address: string): boolean {
+  const executionAccount = sodexTrader.getAccountAddress();
+  return Boolean(executionAccount && executionAccount.toLowerCase() === address.toLowerCase());
 }
 
 function policySnapshot(policy: ReturnType<typeof executionPolicy.evaluateExecutionPolicy>, keyStatus: ReturnType<typeof sodexTrader.getKeyStatus>) {
@@ -159,6 +165,13 @@ function buildSimulation(payload: ParsedActionPayload) {
 
 router.post('/simulate', async (req: Request, res: Response) => {
   const payload = parsePayload(req.body);
+  const session = walletAuth.getWalletSession(req);
+  if (!session) return res.status(401).json({ error: 'Connect and sign in with your SoDEX wallet.' });
+  if (!sessionOwnsExecutionAccount(session.address)) {
+    return res.status(403).json({ error: 'This wallet is not authorized to use the configured execution account.' });
+  }
+  payload.wallet = session.address;
+  payload.network = session.network;
   const simulation = buildSimulation(payload);
 
   await recordAction(
@@ -189,6 +202,13 @@ router.post('/simulate', async (req: Request, res: Response) => {
 
 async function executePayload(req: Request, res: Response) {
   const payload = parsePayload(req.body);
+  const session = walletAuth.getWalletSession(req);
+  if (!session) return res.status(401).json({ error: 'Connect and sign in with your SoDEX wallet.' });
+  if (!sessionOwnsExecutionAccount(session.address)) {
+    return res.status(403).json({ error: 'This wallet is not authorized to use the configured execution account.' });
+  }
+  payload.wallet = session.address;
+  payload.network = session.network;
   const simulation = buildSimulation(payload);
   const firstFailure = simulation.checks.find((check) => !check.passed);
 
