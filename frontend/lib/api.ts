@@ -437,6 +437,45 @@ export async function saveNarrativeFeedback(payload: { signalId: string; sector:
   });
 }
 
+export interface NarrativeAdvisorResponse {
+  intent: string;
+  sector: string;
+  answer: string;
+  evidence: string[];
+  metrics: Record<string, number | string | boolean>;
+  invalidation: string;
+  scenario: null | {
+    eligible: boolean;
+    lowAmount: number;
+    highAmount: number;
+    capacityPct: number;
+    currentExposurePct: number;
+    reasons: string[];
+    allocations: Array<{ symbol: string; percentage: number; lowAmount: number; highAmount: number }>;
+  };
+  dataTimestamp: string;
+  conversationId: string | null;
+  recommendationId: string | null;
+}
+
+export async function askNarrativeScanner(payload: { question: string; investableAmount: number; riskMode: 'conservative' | 'balanced' | 'aggressive' }) {
+  return requestJson<NarrativeAdvisorResponse>('/api/narrative/ask', {
+    method: 'POST',
+    body: JSON.stringify(payload)
+  });
+}
+
+export async function fetchNarrativeConversationHistory() {
+  return requestJson<Array<Record<string, unknown>>>('/api/narrative/ask/history');
+}
+
+export async function saveRecommendationStatus(id: string, status: 'ACCEPTED' | 'REJECTED' | 'SAVED') {
+  return requestJson<{ saved: true; status: string }>(`/api/narrative/ask/recommendations/${encodeURIComponent(id)}/feedback`, {
+    method: 'POST',
+    body: JSON.stringify({ status })
+  });
+}
+
 export async function disconnectSodex() {
   return requestJson<{ disconnected: true }>('/api/sodex/disconnect', { method: 'POST' });
 }

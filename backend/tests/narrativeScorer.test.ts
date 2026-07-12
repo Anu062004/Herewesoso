@@ -3,6 +3,19 @@ import assert = require('node:assert/strict');
 import narrativeScorer = require('../utils/narrativeScorer');
 import { analyzeNarrative, deduplicateHeadlines } from '../services/narrativeEngine';
 import { calculateBaseline } from '../services/narrativeLearning';
+import { answerNarrativeQuestion, calculateAllocationScenario, parseAdvisorIntent } from '../services/narrativeAdvisor';
+import type { NarrativeScoreRow } from '../types/domain';
+
+function advisorSignal(values: Partial<NarrativeScoreRow> = {}): NarrativeScoreRow {
+  return {
+    sector: 'AI', score_narrative: 80, score_etf_flow: 60, score_macro: 60,
+    combined_score: 75, signal: 'BUY', top_headlines: ['AI agent launch'],
+    lifecycle_stage: 'ACCELERATING', confidence: 80, market_confirmation_score: 70,
+    crowding_score: 25, velocity_score: 85,
+    evidence: { leadingAssets: ['RENDER-USD', 'FET-USD'], primaryCatalyst: 'Protocol launch', invalidation: 'Confirmation below 35' },
+    ...values
+  };
+}
 
 test('scoreNarrativeLayer returns zero when there are no headlines', () => {
   assert.equal(narrativeScorer.scoreNarrativeLayer([], 'AI'), 0);
@@ -87,6 +100,30 @@ test('narrative learning builds a persistent hourly baseline including quiet hou
   assert.equal(baseline.sampleHours, 24);
   assert.ok(baseline.averageHourly > 0 && baseline.averageHourly < 1);
   assert.ok(baseline.standardDeviation > 0);
+});
+
+test('advisor parses allocation and invalidation questions', () => {
+  assert.equal(parseAdvisorIntent('How much should I invest in AI?'), 'ALLOCATION');
+  assert.equal(parseAdvisorIntent('What invalidates this trade?'), 'INVALIDATION');
+});
+
+test('advisor produces bounded allocation ranges from verified factors', () => {
+  const scenario = calculateAllocationScenario({ signal: advisorSignal(), positions: [], investableAmount: 1000, riskMode: 'balanced' });
+  assert.equal(scenario.eligible, true);
+  assert.ok(scenario.lowAmount > 0 && scenario.highAmount > scenario.lowAmount);
+  assert.ok(scenario.highAmount <= 1000);
+  assert.equal(scenario.allocations.length, 2);
+});
+
+test('advisor refuses allocation when sentiment is unsupported by market confirmation', () => {
+  const answer = answerNarrativeQuestion({
+    question: 'How much can I invest in AI?',
+    signals: [advisorSignal({ sentiment_score: 95, market_confirmation_score: 20 })],
+    positions: [], investableAmount: 1000, riskMode: 'aggressive'
+  });
+  assert.equal(answer.scenario?.eligible, false);
+  assert.equal(answer.scenario?.highAmount, 0);
+  assert.match(answer.answer, /No additional allocation/i);
 });
 
 export {};

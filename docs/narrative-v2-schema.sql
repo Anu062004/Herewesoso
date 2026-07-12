@@ -83,3 +83,41 @@ CREATE TABLE IF NOT EXISTS narrative_source_performance (
 CREATE INDEX IF NOT EXISTS idx_narrative_events_sector_time ON narrative_events (sector, published_at DESC);
 CREATE INDEX IF NOT EXISTS idx_narrative_transitions_sector_time ON narrative_stage_transitions (sector, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_narrative_feedback_wallet ON narrative_feedback (wallet_address, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS narrative_conversations (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  wallet_address TEXT NOT NULL,
+  question TEXT NOT NULL,
+  intent TEXT NOT NULL,
+  sector TEXT NOT NULL,
+  answer TEXT NOT NULL,
+  evidence JSONB DEFAULT '[]',
+  metrics JSONB DEFAULT '{}',
+  scenario JSONB,
+  risk_mode TEXT NOT NULL,
+  investable_amount NUMERIC NOT NULL DEFAULT 0,
+  data_snapshot JSONB DEFAULT '{}'
+);
+
+CREATE TABLE IF NOT EXISTS narrative_recommendations (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  wallet_address TEXT NOT NULL,
+  conversation_id UUID REFERENCES narrative_conversations(id) ON DELETE SET NULL,
+  sector TEXT NOT NULL,
+  risk_mode TEXT NOT NULL,
+  investable_amount NUMERIC NOT NULL,
+  low_amount NUMERIC NOT NULL,
+  high_amount NUMERIC NOT NULL,
+  allocation JSONB DEFAULT '[]',
+  rationale TEXT NOT NULL,
+  evidence JSONB DEFAULT '[]',
+  invalidation TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'SHOWN',
+  data_timestamp TIMESTAMPTZ NOT NULL,
+  feedback_at TIMESTAMPTZ
+);
+
+CREATE INDEX IF NOT EXISTS idx_narrative_conversations_wallet ON narrative_conversations (wallet_address, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_narrative_recommendations_wallet ON narrative_recommendations (wallet_address, created_at DESC);

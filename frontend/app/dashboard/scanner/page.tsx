@@ -25,6 +25,7 @@ import {
   Sparkline
 } from '@/components/terminal/ui';
 import { Button } from '@/components/terminal/ui';
+import AskNarrativeScanner from '@/components/AskNarrativeScanner';
 
 const LIFECYCLE_STAGES = ['EMERGING', 'ACCELERATING', 'ESTABLISHED', 'CROWDED', 'FADING', 'REVERSING'];
 
@@ -61,6 +62,8 @@ export default function ScannerPage() {
         description="Sector ranking, narrative momentum, and memo output from the alpha scanner."
         right={<PollingIndicator freshness={signals.freshness} nextPollInMs={signals.nextPollInMs} />}
       />
+
+      <AskNarrativeScanner />
 
       <Panel>
         <PanelHeader title="Narrative Radar" accent="purple" subtitle="Lifecycle, momentum, confirmation, and crowding ranked by opportunity" />
