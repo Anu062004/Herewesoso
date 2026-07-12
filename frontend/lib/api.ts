@@ -413,6 +413,23 @@ export async function fetchSodexSession() {
   return requestJson<SodexConnection>('/api/sodex/session');
 }
 
+export interface NarrativePreferences {
+  stages: string[];
+  minConfidence: number;
+  maxCrowding: number;
+}
+
+export async function fetchNarrativePreferences() {
+  return requestJson<NarrativePreferences>('/api/narrative/preferences');
+}
+
+export async function saveNarrativePreferences(preferences: NarrativePreferences) {
+  return requestJson<NarrativePreferences>('/api/narrative/preferences', {
+    method: 'POST',
+    body: JSON.stringify(preferences)
+  });
+}
+
 export async function disconnectSodex() {
   return requestJson<{ disconnected: true }>('/api/sodex/disconnect', { method: 'POST' });
 }

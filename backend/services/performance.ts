@@ -200,11 +200,16 @@ async function recordSignalOutcomes(scores: NarrativeScoreRow[]) {
     sector: score.sector,
     signal: score.signal,
     combined_score: score.combined_score,
-    model_version: DEFAULT_MODEL_VERSION,
+    model_version: score.model_version || DEFAULT_MODEL_VERSION,
     score_breakdown: {
       narrative: score.score_narrative,
       etfFlow: score.score_etf_flow,
-      macro: score.score_macro
+      macro: score.score_macro,
+      velocity: score.velocity_score || 0,
+      acceleration: score.acceleration_score || 0,
+      confidence: score.confidence || 0,
+      marketConfirmation: score.market_confirmation_score || 0,
+      crowding: score.crowding_score || 0
     },
     forward_return_1h: null,
     forward_return_6h: null,
@@ -216,7 +221,10 @@ async function recordSignalOutcomes(scores: NarrativeScoreRow[]) {
     outcome_status: 'PENDING',
     source_snapshot: {
       topHeadlines: score.top_headlines || [],
-      reasoningPresent: Boolean(score.reasoning)
+      reasoningPresent: Boolean(score.reasoning),
+      lifecycleStage: score.lifecycle_stage || null,
+      evidence: score.evidence || null,
+      globalContext: score.global_context || null
     },
     resolved_at: null
   }));

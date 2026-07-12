@@ -17,6 +17,7 @@ import newsRoute = require('./routes/news');
 import agentRunsRoute = require('./routes/agentRuns');
 import performanceRoute = require('./routes/performance');
 import executionsRoute = require('./routes/executions');
+import narrativePreferencesRoute = require('./routes/narrativePreferences');
 
 const app = express();
 
@@ -28,6 +29,7 @@ app.use('/api/health', healthRoute);
 app.use('/api/agent-runs', agentRunsRoute);
 app.use('/api/performance', performanceRoute);
 app.use('/api/executions', executionsRoute);
+app.use('/api/narrative/preferences', narrativePreferencesRoute);
 app.use('/api/signals', signalsRoute);
 app.use('/api/positions', positionsRoute);
 app.use('/api/alerts', alertsRoute);
