@@ -2,6 +2,7 @@ import 'dotenv/config';
 import app from './app';
 import orchestrator = require('./agents/orchestrator');
 import telegramBot = require('./services/telegramBot');
+import sodexMarketStream = require('./services/sodexMarketStream');
 
 const { startScheduler } = orchestrator;
 const { startBot } = telegramBot;
@@ -12,6 +13,7 @@ const shouldRunScheduler =
 
 app.listen(PORT, () => {
   console.log(`[Server] Running on port ${PORT}`);
+  sodexMarketStream.start();
   if (shouldRunScheduler) {
     startScheduler();
     startBot();

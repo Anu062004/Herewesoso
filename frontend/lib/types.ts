@@ -75,6 +75,48 @@ export interface LivePosition {
   size: number;
   positionSide: string;
   marginMode?: string;
+  analysis?: ShieldPositionAnalysis;
+}
+
+export interface ShieldPositionAnalysis {
+  direction: 'LONG' | 'SHORT';
+  liquidationPrice: number;
+  liquidationPriceSource: 'ACTUAL' | 'ESTIMATED';
+  confidence: 'HIGH' | 'MEDIUM' | 'LOW';
+  distancePct: number;
+  notional: number;
+  unrealizedPnl: number;
+  marginUtilizationPct: number | null;
+  score: number;
+  riskLevel: RiskLevel;
+  breakdown: {
+    liquidationProximity: number;
+    marginHealth: number;
+    volatility: number;
+    liquidity: number;
+    crowding: number;
+    macro: number;
+    flow: number;
+  };
+  rescue: {
+    targetLeverage: number;
+    addMargin: number;
+    quantityToClose: number;
+    notional: number;
+    suggestedStopPrice: number;
+    targetBufferPct: number;
+    disclaimer: string;
+  };
+  stressScenarios: Array<{
+    movePct: number;
+    stressedPrice: number;
+    estimatedPnl: number;
+    accountEquityAfter: number;
+    marginUtilizationPct: number;
+    liquidationBreached: boolean;
+  }>;
+  calculatedAt: string;
+  modelVersion: string;
 }
 
 export interface LiveAccountState {
@@ -82,6 +124,16 @@ export interface LiveAccountState {
   user?: string;
   accountValue?: number;
   availableMargin?: number;
+  initialMargin?: number;
+  crossMargin?: number;
+  portfolioRisk?: {
+    grossNotional: number;
+    netExposure: number;
+    concentrationPct: number;
+    correlatedExposurePct: number;
+    stressLoss5Pct: number;
+    riskLevel: string;
+  };
   positions?: LivePosition[];
   balances?: unknown[];
 }
@@ -92,6 +144,7 @@ export interface PositionsResponse {
   history: PositionSnapshot[];
   network?: 'testnet' | 'mainnet';
   updatedAt?: string;
+  stream?: { connected: boolean; tickCount: number };
   error?: string;
 }
 

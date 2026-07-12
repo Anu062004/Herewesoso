@@ -76,15 +76,15 @@ export function resolvePositions(response: PositionsResponse) {
   };
 }
 
-export function computeDistancePercent(input: Pick<LivePosition, 'markPrice' | 'liquidationPrice'>): number {
+export function computeDistancePercent(input: Pick<LivePosition, 'markPrice' | 'liquidationPrice' | 'leverage' | 'positionSide' | 'size'>): number {
   const mark = numeric(input.markPrice) || 0;
   const liquidation = numeric(input.liquidationPrice) || 0;
 
-  if (!mark || !liquidation) {
-    return 0;
-  }
-
-  return Math.max(0, (Math.abs(mark - liquidation) / mark) * 100);
+  if (!mark) return 0;
+  if (!liquidation) return input.leverage > 0 ? Math.min(100 / input.leverage, 100) : 0;
+  const direction = input.positionSide === 'SHORT' || (input.positionSide === 'BOTH' && input.size < 0) ? 'SHORT' : 'LONG';
+  const distance = direction === 'SHORT' ? (liquidation - mark) / mark * 100 : (mark - liquidation) / mark * 100;
+  return Math.max(0, distance);
 }
 
 export function scoreFromDistance(distance: number): number {
