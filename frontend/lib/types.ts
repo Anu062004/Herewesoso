@@ -29,13 +29,16 @@ export interface SignalRow {
   contradiction_score?: number;
   global_context?: Record<string, unknown>;
   evidence?: {
-    matchedHeadlines?: Array<{ title: string; source: string; publishedAt: string | null; catalyst: string; sentiment: number }>;
+    matchedHeadlines?: Array<{ title: string; source: string; publishedAt: string | null; catalyst: string; sentiment: number; clusterId?: string }>;
     uniqueSources?: string[];
     leadingAssets?: string[];
     primaryCatalyst?: string;
     invalidation?: string;
     counts?: { hour1: number; hours6: number; hours24: number };
     modelVersion?: string;
+    baseline?: { averageHourly: number; standardDeviation: number; sampleHours: number };
+    marketRegime?: string;
+    marketBreadth?: number;
     portfolioRelevance?: Record<string, unknown>;
   };
   model_version?: string;

@@ -2,6 +2,7 @@ import test = require('node:test');
 import assert = require('node:assert/strict');
 import narrativeScorer = require('../utils/narrativeScorer');
 import { analyzeNarrative, deduplicateHeadlines } from '../services/narrativeEngine';
+import { calculateBaseline } from '../services/narrativeLearning';
 
 test('scoreNarrativeLayer returns zero when there are no headlines', () => {
   assert.equal(narrativeScorer.scoreNarrativeLayer([], 'AI'), 0);
@@ -74,6 +75,18 @@ test('narrative v2 treats negative contradictory evidence as risk', () => {
 
   assert.ok(result.contradictionScore > 50);
   assert.ok(result.sentimentScore < 50);
+});
+
+test('narrative learning builds a persistent hourly baseline including quiet hours', () => {
+  const now = Date.now();
+  const baseline = calculateBaseline([
+    { sector: 'AI', source: 'A', cluster_id: '1', published_at: new Date(now - 60 * 60 * 1000).toISOString(), sentiment: 1, catalyst: 'Launch' },
+    { sector: 'AI', source: 'B', cluster_id: '2', published_at: new Date(now - 2 * 60 * 60 * 1000).toISOString(), sentiment: 1, catalyst: 'Launch' }
+  ], now, 1);
+
+  assert.equal(baseline.sampleHours, 24);
+  assert.ok(baseline.averageHourly > 0 && baseline.averageHourly < 1);
+  assert.ok(baseline.standardDeviation > 0);
 });
 
 export {};

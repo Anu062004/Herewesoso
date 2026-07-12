@@ -30,3 +30,56 @@ CREATE TABLE IF NOT EXISTS narrative_preferences (
   max_crowding INTEGER NOT NULL DEFAULT 65,
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+CREATE TABLE IF NOT EXISTS narrative_events (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  published_at TIMESTAMPTZ NOT NULL,
+  sector TEXT NOT NULL,
+  sub_narrative TEXT,
+  title TEXT NOT NULL,
+  source TEXT NOT NULL,
+  cluster_id TEXT NOT NULL,
+  sentiment NUMERIC NOT NULL DEFAULT 0,
+  catalyst TEXT,
+  model_version TEXT NOT NULL,
+  UNIQUE (sector, cluster_id)
+);
+
+CREATE TABLE IF NOT EXISTS narrative_stage_transitions (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  sector TEXT NOT NULL,
+  from_stage TEXT NOT NULL,
+  to_stage TEXT NOT NULL,
+  confidence INTEGER NOT NULL,
+  opportunity_score INTEGER NOT NULL,
+  invalidated BOOLEAN NOT NULL DEFAULT false,
+  evidence JSONB DEFAULT '{}',
+  model_version TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS narrative_feedback (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  wallet_address TEXT NOT NULL,
+  signal_id TEXT,
+  sector TEXT NOT NULL,
+  useful BOOLEAN NOT NULL,
+  reason TEXT,
+  UNIQUE (wallet_address, signal_id)
+);
+
+CREATE TABLE IF NOT EXISTS narrative_source_performance (
+  source TEXT PRIMARY KEY,
+  sample_count INTEGER NOT NULL DEFAULT 0,
+  relevance_rate NUMERIC,
+  average_alpha_24h NUMERIC,
+  contradiction_rate NUMERIC,
+  reliability_score NUMERIC NOT NULL DEFAULT 50,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_narrative_events_sector_time ON narrative_events (sector, published_at DESC);
+CREATE INDEX IF NOT EXISTS idx_narrative_transitions_sector_time ON narrative_stage_transitions (sector, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_narrative_feedback_wallet ON narrative_feedback (wallet_address, created_at DESC);

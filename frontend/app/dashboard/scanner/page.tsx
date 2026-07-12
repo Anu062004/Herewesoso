@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { fetchMemos, fetchNarrativePreferences, fetchSignals, saveNarrativePreferences } from '@/lib/api';
+import { fetchMemos, fetchNarrativePreferences, fetchSignals, saveNarrativeFeedback, saveNarrativePreferences } from '@/lib/api';
 import { formatDateTime } from '@/lib/format';
 import {
   latestSignalsBySector,
@@ -48,6 +48,7 @@ export default function ScannerPage() {
   const leadSignal = latestSignals[0];
   const [preferences, setPreferences] = useState({ stages: ['EMERGING', 'ACCELERATING'], minConfidence: 60, maxCrowding: 65 });
   const [preferenceStatus, setPreferenceStatus] = useState('');
+  const [feedbackStatus, setFeedbackStatus] = useState<Record<string, string>>({});
 
   useEffect(() => {
     void fetchNarrativePreferences().then(setPreferences).catch(() => undefined);
@@ -255,6 +256,24 @@ export default function ScannerPage() {
                   <p className="mt-3 text-[12px] leading-5 text-[var(--text-2)]">{evidence.matchedHeadlines[0].title}</p>
                 ) : null}
                 {evidence.invalidation ? <p className="mt-2 text-[11px] leading-5 text-[var(--text-3)]">Invalidation: {evidence.invalidation}</p> : null}
+                <div className="mt-3 flex items-center gap-2 border-t border-[var(--border)] pt-3">
+                  <span className="mr-auto text-[11px] text-[var(--text-3)]">Was this useful?</span>
+                  {[{ label: 'Yes', useful: true }, { label: 'Not relevant', useful: false }].map((choice) => (
+                    <button
+                      key={choice.label}
+                      type="button"
+                      className="rounded-md border border-[var(--border)] px-2 py-1 text-[10px] text-[var(--text-2)] hover:border-[var(--border-hover)]"
+                      onClick={() => {
+                        const signalId = signal.id || `${signal.sector}:${signal.created_at || signal.model_version || 'latest'}`;
+                        setFeedbackStatus((current) => ({ ...current, [signal.sector]: 'Saving...' }));
+                        void saveNarrativeFeedback({ signalId, sector: signal.sector, useful: choice.useful })
+                          .then(() => setFeedbackStatus((current) => ({ ...current, [signal.sector]: 'Saved' })))
+                          .catch(() => setFeedbackStatus((current) => ({ ...current, [signal.sector]: 'Failed' })));
+                      }}
+                    >{choice.label}</button>
+                  ))}
+                  <span className="text-[10px] text-[var(--text-3)]">{feedbackStatus[signal.sector]}</span>
+                </div>
               </article>
             );
           })}
