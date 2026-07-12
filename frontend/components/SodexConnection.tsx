@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 
 import { connectSodex, disconnectSodex, fetchSodexLoginChallenge, fetchSodexSession } from '@/lib/api';
@@ -127,6 +128,7 @@ async function ensureWalletNetwork(provider: EthereumProvider, network: SodexNet
 }
 
 export default function SodexConnection() {
+  const router = useRouter();
   const connection = useSodexConnection();
   const [network, setNetwork] = useState<SodexNetwork>('testnet');
   const [state, setState] = useState<ConnectState>('idle');
@@ -224,6 +226,8 @@ export default function SodexConnection() {
           ? 'Wallet verified. Open the official SoDEX app to create or enable the trading account.'
           : `${network === 'mainnet' ? 'Mainnet' : 'Testnet'} account verified and loaded.`
       );
+      const requestedPath = new URLSearchParams(window.location.search).get('next');
+      router.replace(requestedPath?.startsWith('/dashboard') ? requestedPath : '/dashboard');
     } catch (error) {
       setState('error');
       setMessage(error instanceof Error ? error.message : 'The SoDEX connection could not be completed.');

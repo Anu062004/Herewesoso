@@ -197,6 +197,37 @@ export default function DashboardShell({ children }: DashboardShellProps) {
     }
   }
 
+  if (pathname === '/dashboard/sodex/connect') {
+    return (
+      <div className="min-h-screen bg-[var(--bg-app)]">
+        <header className="border-b border-[var(--border)] bg-[var(--bg-surface)]/95">
+          <div className="mx-auto flex min-h-[68px] max-w-[1180px] items-center justify-between gap-4 px-4 py-3 sm:px-6">
+            <Link href="/" className="flex items-center gap-2.5 transition-opacity hover:opacity-90" aria-label="Gold and Grith home">
+              <img src="/brand/gold-and-grith-mark.svg" alt="" className="h-10 w-10" />
+              <span className="inline-flex items-baseline gap-1.5 whitespace-nowrap font-headline text-[17px] font-bold tracking-[-0.035em] text-[var(--text-1)]">
+                <span>Gold</span><span className="text-[var(--brand)]">&amp;</span><span>Grith</span>
+              </span>
+            </Link>
+            <div className="flex items-center gap-2">
+              <a
+                href="https://sodex.com/documentation/user-guide/onboarding-guidance"
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex h-9 items-center rounded-[var(--radius-md)] border border-[var(--border)] px-3 text-[12px] text-[var(--text-2)] transition hover:border-[var(--border-hover)] hover:text-[var(--text-1)]"
+              >
+                Documentation
+              </a>
+              <Link href="/" className="inline-flex h-9 items-center rounded-[var(--radius-md)] border border-[var(--border)] px-3 text-[12px] text-[var(--text-2)] transition hover:border-[var(--border-hover)] hover:text-[var(--text-1)]">
+                Back home
+              </Link>
+            </div>
+          </div>
+        </header>
+        <main className="mx-auto max-w-[1180px] px-4 py-8 sm:px-6">{children}</main>
+      </div>
+    );
+  }
+
   return (
     <>
       <div className="min-h-screen bg-[var(--bg-app)]">
