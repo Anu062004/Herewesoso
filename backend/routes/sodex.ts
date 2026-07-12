@@ -5,11 +5,11 @@ import express from 'express';
 import { ethers } from 'ethers';
 import sodex = require('../services/sodex');
 import errorUtils = require('../utils/error');
+import walletAuth = require('../services/walletAuth');
 
 const { getErrorMessage } = errorUtils;
 
 const VALID_INTERVALS = new Set(['1m', '5m', '15m', '30m', '1h', '4h', '1d']);
-const LOGIN_WINDOW_MS = 5 * 60 * 1000;
 type SodexNetwork = 'testnet' | 'mainnet';
 type SmokeStatus = 'ok' | 'error' | 'skipped';
 
@@ -28,20 +28,14 @@ function parseNetwork(value: unknown): SodexNetwork {
   return value === 'mainnet' ? 'mainnet' : 'testnet';
 }
 
-function buildLoginMessage(address: string, network: SodexNetwork, issuedAt: number): string {
-  return [
-    'Gold & Grith SoDEX login',
-    `Wallet: ${address}`,
-    `Environment: ${network}`,
-    `Issued at: ${issuedAt}`,
-    '',
-    'This signature proves wallet ownership. It does not authorize a trade or transfer.'
-  ].join('\n');
-}
+function authenticatedWallet(req: Request, res: Response): { address: string; network: SodexNetwork } | null {
+  const session = walletAuth.getWalletSession(req);
+  if (!session) {
+    res.status(401).json({ error: 'Connect and sign in with your SoDEX wallet.' });
+    return null;
+  }
 
-function getWallet(req: Request): string | null {
-  const wallet = typeof req.query.wallet === 'string' ? req.query.wallet.trim() : process.env.USER_WALLET_ADDRESS;
-  return wallet || null;
+  return { address: session.address, network: session.network };
 }
 
 function parseLimit(value: unknown, fallback: number, max: number): number {
@@ -120,12 +114,9 @@ function summarizeEnvelope(value: unknown): Pick<SmokeCheck, 'count' | 'sample'>
 }
 
 router.get('/account', async (req: Request, res: Response) => {
-  const wallet = getWallet(req);
-  const network = parseNetwork(req.query.network);
-
-  if (!wallet) {
-    return res.status(400).json({ error: 'No wallet address provided.' });
-  }
+  const identity = authenticatedWallet(req, res);
+  if (!identity) return;
+  const { address: wallet, network } = identity;
 
   try {
     const enriched = await sodex.getEnrichedPositions(wallet, network);
@@ -139,7 +130,8 @@ router.get('/account', async (req: Request, res: Response) => {
 router.get('/smoke', async (req: Request, res: Response) => {
   const network = parseNetwork(req.query.network);
   const symbol = parseSymbol(req.query.symbol) || 'BTC-USD';
-  const wallet = getWallet(req);
+  const session = walletAuth.getWalletSession(req);
+  const wallet = session?.address || null;
   const checks: SmokeCheck[] = await Promise.all([
     runSmokeCheck('perps.markPrices', () => sodex.getMarkPrices(symbol, network), summarizeEnvelope),
     runSmokeCheck('perps.symbols', () => sodex.getSymbols(network), summarizeEnvelope),
@@ -230,12 +222,9 @@ router.get('/orderbook/:symbol', async (req: Request, res: Response) => {
 });
 
 router.get('/orders', async (req: Request, res: Response) => {
-  const wallet = getWallet(req);
-  const network = parseNetwork(req.query.network);
-
-  if (!wallet) {
-    return res.status(400).json({ error: 'No wallet address provided.' });
-  }
+  const identity = authenticatedWallet(req, res);
+  if (!identity) return;
+  const { address: wallet, network } = identity;
 
   const symbol = typeof req.query.symbol === 'string' ? req.query.symbol.trim().toUpperCase() : undefined;
 
@@ -276,15 +265,16 @@ router.get('/login-challenge', (req: Request, res: Response) => {
   }
 
   const checksumAddress = ethers.getAddress(address);
-  const issuedAt = Date.now();
+  const challenge = walletAuth.createChallenge(checksumAddress, network);
 
   return res.json({
+    challengeId: challenge.id,
     network,
     chainId: network === 'mainnet' ? 286623 : 138565,
     address: checksumAddress,
-    issuedAt,
-    expiresAt: issuedAt + LOGIN_WINDOW_MS,
-    message: buildLoginMessage(checksumAddress.toLowerCase(), network, issuedAt)
+    issuedAt: challenge.issuedAt,
+    expiresAt: challenge.expiresAt,
+    message: challenge.message
   });
 });
 
@@ -293,25 +283,24 @@ router.post('/connect', async (req: Request, res: Response) => {
   const network = parseNetwork(payload.network);
   const address = typeof payload.address === 'string' ? payload.address.trim() : '';
   const signature = typeof payload.signature === 'string' ? payload.signature.trim() : '';
-  const issuedAt = Number(payload.issuedAt);
+  const challengeId = typeof payload.challengeId === 'string' ? payload.challengeId.trim() : '';
 
   if (!ethers.isAddress(address)) {
     return res.status(400).json({ error: 'A valid EVM wallet address is required.' });
   }
 
-  if (!signature || !Number.isFinite(issuedAt)) {
-    return res.status(400).json({ error: 'Wallet signature and issuedAt are required.' });
-  }
-
-  if (Math.abs(Date.now() - issuedAt) > LOGIN_WINDOW_MS) {
-    return res.status(400).json({ error: 'The wallet login request expired. Please sign again.' });
+  if (!signature || !challengeId) {
+    return res.status(400).json({ error: 'Wallet signature and challengeId are required.' });
   }
 
   const checksumAddress = ethers.getAddress(address);
-  const message = buildLoginMessage(checksumAddress.toLowerCase(), network, issuedAt);
+  const challenge = walletAuth.consumeChallenge(challengeId, checksumAddress, network);
+  if (!challenge) {
+    return res.status(401).json({ error: 'The wallet login challenge is invalid, expired, or already used.' });
+  }
 
   try {
-    const recovered = ethers.verifyMessage(message, signature);
+    const recovered = ethers.verifyMessage(walletAuth.buildLoginMessage(challenge), signature);
 
     if (ethers.getAddress(recovered) !== checksumAddress) {
       return res.status(401).json({ error: 'The signature does not match the selected wallet.' });
@@ -321,6 +310,9 @@ router.post('/connect', async (req: Request, res: Response) => {
       error: `Could not verify the wallet signature: ${getErrorMessage(error)}`
     });
   }
+
+  const { token, session } = walletAuth.createSession(checksumAddress, network);
+  res.setHeader('Set-Cookie', walletAuth.sessionCookie(req, token));
 
   let accountState: AccountState | null = null;
   let accountError: string | null = null;
@@ -341,8 +333,41 @@ router.post('/connect', async (req: Request, res: Response) => {
     accountValue: accountState?.accountValue || 0,
     availableMargin: accountState?.availableMargin || 0,
     accountError,
-    connectedAt: new Date().toISOString()
+    connectedAt: new Date().toISOString(),
+    sessionExpiresAt: new Date(session.expiresAt).toISOString()
   });
+});
+
+router.get('/session', async (req: Request, res: Response) => {
+  const session = walletAuth.getWalletSession(req);
+  if (!session) return res.status(401).json({ error: 'No active SoDEX wallet session.' });
+
+  let accountState: AccountState | null = null;
+  let accountError: string | null = null;
+  try {
+    const result = await sodex.getAccountState(session.address, session.network);
+    accountState = result.data;
+  } catch (error) {
+    accountError = getErrorMessage(error);
+  }
+
+  return res.json({
+    connected: true,
+    network: session.network,
+    chainId: session.network === 'mainnet' ? 286623 : 138565,
+    address: session.address,
+    accountId: accountState?.accountId || null,
+    accountValue: accountState?.accountValue || 0,
+    availableMargin: accountState?.availableMargin || 0,
+    accountError,
+    connectedAt: new Date(session.issuedAt).toISOString(),
+    sessionExpiresAt: new Date(session.expiresAt).toISOString()
+  });
+});
+
+router.post('/disconnect', (req: Request, res: Response) => {
+  res.setHeader('Set-Cookie', walletAuth.clearSessionCookie(req));
+  return res.json({ disconnected: true });
 });
 
 export = router;

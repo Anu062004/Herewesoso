@@ -4,6 +4,7 @@ import { ethers } from 'ethers';
 
 import nonceManager = require('../services/sodexNonceManager');
 import sodexSigner = require('../services/sodexSigner');
+import walletAuth = require('../services/walletAuth');
 
 const PRIVATE_KEY = '0x2222222222222222222222222222222222222222222222222222222222222222';
 
@@ -118,6 +119,27 @@ test('nonce manager increases monotonically per signer', () => {
   assert.equal(first, 1000n);
   assert.equal(second, 1001n);
   assert.equal(otherSigner, 1000n);
+});
+
+test('wallet login challenges are one-time and bound to wallet and network', () => {
+  const wallet = sodexSigner.createWallet(PRIVATE_KEY);
+  const challenge = walletAuth.createChallenge(wallet.address, 'mainnet');
+
+  assert.match(challenge.message, /Environment: mainnet/);
+  assert.match(challenge.message, /Nonce: [0-9a-f]+/);
+  assert.equal(walletAuth.consumeChallenge(challenge.id, wallet.address, 'testnet'), null);
+  assert.ok(walletAuth.consumeChallenge(challenge.id, wallet.address, 'mainnet'));
+  assert.equal(walletAuth.consumeChallenge(challenge.id, wallet.address, 'mainnet'), null);
+});
+
+test('wallet sessions reject tampering and preserve authenticated identity', () => {
+  const wallet = sodexSigner.createWallet(PRIVATE_KEY);
+  const { token } = walletAuth.createSession(wallet.address, 'testnet');
+  const session = walletAuth.verifySessionToken(token);
+
+  assert.equal(session?.address, wallet.address);
+  assert.equal(session?.network, 'testnet');
+  assert.equal(walletAuth.verifySessionToken(`${token}tampered`), null);
 });
 
 export {};

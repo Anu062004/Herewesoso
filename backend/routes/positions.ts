@@ -6,6 +6,7 @@ import sodex = require('../services/sodex');
 import supabaseService = require('../services/supabase');
 import memoryStore = require('../services/memoryStore');
 import errorUtils = require('../utils/error');
+import walletAuth = require('../services/walletAuth');
 
 const { safeSelect } = supabaseService;
 const { getErrorMessage } = errorUtils;
@@ -38,8 +39,10 @@ function parseNetwork(value: unknown): SodexNetwork {
 }
 
 router.get('/', async (req: Request, res: Response) => {
-  const wallet = typeof req.query.wallet === 'string' ? req.query.wallet : process.env.USER_WALLET_ADDRESS;
-  const network = parseNetwork(req.query.network);
+  const session = walletAuth.getWalletSession(req);
+  if (!session) return res.status(401).json({ error: 'Connect and sign in with your SoDEX wallet.' });
+  const wallet = session.address;
+  const network = parseNetwork(session.network);
 
   try {
     // live === null  → SoDEX API unreachable (frontend falls back to Supabase history)
