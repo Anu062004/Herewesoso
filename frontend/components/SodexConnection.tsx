@@ -1,7 +1,5 @@
 'use client';
 
-import Link from 'next/link';
-import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 
 import { connectSodex, disconnectSodex, fetchSodexLoginChallenge, fetchSodexSession } from '@/lib/api';
@@ -128,7 +126,6 @@ async function ensureWalletNetwork(provider: EthereumProvider, network: SodexNet
 }
 
 export default function SodexConnection() {
-  const router = useRouter();
   const connection = useSodexConnection();
   const [network, setNetwork] = useState<SodexNetwork>('testnet');
   const [state, setState] = useState<ConnectState>('idle');
@@ -227,7 +224,7 @@ export default function SodexConnection() {
           : `${network === 'mainnet' ? 'Mainnet' : 'Testnet'} account verified and loaded.`
       );
       const requestedPath = new URLSearchParams(window.location.search).get('next');
-      router.replace(requestedPath?.startsWith('/dashboard') ? requestedPath : '/dashboard');
+      window.location.assign(requestedPath?.startsWith('/dashboard') ? requestedPath : '/dashboard');
     } catch (error) {
       setState('error');
       setMessage(error instanceof Error ? error.message : 'The SoDEX connection could not be completed.');
@@ -443,12 +440,20 @@ export default function SodexConnection() {
         </Panel>
 
         {connection ? (
-          <Link
-            href="/dashboard/positions"
-            className="inline-flex h-10 w-full items-center justify-center rounded-[var(--radius-md)] bg-[var(--brand)] px-4 text-[13px] font-semibold text-black transition hover:brightness-110"
-          >
-            View connected positions
-          </Link>
+          <div className="grid gap-2 sm:grid-cols-2">
+            <a
+              href="/dashboard"
+              className="inline-flex h-10 items-center justify-center rounded-[var(--radius-md)] bg-[var(--brand)] px-4 text-[13px] font-semibold text-black transition hover:brightness-110"
+            >
+              Open Dashboard
+            </a>
+            <a
+              href="/dashboard/scanner"
+              className="inline-flex h-10 items-center justify-center rounded-[var(--radius-md)] border border-[var(--border)] bg-[var(--bg-elevated)] px-4 text-[13px] font-semibold text-[var(--text-1)] transition hover:border-[var(--border-hover)]"
+            >
+              Open Narrative Scanner
+            </a>
+          </div>
         ) : null}
       </div>
     </div>
