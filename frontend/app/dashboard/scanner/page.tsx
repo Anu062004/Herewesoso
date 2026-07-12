@@ -14,6 +14,7 @@ import { usePollingResource } from '@/lib/usePollingResource';
 
 import {
   EmptyState,
+  DonutChart,
   ErrorCard,
   PageHeader,
   Panel,
@@ -44,6 +45,7 @@ export default function ScannerPage() {
   const signals = usePollingResource({ fetcher: fetchSignals, intervalMs: 60000 });
   const memos = usePollingResource({ fetcher: fetchMemos, intervalMs: 60000 });
   const latestSignals = latestSignalsBySector(signals.data || []).slice(0, 8);
+  const leadSignal = latestSignals[0];
   const [preferences, setPreferences] = useState({ stages: ['EMERGING', 'ACCELERATING'], minConfidence: 60, maxCrowding: 65 });
   const [preferenceStatus, setPreferenceStatus] = useState('');
 
@@ -117,6 +119,69 @@ export default function ScannerPage() {
           )}
         </div>
       </Panel>
+
+      {leadSignal ? (
+        <Panel>
+          <PanelHeader title="Signal Composition" accent="blue" subtitle={`What is driving ${leadSignal.sector} and how it fits this wallet`} />
+          <div className="grid gap-6 p-5 lg:grid-cols-3">
+            <div>
+              <div className="mb-4 text-[12px] font-medium text-[var(--text-2)]">Opportunity drivers</div>
+              <DonutChart
+                centerValue={leadSignal.combined_score}
+                centerLabel="Opportunity"
+                segments={[
+                  { label: 'Velocity', value: (leadSignal.velocity_score || 0) * 0.2, color: 'var(--green)' },
+                  { label: 'Acceleration', value: (leadSignal.acceleration_score || 0) * 0.15, color: 'var(--cyan)' },
+                  { label: 'Source breadth', value: (leadSignal.source_breadth_score || 0) * 0.15, color: 'var(--blue)' },
+                  { label: 'Catalyst', value: (leadSignal.catalyst_score || 0) * 0.1, color: 'var(--purple)' },
+                  { label: 'Sentiment', value: (leadSignal.sentiment_score || 0) * 0.1, color: 'var(--amber)' },
+                  { label: 'Market', value: (leadSignal.market_confirmation_score || 0) * 0.2, color: '#a78bfa' }
+                ]}
+              />
+            </div>
+
+            <div>
+              <div className="mb-4 text-[12px] font-medium text-[var(--text-2)]">ETF and macro context</div>
+              {(() => {
+                const context = leadSignal.global_context || {};
+                const etf = Number(context.etfScore ?? leadSignal.score_etf_flow ?? 0);
+                const macro = Number(context.macroScore ?? leadSignal.score_macro ?? 0);
+                return (
+                  <DonutChart
+                    centerValue={Math.round((etf + macro) / 2)}
+                    centerLabel="Global context"
+                    segments={[
+                      { label: 'ETF flow support', value: etf, color: 'var(--green)' },
+                      { label: 'Macro support', value: macro, color: 'var(--blue)' },
+                      { label: 'Context risk', value: Math.max(0, 200 - etf - macro), color: 'var(--red)' }
+                    ]}
+                  />
+                );
+              })()}
+            </div>
+
+            <div>
+              <div className="mb-4 text-[12px] font-medium text-[var(--text-2)]">Wallet narrative capacity</div>
+              {(() => {
+                const relevance = (leadSignal.evidence?.portfolioRelevance || {}) as { exposurePct?: number; suggestedMaxPct?: number };
+                const exposure = Number(relevance.exposurePct || 0);
+                const maximum = Number(relevance.suggestedMaxPct || 0);
+                return (
+                  <DonutChart
+                    centerValue={`${exposure.toFixed(1)}%`}
+                    centerLabel="Current exposure"
+                    segments={[
+                      { label: 'Current exposure', value: Math.min(exposure, maximum || exposure), color: 'var(--amber)' },
+                      { label: 'Available capacity', value: Math.max(0, maximum - exposure), color: 'var(--green)' },
+                      { label: 'Above suggested max', value: Math.max(0, exposure - maximum), color: 'var(--red)' }
+                    ]}
+                  />
+                );
+              })()}
+            </div>
+          </div>
+        </Panel>
+      ) : null}
 
       <Panel>
         <PanelHeader title="My Narrative Alerts" accent="amber" subtitle="Wallet-specific lifecycle and quality thresholds" />

@@ -309,6 +309,57 @@ export function Sparkline({
   );
 }
 
+export function DonutChart({
+  segments,
+  centerValue,
+  centerLabel,
+  size = 132
+}: {
+  segments: Array<{ label: string; value: number; color: string }>;
+  centerValue: string | number;
+  centerLabel: string;
+  size?: number;
+}) {
+  const normalized = segments.map((segment) => ({ ...segment, value: Math.max(0, Number(segment.value) || 0) }));
+  const total = normalized.reduce((sum, segment) => sum + segment.value, 0);
+  let cursor = 0;
+  const stops = total > 0
+    ? normalized.map((segment) => {
+        const start = cursor;
+        cursor += (segment.value / total) * 100;
+        return `${segment.color} ${start}% ${cursor}%`;
+      }).join(', ')
+    : 'var(--border) 0% 100%';
+  const description = normalized.map((segment) => `${segment.label} ${segment.value.toFixed(0)}`).join(', ');
+
+  return (
+    <div className="flex flex-col items-center gap-4 sm:flex-row sm:items-center">
+      <div
+        role="img"
+        aria-label={`${centerLabel}: ${centerValue}. ${description}`}
+        className="relative shrink-0 rounded-full"
+        style={{ width: size, height: size, background: `conic-gradient(${stops})` }}
+      >
+        <div className="absolute inset-[15%] flex flex-col items-center justify-center rounded-full border border-[var(--border)] bg-[var(--bg-card)] text-center shadow-[0_0_18px_rgba(0,0,0,0.35)]">
+          <div className="text-[22px] font-semibold tabular-nums text-[var(--text-1)]">{centerValue}</div>
+          <div className="mt-0.5 max-w-[74px] text-[9px] uppercase tracking-[0.12em] text-[var(--text-3)]">{centerLabel}</div>
+        </div>
+      </div>
+      <div className="min-w-0 space-y-2">
+        {normalized.map((segment) => (
+          <div key={segment.label} className="flex items-center justify-between gap-5 text-[11px]">
+            <span className="flex min-w-0 items-center gap-2 text-[var(--text-2)]">
+              <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: segment.color }} />
+              <span className="truncate">{segment.label}</span>
+            </span>
+            <span className="tabular-nums text-[var(--text-1)]">{segment.value.toFixed(0)}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export function DistanceBar({
   percent,
   compact = false
