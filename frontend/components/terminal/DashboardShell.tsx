@@ -4,7 +4,7 @@ import type { FormEvent, ReactNode } from 'react';
 
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 
 import { fetchAgentRuns, fetchHealth, sendTelegramTest, triggerCycle } from '@/lib/api';
 import { formatDateTime, formatRelativeTime } from '@/lib/format';
@@ -121,6 +121,7 @@ export default function DashboardShell({ children }: DashboardShellProps) {
   const sodexConnection = useSodexConnection();
   const [searchTerm, setSearchTerm] = useState('');
   const [moreOpen, setMoreOpen] = useState(false);
+  const moreMenuRef = useRef<HTMLDivElement>(null);
   const [telegramOpen, setTelegramOpen] = useState(false);
   const [actionModal, setActionModal] = useState<{
     title: string;
@@ -151,6 +152,29 @@ export default function DashboardShell({ children }: DashboardShellProps) {
   useEffect(() => {
     setMoreOpen(false);
   }, [pathname]);
+
+  useEffect(() => {
+    if (!moreOpen) return;
+
+    function closeMoreMenu(event: PointerEvent | KeyboardEvent) {
+      if (event instanceof KeyboardEvent) {
+        if (event.key === 'Escape') setMoreOpen(false);
+        return;
+      }
+
+      if (!moreMenuRef.current?.contains(event.target as Node)) {
+        setMoreOpen(false);
+      }
+    }
+
+    document.addEventListener('pointerdown', closeMoreMenu);
+    document.addEventListener('keydown', closeMoreMenu);
+
+    return () => {
+      document.removeEventListener('pointerdown', closeMoreMenu);
+      document.removeEventListener('keydown', closeMoreMenu);
+    };
+  }, [moreOpen]);
 
   function handleSearch(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -311,29 +335,31 @@ export default function DashboardShell({ children }: DashboardShellProps) {
           </header>
 
           <nav className="border-t border-[var(--border)] bg-[var(--bg-surface)]">
-            <div className="mx-auto flex max-w-[1520px] items-center gap-1 overflow-x-auto px-3 py-1.5 sm:px-5">
-              {PRIMARY_NAV_ITEMS.map((item) => {
-                const active = isActive(pathname, item.href);
+            <div className="mx-auto flex max-w-[1520px] items-center gap-1 px-3 py-1.5 sm:px-5">
+              <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto">
+                {PRIMARY_NAV_ITEMS.map((item) => {
+                  const active = isActive(pathname, item.href);
 
-                return (
-                  <Link
-                    key={item.href}
-                    href={item.href}
-                    className={cx(
-                      'relative inline-flex h-10 shrink-0 items-center gap-2 rounded-[var(--radius-md)] px-3 text-[13px] font-medium transition-[color,background] duration-[var(--dur-short)]',
-                      active
-                        ? 'bg-[var(--brand-soft)] text-[var(--text-1)]'
-                        : 'text-[var(--text-2)] hover:bg-[rgba(255,255,255,0.04)] hover:text-[var(--text-1)]'
-                    )}
-                  >
-                    <span className={active ? 'text-[var(--brand)]' : 'text-[var(--text-3)]'}>{item.icon}</span>
-                    <span className="whitespace-nowrap">{item.label}</span>
-                    {active ? <span className="absolute inset-x-3 -bottom-1.5 h-0.5 rounded-full bg-[var(--brand)]" /> : null}
-                  </Link>
-                );
-              })}
+                  return (
+                    <Link
+                      key={item.href}
+                      href={item.href}
+                      className={cx(
+                        'relative inline-flex h-10 shrink-0 items-center gap-2 rounded-[var(--radius-md)] px-3 text-[13px] font-medium transition-[color,background] duration-[var(--dur-short)]',
+                        active
+                          ? 'bg-[var(--brand-soft)] text-[var(--text-1)]'
+                          : 'text-[var(--text-2)] hover:bg-[rgba(255,255,255,0.04)] hover:text-[var(--text-1)]'
+                      )}
+                    >
+                      <span className={active ? 'text-[var(--brand)]' : 'text-[var(--text-3)]'}>{item.icon}</span>
+                      <span className="whitespace-nowrap">{item.label}</span>
+                      {active ? <span className="absolute inset-x-3 -bottom-1.5 h-0.5 rounded-full bg-[var(--brand)]" /> : null}
+                    </Link>
+                  );
+                })}
+              </div>
 
-              <div className="relative ml-auto">
+              <div ref={moreMenuRef} className="relative shrink-0">
                 <button
                   type="button"
                   onClick={() => setMoreOpen((open) => !open)}
@@ -345,13 +371,14 @@ export default function DashboardShell({ children }: DashboardShellProps) {
                   )}
                   aria-expanded={moreOpen}
                   aria-haspopup="menu"
+                  aria-controls="dashboard-more-menu"
                 >
                   <NotesIcon className={hasActiveSecondaryNav || moreOpen ? 'h-4 w-4 text-[var(--brand)]' : 'h-4 w-4 text-[var(--text-3)]'} />
                   <span>More</span>
                 </button>
 
                 {moreOpen ? (
-                  <div className="absolute right-0 top-[calc(100%+10px)] z-[var(--z-dropdown)] w-[268px] rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--bg-elevated)] p-2 shadow-[var(--shadow-md)]">
+                  <div id="dashboard-more-menu" role="menu" className="absolute right-0 top-[calc(100%+10px)] z-[var(--z-dropdown)] w-[268px] rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--bg-elevated)] p-2 shadow-[var(--shadow-md)]">
                     <div className="px-3 pb-2 pt-1 text-[11px] font-medium uppercase tracking-[0.14em] text-[var(--text-3)]">
                       Secondary sections
                     </div>
@@ -363,6 +390,7 @@ export default function DashboardShell({ children }: DashboardShellProps) {
                           <Link
                             key={item.href}
                             href={item.href}
+                            role="menuitem"
                             onClick={() => setMoreOpen(false)}
                             className={cx(
                               'flex items-center gap-2 rounded-[var(--radius-md)] px-3 py-2 text-[13px] transition',
