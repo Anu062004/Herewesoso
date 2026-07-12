@@ -104,6 +104,7 @@ function normalizePositions(raw: RawRecord): EnrichedPosition[] {
       liquidationPrice: position.liquidationPrice || position.takeOverPrice || null,
       leverage: position.leverage,
       realizedPnL: position.realizedPnL,
+      unrealizedPnL: position.unrealizedPnL,
       createdAt: position.createdAt,
       updatedAt: position.updatedAt,
       active: position.active
@@ -134,10 +135,12 @@ const sodex = {
     const statePositions = (stateRaw?.data?.P || []) as RawRecord[];
     const markPrices = (markPricesRaw?.data || []) as RawRecord[];
     const liquidationPriceMap = new Map<string, string | number | null>();
+    const unrealizedPnlMap = new Map<string, string | number | null>();
     const markPriceMap = new Map<string, string | number | null>();
 
     for (const position of statePositions) {
       liquidationPriceMap.set(position.s, position.lp);
+      unrealizedPnlMap.set(position.s, position.ur);
     }
 
     for (const markPrice of markPrices) {
@@ -148,6 +151,7 @@ const sodex = {
       position.markPrice = markPriceMap.get(position.symbol) || position.markPrice || null;
       position.liquidationPrice =
         position.liquidationPrice || liquidationPriceMap.get(position.symbol) || null;
+      (position as any).unrealizedPnL = (position as any).unrealizedPnL || unrealizedPnlMap.get(position.symbol) || null;
     }
 
     return {

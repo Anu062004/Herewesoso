@@ -24,9 +24,10 @@ interface MacroHistoryEntry {
   priceChangePct?: string | number | null;
 }
 
-const WALLET = process.env.USER_WALLET_ADDRESS;
 const ALERT_THRESHOLD = Number.parseInt(process.env.RISK_ALERT_THRESHOLD || '65', 10);
+const ALERT_COOLDOWN_MS = Number.parseInt(process.env.RISK_ALERT_COOLDOWN_MS || '1800000', 10);
 const HIGH_IMPACT_EVENTS = ['CPI', 'FOMC', 'Federal Reserve', 'GDP', 'NFP', 'Jobs', 'PCE'];
+const recentAlerts = new Map<string, { score: number; level: string; sentAt: number }>();
 
 function buildDemoShieldState(walletAddress?: string): ShieldState {
   return {
@@ -44,7 +45,7 @@ function buildDemoShieldState(walletAddress?: string): ShieldState {
       }
     ],
     accountState: {
-      walletAddress: walletAddress || WALLET || null,
+      walletAddress: walletAddress || process.env.USER_WALLET_ADDRESS || null,
       accountId: null,
       accountValue: 0,
       availableMargin: 0,
@@ -126,14 +127,16 @@ async function runShieldAgent(): Promise<ShieldAgentResult> {
   const runRecord = await createAgentRun('shield');
 
   try {
-    if (!WALLET) {
+    const wallet = process.env.USER_WALLET_ADDRESS;
+    const network = process.env.SODEX_NETWORK === 'mainnet' ? 'mainnet' : 'testnet';
+    if (!wallet) {
       throw new Error('USER_WALLET_ADDRESS is not configured.');
     }
 
     let shieldState: ShieldState;
 
     try {
-      shieldState = await sodex.getEnrichedPositions(WALLET);
+      shieldState = await sodex.getEnrichedPositions(wallet, network);
     } catch (error) {
       console.warn(`[ShieldAgent] SoDEX API unreachable — skipping cycle: ${getErrorMessage(error)}`);
       const duration = Date.now() - startTime;
@@ -161,7 +164,7 @@ async function runShieldAgent(): Promise<ShieldAgentResult> {
       ...((tomorrowEvents?.data || []) as MacroEvent[])
     ];
     const dangerousEvents = allEvents.filter((event) =>
-      HIGH_IMPACT_EVENTS.some((marker) => event?.name?.includes(marker))
+      HIGH_IMPACT_EVENTS.some((marker) => String(event?.name || '').toLowerCase().includes(marker.toLowerCase()))
     );
     const etfSummary = (etfData?.data || {}) as Record<string, unknown>;
     const etfNetFlow = parseNumber(etfSummary.netFlow ?? etfSummary.netFlow1Day);
@@ -196,7 +199,7 @@ async function runShieldAgent(): Promise<ShieldAgentResult> {
       const parsedLeverage = parseNumber(position.leverage);
       const parsedPositionSize = parseNumber(position.positionSize);
       const entryPrice = parseNumber(position.entryPrice);
-      const positionSide = position.positionSide || position.side || 'BOTH';
+      const positionSide = riskCalculator.resolveDirection(position.positionSide || position.side, parsedPositionSize);
 
       const distancePct = riskCalculator.calculateLiquidationDistance(
         parsedMarkPrice,
@@ -204,22 +207,33 @@ async function runShieldAgent(): Promise<ShieldAgentResult> {
         positionSide,
         parsedLeverage
       );
-      const positionRisk = riskCalculator.distanceToRiskScore(distancePct);
       const macroThreatScore = nearestEvent
         ? riskCalculator.assessMacroThreat(hoursUntilEvent, historicalMove)
         : 0;
-      const combinedRisk = riskCalculator.calculateCombinedRisk(
-        positionRisk,
-        macroThreatScore,
-        etfOutflow
-      );
-      const riskLevel = riskCalculator.scoreToRiskLevel(combinedRisk);
-      const suggestedAction = riskCalculator.suggestAction(riskLevel, parsedLeverage, distancePct);
+      const analysis = riskCalculator.analyzePosition({
+        markPrice: parsedMarkPrice,
+        liquidationPrice: parsedLiquidationPrice,
+        entryPrice,
+        leverage: parsedLeverage,
+        positionSize: parsedPositionSize,
+        positionSide,
+        accountValue: shieldState.accountState?.accountValue || 0,
+        availableMargin: shieldState.accountState?.availableMargin || 0,
+        initialMargin: shieldState.accountState?.initialMargin || 0,
+        unrealizedPnl: parseNumber((position as any).unrealizedPnL),
+        macroThreat: macroThreatScore,
+        flowThreat: etfOutflow ? 70 : 0
+      });
+      const combinedRisk = analysis.score;
+      const riskLevel = analysis.riskLevel;
+      const suggestedAction = combinedRisk >= 55
+        ? `Reduce toward ${analysis.rescue.targetLeverage}x, close about ${analysis.rescue.quantityToClose} units, or add approximately $${analysis.rescue.addMargin.toFixed(2)} margin.`
+        : riskCalculator.suggestAction(riskLevel, parsedLeverage, distancePct);
 
       let claudeMemo = suggestedAction;
 
-      if (combinedRisk >= 30) {
-        const positionValue = parsedMarkPrice * parsedPositionSize;
+      if (combinedRisk >= ALERT_THRESHOLD) {
+        const positionValue = analysis.notional;
         claudeMemo = await claude.generateRiskMemo({
           symbol,
           side: positionSide,
@@ -272,7 +286,7 @@ async function runShieldAgent(): Promise<ShieldAgentResult> {
       }
 
       const snapshot: PositionRiskSnapshot = {
-        wallet_address: WALLET,
+        wallet_address: wallet,
         symbol,
         entry_price: entryPrice,
         mark_price: parsedMarkPrice,
@@ -293,7 +307,12 @@ async function runShieldAgent(): Promise<ShieldAgentResult> {
 
       riskSnapshots.push(snapshot);
 
-      if (combinedRisk >= 30) {
+      const alertKey = `${wallet.toLowerCase()}:${network}:${symbol}`;
+      const previousAlert = recentAlerts.get(alertKey);
+      const escalated = previousAlert && (previousAlert.level !== riskLevel || combinedRisk >= previousAlert.score + 10);
+      const cooldownElapsed = !previousAlert || Date.now() - previousAlert.sentAt >= ALERT_COOLDOWN_MS;
+
+      if (combinedRisk >= ALERT_THRESHOLD && (cooldownElapsed || escalated)) {
         const alertResult = await telegram.sendLiquidationAlert({
           symbol,
           leverage: parsedLeverage,
@@ -312,7 +331,7 @@ async function runShieldAgent(): Promise<ShieldAgentResult> {
           title: alertResult.title,
           message: alertResult.message,
           telegram_sent: Boolean(alertResult.telegramSent),
-          data: { symbol, riskLevel, riskScore: combinedRisk }
+          data: { symbol, riskLevel, riskScore: combinedRisk, wallet, network, alertState: escalated ? 'ESCALATED' : 'OPEN', rescue: analysis.rescue }
         });
 
         await safeInsert('alerts', {
@@ -324,9 +343,15 @@ async function runShieldAgent(): Promise<ShieldAgentResult> {
           data: {
             symbol,
             riskLevel,
-            riskScore: combinedRisk
+            riskScore: combinedRisk,
+            wallet,
+            network,
+            alertState: escalated ? 'ESCALATED' : 'OPEN',
+            rescue: analysis.rescue,
+            confidence: analysis.confidence
           }
         });
+        recentAlerts.set(alertKey, { score: combinedRisk, level: riskLevel, sentAt: Date.now() });
       }
     }
 
@@ -378,7 +403,7 @@ async function runShieldAgent(): Promise<ShieldAgentResult> {
     if (riskSnapshots.length > 0) {
       memoryStore.pushPositionRisks(riskSnapshots);
       await safeInsert('position_risks', riskSnapshots);
-      await performanceService.recordPortfolioSnapshot(WALLET, shieldState, riskSnapshots);
+      await performanceService.recordPortfolioSnapshot(wallet, shieldState, riskSnapshots);
     }
 
     const duration = Date.now() - startTime;
