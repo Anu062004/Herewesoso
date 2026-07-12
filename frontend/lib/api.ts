@@ -514,6 +514,35 @@ export async function fetchSodexKlines(symbol: string, interval = '1h', limit = 
   return normalizeKlines(symbol, interval, raw);
 }
 
+export interface TechnicalGraphAnalysis {
+  version: string;
+  symbol: string;
+  interval: string;
+  observations: number;
+  trend: 'BULLISH' | 'BEARISH' | 'RANGE';
+  momentum: 'BULLISH' | 'BEARISH' | 'NEUTRAL';
+  volatilityRegime: 'NORMAL' | 'ELEVATED' | 'HIGH';
+  breakout: 'UPSIDE' | 'DOWNSIDE' | 'NONE';
+  confidence: number;
+  changePct: number;
+  volatilityPct: number | null;
+  volumeRatio: number | null;
+  support: number;
+  resistance: number;
+  invalidation: number;
+  indicators: Record<string, number | null>;
+  evidence: string[];
+  conflicts: string[];
+  narrative: string;
+  disclaimer: string;
+  calculatedAt: string;
+}
+
+export async function fetchTechnicalGraphAnalysis(symbol: string, interval = '1h', limit = 240) {
+  const query = buildSodexQuery({ interval, limit });
+  return requestJson<TechnicalGraphAnalysis>(`/api/sodex/chart-analysis/${encodeURIComponent(symbol)}${query}`);
+}
+
 export interface SosoIndex {
   id: string;
   symbol: string;

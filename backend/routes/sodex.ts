@@ -6,6 +6,7 @@ import { ethers } from 'ethers';
 import sodex = require('../services/sodex');
 import errorUtils = require('../utils/error');
 import walletAuth = require('../services/walletAuth');
+import technicalGraphAnalysis = require('../services/technicalGraphAnalysis');
 
 const { getErrorMessage } = errorUtils;
 
@@ -253,6 +254,22 @@ router.get('/klines/:symbol', async (req: Request, res: Response) => {
   } catch (error) {
     console.error('[SoDEX Route] /klines error:', getErrorMessage(error));
     return res.status(500).json({ error: getErrorMessage(error) });
+  }
+});
+
+router.get('/chart-analysis/:symbol', async (req: Request, res: Response) => {
+  const symbol = parseSymbol(req.params.symbol);
+  const network = parseNetwork(req.query.network);
+  if (!symbol) return res.status(400).json({ error: 'A valid symbol is required.' });
+  try {
+    const interval = parseInterval(req.query.interval);
+    const limit = Math.max(50, parseLimit(req.query.limit, 240, 500));
+    const raw = await sodex.getKlines(symbol, interval, limit, network);
+    const points = technicalGraphAnalysis.normalizeGraphCandles(raw);
+    return res.json(technicalGraphAnalysis.analyzeTechnicalGraph({ symbol, interval, points }));
+  } catch (error) {
+    const message = getErrorMessage(error);
+    return res.status(message.includes('At least 20') ? 422 : 500).json({ error: message });
   }
 });
 
