@@ -6,6 +6,17 @@ import errorUtils = require('../utils/error');
 
 const router = express.Router();
 const { getErrorMessage } = errorUtils;
+const cache = new Map<string, { expiresAt: number; payload: Record<string, unknown> }>();
+
+function cached(key: string) {
+  const entry = cache.get(key);
+  return entry && entry.expiresAt > Date.now() ? entry.payload : null;
+}
+
+function remember(key: string, payload: Record<string, unknown>, ttlMs: number) {
+  cache.set(key, { payload, expiresAt: Date.now() + ttlMs });
+  return payload;
+}
 
 function number(value: unknown): number | null {
   const parsed = Number(value);
@@ -51,20 +62,22 @@ function normalizePoint(item: any) {
 }
 
 router.get('/', async (_req: Request, res: Response) => {
+  const existing = cached('list');
+  if (existing) return res.json(existing);
   try {
     const response = await sosovalue.getSSIList();
     const indices = rows(response?.data).map(normalizeIndex);
-    return res.json({ indices, count: indices.length, updatedAt: new Date().toISOString(), unavailable: indices.length === 0 });
+    return res.json(remember('list', { indices, count: indices.length, updatedAt: new Date().toISOString(), unavailable: indices.length === 0 }, 5 * 60000));
   } catch (error) {
     const message = getErrorMessage(error);
     console.warn('[Indices Route] Index list unavailable:', message);
-    return res.json({
+    return res.json(remember('list', {
       indices: [],
       count: 0,
       updatedAt: new Date().toISOString(),
       unavailable: true,
       message: message.includes('429') ? 'SoSoValue rate limit reached. The index feed will retry automatically.' : message
-    });
+    }, 60000));
   }
 });
 
@@ -72,21 +85,24 @@ router.get('/:identifier/history', async (req: Request, res: Response) => {
   const identifier = String(req.params.identifier || '').trim();
   const days = Math.min(365, Math.max(7, Number.parseInt(String(req.query.days || 90), 10) || 90));
   if (!identifier) return res.status(400).json({ error: 'Index identifier is required.', points: [] });
+  const cacheKey = `history:${identifier}:${days}`;
+  const existing = cached(cacheKey);
+  if (existing) return res.json(existing);
   try {
     const response = await sosovalue.getSSIHistory(identifier, days);
     const points = rows(response?.data).map(normalizePoint).filter(Boolean).sort((a: any, b: any) => a.time - b.time);
-    return res.json({ identifier, days, points, updatedAt: new Date().toISOString(), unavailable: points.length === 0 });
+    return res.json(remember(cacheKey, { identifier, days, points, updatedAt: new Date().toISOString(), unavailable: points.length === 0 }, 5 * 60000));
   } catch (error) {
     const message = getErrorMessage(error);
     console.warn(`[Indices Route] History unavailable for ${identifier}:`, message);
-    return res.json({
+    return res.json(remember(cacheKey, {
       identifier,
       days,
       points: [],
       updatedAt: new Date().toISOString(),
       unavailable: true,
       message: message.includes('429') ? 'SoSoValue rate limit reached. Index history will retry automatically.' : message
-    });
+    }, 60000));
   }
 });
 
