@@ -430,6 +430,13 @@ export async function saveNarrativePreferences(preferences: NarrativePreferences
   });
 }
 
+export async function saveNarrativeFeedback(payload: { signalId: string; sector: string; useful: boolean; reason?: string }) {
+  return requestJson<{ saved: true; signalId: string; useful: boolean }>('/api/narrative/feedback', {
+    method: 'POST',
+    body: JSON.stringify(payload)
+  });
+}
+
 export async function disconnectSodex() {
   return requestJson<{ disconnected: true }>('/api/sodex/disconnect', { method: 'POST' });
 }

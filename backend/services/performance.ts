@@ -207,6 +207,10 @@ async function recordSignalOutcomes(scores: NarrativeScoreRow[]) {
       macro: score.score_macro,
       velocity: score.velocity_score || 0,
       acceleration: score.acceleration_score || 0,
+      sourceBreadth: score.source_breadth_score || 0,
+      sourceQuality: score.source_quality_score || 0,
+      catalyst: score.catalyst_score || 0,
+      sentiment: score.sentiment_score || 0,
       confidence: score.confidence || 0,
       marketConfirmation: score.market_confirmation_score || 0,
       crowding: score.crowding_score || 0

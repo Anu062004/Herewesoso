@@ -9,16 +9,27 @@ export interface MarketConfirmation {
   volumeRatio: number;
   available: boolean;
   fundingRate?: number;
+  breadth?: number;
+  regime?: 'RISK_ON' | 'RISK_OFF' | 'TRENDING' | 'SIDEWAYS' | 'HIGH_VOLATILITY';
+}
+
+export interface NarrativeBaseline { averageHourly: number; standardDeviation: number; sampleHours: number; }
+export interface NarrativeWeights {
+  velocity: number; acceleration: number; sourceBreadth: number; sourceQuality: number;
+  catalyst: number; sentiment: number; market: number;
 }
 
 export interface NarrativeEvidence {
-  matchedHeadlines: Array<{ title: string; source: string; publishedAt: string | null; catalyst: string; sentiment: number }>;
+  matchedHeadlines: Array<{ title: string; source: string; publishedAt: string | null; catalyst: string; sentiment: number; clusterId: string }>;
   uniqueSources: string[];
   leadingAssets: string[];
   primaryCatalyst: string;
   invalidation: string;
   counts: { hour1: number; hours6: number; hours24: number };
   modelVersion: string;
+  baseline: NarrativeBaseline;
+  marketRegime: string;
+  marketBreadth: number;
 }
 
 export interface NarrativeAnalysis {
@@ -49,6 +60,10 @@ interface TaxonomyEntry {
 }
 
 export const NARRATIVE_MODEL_VERSION = 'narrative-v2.0.0';
+export const DEFAULT_NARRATIVE_WEIGHTS: NarrativeWeights = {
+  velocity: 0.2, acceleration: 0.15, sourceBreadth: 0.15, sourceQuality: 0.1,
+  catalyst: 0.1, sentiment: 0.1, market: 0.2
+};
 
 export const NARRATIVE_TAXONOMY: Record<string, TaxonomyEntry> = {
   DeFi: {
@@ -132,6 +147,8 @@ function fingerprint(headline: Headline): string {
     .filter((word) => word.length > 2).slice(0, 12).sort().join(' ');
 }
 
+export function headlineClusterId(headline: Headline): string { return fingerprint(headline); }
+
 export function deduplicateHeadlines(headlines: Headline[]): Headline[] {
   const seen = new Set<string>();
   return headlines.filter((headline) => {
@@ -177,7 +194,10 @@ export function analyzeNarrative(
   headlines: Headline[],
   sector: string,
   market: MarketConfirmation = { score: 50, return6h: 0, return24h: 0, volumeRatio: 1, available: false },
-  now = Date.now()
+  now = Date.now(),
+  baseline: NarrativeBaseline = { averageHourly: 0.25, standardDeviation: 0.5, sampleHours: 0 },
+  weights: NarrativeWeights = DEFAULT_NARRATIVE_WEIGHTS,
+  sourceReliability: Record<string, number> = {}
 ): NarrativeAnalysis {
   const entry = NARRATIVE_TAXONOMY[sector] || { terms: [sector.toLowerCase()], subNarratives: {}, assets: [] };
   const unique = deduplicateHeadlines(headlines);
@@ -188,14 +208,20 @@ export function analyzeNarrative(
   const hours6 = count(6);
   const hours24 = count(24);
   const previousHourly = Math.max((hours6 - hour1) / 5, 0.25);
-  const baselineHourly = Math.max((hours24 - hours6) / 18, 0.25);
-  const velocityScore = clamp(50 + ((hour1 / baselineHourly) - 1) * 25);
+  const batchBaseline = Math.max((hours24 - hours6) / 18, 0.25);
+  const baselineHourly = baseline.sampleHours >= 24 ? Math.max(baseline.averageHourly, 0.05) : batchBaseline;
+  const deviation = baseline.sampleHours >= 24 ? Math.max(baseline.standardDeviation, 0.25) : Math.max(batchBaseline, 0.25);
+  const velocityScore = clamp(50 + ((hour1 - baselineHourly) / deviation) * 15);
   const accelerationScore = clamp(50 + ((hour1 / previousHourly) - 1) * 25);
   const attentionScore = clamp((hours24 / Math.max(unique.length, 1)) * 260);
   const sources = [...new Set(relevant.map(sourceOf).filter(Boolean))];
   const sourceBreadthScore = clamp(sources.length * 14);
   const sourceQualityScore = relevant.length
-    ? clamp(relevant.reduce((sum, headline) => sum + (QUALITY_SOURCES.some((source) => sourceOf(headline).toLowerCase().includes(source)) ? 90 : 55), 0) / relevant.length)
+    ? clamp(relevant.reduce((sum, headline) => {
+        const source = sourceOf(headline).toLowerCase();
+        const learned = sourceReliability[source];
+        return sum + (typeof learned === 'number' ? learned : QUALITY_SOURCES.some((known) => source.includes(known)) ? 90 : 55);
+      }, 0) / relevant.length)
     : 0;
   const sentiments = relevant.map((headline) => sentiment(textOf(headline)));
   const averageSentiment = sentiments.length ? sentiments.reduce((a, b) => a + b, 0) / sentiments.length : 0;
@@ -210,9 +236,11 @@ export function analyzeNarrative(
   const crowdingScore = clamp(Math.max(0, velocityScore - 65) * 0.7 + Math.max(0, market.return24h - 5) * 5 + Math.max(0, market.volumeRatio - 2) * 12 + Math.abs(market.fundingRate || 0) * 1000);
   const freshness = relevant.length ? relevant.reduce((sum, headline) => sum + Math.exp(-Math.max(0, now - timestampOf(headline)) / (6 * hour)), 0) / relevant.length : 0;
   const confidence = clamp(relevant.length * 8 + sources.length * 7 + freshness * 25 + (market.available ? 15 : 0) - contradictionScore * 0.25);
+  const regimeAdjustment = market.regime === 'RISK_OFF' ? -8 : market.regime === 'HIGH_VOLATILITY' ? -6 : market.regime === 'RISK_ON' ? 4 : 0;
   const opportunityScore = clamp(
-    velocityScore * 0.2 + accelerationScore * 0.15 + sourceBreadthScore * 0.15 + sourceQualityScore * 0.1 +
-    catalystScore * 0.1 + sentimentScore * 0.1 + market.score * 0.2 - crowdingScore * 0.18 - contradictionScore * 0.15
+    velocityScore * weights.velocity + accelerationScore * weights.acceleration + sourceBreadthScore * weights.sourceBreadth +
+    sourceQualityScore * weights.sourceQuality + catalystScore * weights.catalyst + sentimentScore * weights.sentiment +
+    market.score * weights.market - crowdingScore * 0.18 - contradictionScore * 0.15 + regimeAdjustment
   );
   let lifecycleStage: NarrativeStage = 'ESTABLISHED';
   if (averageSentiment < -0.3 && accelerationScore < 45) lifecycleStage = 'REVERSING';
@@ -230,11 +258,14 @@ export function analyzeNarrative(
       matchedHeadlines: relevant.slice(0, 10).map((headline) => ({
         title: titleOf(headline), source: sourceOf(headline),
         publishedAt: new Date(timestampOf(headline)).toISOString(), catalyst: catalyst(textOf(headline)).label,
-        sentiment: sentiment(textOf(headline))
+        sentiment: sentiment(textOf(headline)), clusterId: fingerprint(headline)
       })),
       uniqueSources: sources, leadingAssets: entry.assets, primaryCatalyst: strongestCatalyst.label,
       invalidation: 'Velocity below baseline for 6 hours or market confirmation below 35.',
-      counts: { hour1, hours6, hours24 }, modelVersion: NARRATIVE_MODEL_VERSION
+      counts: { hour1, hours6, hours24 }, modelVersion: NARRATIVE_MODEL_VERSION,
+      baseline,
+      marketRegime: market.regime || 'SIDEWAYS',
+      marketBreadth: market.breadth ?? 0
     }
   };
 }

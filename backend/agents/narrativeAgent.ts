@@ -11,6 +11,7 @@ import errorUtils = require('../utils/error');
 import performanceService = require('../services/performance');
 import sodex = require('../services/sodex');
 import { analyzeNarrative, assetsForSector, NARRATIVE_MODEL_VERSION, type MarketConfirmation } from '../services/narrativeEngine';
+import { loadCalibratedWeights, loadNarrativeBaselines, loadSourceReliability } from '../services/narrativeLearning';
 
 const { delay } = delayUtils;
 const { safeInsert, safeSelect, createAgentRun, completeAgentRun, failAgentRun } = supabaseService;
@@ -52,9 +53,7 @@ function marketPoints(input: unknown): Array<{ close: number; volume: number }> 
   }).filter((point) => point.close > 0);
 }
 
-async function getMarketConfirmation(sector: string): Promise<MarketConfirmation> {
-  const symbol = assetsForSector(sector)[0];
-  if (!symbol) return { score: 50, return6h: 0, return24h: 0, volumeRatio: 1, available: false };
+async function getSymbolMarket(symbol: string): Promise<Omit<MarketConfirmation, 'regime' | 'breadth'>> {
   try {
     const network = process.env.SIGNAL_OUTCOME_NETWORK === 'mainnet' ? 'mainnet' : 'testnet';
     const raw = await sodex.getKlines(symbol, '1h', 30, network);
@@ -73,6 +72,75 @@ async function getMarketConfirmation(sector: string): Promise<MarketConfirmation
   } catch {
     return { score: 50, return6h: 0, return24h: 0, volumeRatio: 1, available: false };
   }
+}
+
+async function getMarketRegime(): Promise<NonNullable<MarketConfirmation['regime']>> {
+  const market = await getSymbolMarket('BTC-USD');
+  if (!market.available) return 'SIDEWAYS';
+  if (Math.abs(market.return24h) >= 6) return 'HIGH_VOLATILITY';
+  if (market.return24h >= 2 && market.return6h > 0) return 'RISK_ON';
+  if (market.return24h <= -2 && market.return6h < 0) return 'RISK_OFF';
+  if (Math.abs(market.return24h) >= 1.5) return 'TRENDING';
+  return 'SIDEWAYS';
+}
+
+async function getMarketConfirmation(sector: string, regime: NonNullable<MarketConfirmation['regime']>): Promise<MarketConfirmation> {
+  const assets = assetsForSector(sector);
+  if (!assets.length) return { score: 50, return6h: 0, return24h: 0, volumeRatio: 1, available: false, breadth: 0, regime };
+  const markets = await Promise.all(assets.map(getSymbolMarket));
+  const available = markets.filter((market) => market.available);
+  if (!available.length) return { score: 50, return6h: 0, return24h: 0, volumeRatio: 1, available: false, breadth: 0, regime };
+  const average = (values: number[]) => values.reduce((a, b) => a + b, 0) / values.length;
+  const breadth = (available.filter((market) => market.return6h > 0).length / available.length) * 100;
+  return {
+    score: Math.round(average(available.map((market) => market.score)) * 0.7 + breadth * 0.3),
+    return6h: average(available.map((market) => market.return6h)),
+    return24h: average(available.map((market) => market.return24h)),
+    volumeRatio: average(available.map((market) => market.volumeRatio)),
+    available: true,
+    breadth,
+    regime
+  };
+}
+
+async function persistNarrativeEvidence(scores: NarrativeScoreRow[]) {
+  const since = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+  const { data: existing } = await safeSelect<any>('narrative_events', (query: any) => query.gte('published_at', since).limit(5000));
+  const known = new Set(existing.map((row: any) => `${row.sector}:${row.cluster_id}`));
+  const rows = scores.flatMap((score) => {
+    const evidence = (score.evidence || {}) as { matchedHeadlines?: Array<Record<string, unknown>> };
+    return (evidence.matchedHeadlines || []).map((headline) => ({
+      sector: score.sector,
+      sub_narrative: score.sub_narrative || 'General',
+      title: String(headline.title || ''),
+      source: String(headline.source || 'Unknown'),
+      cluster_id: String(headline.clusterId || ''),
+      published_at: String(headline.publishedAt || new Date().toISOString()),
+      sentiment: Number(headline.sentiment || 0),
+      catalyst: String(headline.catalyst || 'Organic attention'),
+      model_version: score.model_version || NARRATIVE_MODEL_VERSION
+    })).filter((row) => row.cluster_id && !known.has(`${row.sector}:${row.cluster_id}`));
+  });
+  if (rows.length) await safeInsert('narrative_events', rows);
+}
+
+async function persistLifecycleTransitions(scores: NarrativeScoreRow[]) {
+  const { data: previous } = await safeSelect<NarrativeScoreRow>('narrative_scores', (query: any) =>
+    query.order('created_at', { ascending: false }).limit(64)
+  );
+  const latest = new Map<string, NarrativeScoreRow>();
+  previous.forEach((row) => { if (!latest.has(row.sector)) latest.set(row.sector, row); });
+  const transitions = scores.flatMap((score) => {
+    const prior = latest.get(score.sector);
+    if (!prior?.lifecycle_stage || !score.lifecycle_stage || prior.lifecycle_stage === score.lifecycle_stage) return [];
+    return [{
+      sector: score.sector, from_stage: prior.lifecycle_stage, to_stage: score.lifecycle_stage,
+      confidence: score.confidence || 0, opportunity_score: score.combined_score,
+      invalidated: score.lifecycle_stage === 'FADING' || score.lifecycle_stage === 'REVERSING',
+      evidence: score.evidence || {}, model_version: score.model_version || NARRATIVE_MODEL_VERSION
+    }];
+  });
+  if (transitions.length) await safeInsert('narrative_stage_transitions', transitions);
 }
 
 async function alertAllowed(score: NarrativeScoreRow): Promise<boolean> {
@@ -106,9 +174,12 @@ async function runNarrativeAgent(): Promise<NarrativeAgentResult> {
     const upcoming = (Array.isArray(macroEvents?.data) ? macroEvents.data : []) as MacroEvent[];
 
     const macroScore = narrativeScorer.scoreMacroLayer(upcoming);
-    const marketConfirmations = await Promise.all(SECTORS.map((sector) => getMarketConfirmation(sector)));
+    const [regime, baselines, calibration, sourceReliability] = await Promise.all([
+      getMarketRegime(), loadNarrativeBaselines(SECTORS), loadCalibratedWeights(), loadSourceReliability()
+    ]);
+    const marketConfirmations = await Promise.all(SECTORS.map((sector) => getMarketConfirmation(sector, regime)));
     const sectorScores: NarrativeScoreRow[] = SECTORS.map((sector, index) => {
-      const analysis = analyzeNarrative(headlines, sector, marketConfirmations[index]);
+      const analysis = analyzeNarrative(headlines, sector, marketConfirmations[index], Date.now(), baselines[sector], calibration.weights, sourceReliability);
       const narrativeScore = analysis.attentionScore;
       const etfScore = narrativeScorer.scoreETFLayer(etfNetFlow);
 
@@ -133,7 +204,7 @@ async function runNarrativeAgent(): Promise<NarrativeAgentResult> {
         market_confirmation_score: analysis.marketConfirmationScore,
         crowding_score: analysis.crowdingScore,
         contradiction_score: analysis.contradictionScore,
-        global_context: { etfFlow7Day: etfNetFlow, etfScore, macroScore, upcomingEventCount: upcoming.length },
+        global_context: { etfFlow7Day: etfNetFlow, etfScore, macroScore, upcomingEventCount: upcoming.length, marketRegime: regime, calibrationSamples: calibration.samples, calibratedWeights: calibration.calibrated },
         evidence: analysis.evidence as unknown as Record<string, unknown>,
         model_version: NARRATIVE_MODEL_VERSION
       };
@@ -261,6 +332,8 @@ async function runNarrativeAgent(): Promise<NarrativeAgentResult> {
       reasoning: reasoningMap.get(score.sector) || null
     }));
 
+    await persistLifecycleTransitions(scoresToStore);
+    await persistNarrativeEvidence(scoresToStore);
     memoryStore.pushSignals(scoresToStore);
     await safeInsert('narrative_scores', scoresToStore);
     await performanceService.recordSignalOutcomes(scoresToStore);
