@@ -231,9 +231,9 @@ async function executePayload(req: Request, res: Response) {
     let result: sodexTrader.OrderResult;
 
     if (payload.action === 'CLOSE_POSITION') {
-      result = await sodexTrader.closePosition(payload.symbol);
+      result = await sodexTrader.closePosition(payload.symbol, '', payload.network);
     } else if (payload.action === 'REDUCE_LEVERAGE' && payload.targetLeverage) {
-      result = await sodexTrader.reduceLeverage(payload.symbol, payload.targetLeverage);
+      result = await sodexTrader.reduceLeverage(payload.symbol, payload.targetLeverage, payload.network);
     } else if (payload.action === 'CANCEL_ORDER') {
       if (payload.cancels.length === 0) {
         result = {
@@ -241,7 +241,7 @@ async function executePayload(req: Request, res: Response) {
           message: 'Provide orderId, clOrdId, or a cancels array to cancel an order.'
         };
       } else {
-        result = await sodexTrader.cancelOrders({ symbol: payload.symbol, cancels: payload.cancels });
+        result = await sodexTrader.cancelOrders({ symbol: payload.symbol, cancels: payload.cancels }, payload.network);
       }
     } else {
       result = { success: false, message: 'Unsupported or incomplete action payload.' };
