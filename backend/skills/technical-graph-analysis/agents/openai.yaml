@@ -1,0 +1,4 @@
+interface:
+  display_name: "Technical Graph Analysis"
+  short_description: "Evidence-based crypto chart narrative analysis"
+  default_prompt: "Use $technical-graph-analysis to analyse this market chart and explain its trend, momentum, levels, and invalidation."

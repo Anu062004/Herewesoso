@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { useMemo, useState } from 'react';
 
-import { fetchSodexKlines, fetchSodexMarkets } from '@/lib/api';
+import { fetchSodexKlines, fetchSodexMarkets, fetchTechnicalGraphAnalysis } from '@/lib/api';
 import { formatCompactNumber, formatDateTime, formatPercent, formatPrice } from '@/lib/format';
 import { useSodexConnection } from '@/lib/useSodexConnection';
 import { usePollingResource } from '@/lib/usePollingResource';
@@ -47,6 +47,11 @@ export default function KlinesClient({ initialSymbol }: { initialSymbol: string 
     intervalMs: pollingIntervalFor(interval),
     key: `${network}:${symbol}:${interval}:${limit}`
   });
+  const backendAnalysis = usePollingResource({
+    fetcher: () => showNarrative ? fetchTechnicalGraphAnalysis(symbol, interval, limit) : Promise.resolve(null),
+    intervalMs: pollingIntervalFor(interval),
+    key: `${showNarrative}:${network}:${symbol}:${interval}:${limit}`
+  });
 
   const symbols = (markets.data?.markets || []).map((market) => market.symbol);
   const options = symbols.length > 0 ? symbols : FALLBACK_SYMBOLS;
@@ -64,7 +69,8 @@ export default function KlinesClient({ initialSymbol }: { initialSymbol: string 
 
     return { latest, high, low, volume, candleChangePct, rangeChangePct };
   }, [points]);
-  const chartNarrative = useMemo(() => analyzeChart(points), [points]);
+  const localNarrative = useMemo(() => analyzeChart(points), [points]);
+  const chartNarrative = backendAnalysis.data || localNarrative;
 
   return (
     <div className="space-y-4">
@@ -207,9 +213,11 @@ export default function KlinesClient({ initialSymbol }: { initialSymbol: string 
                       <div className="text-[14px] font-semibold text-[var(--text-1)]">Chart Narrative</div>
                       <Pill tone={chartNarrative.trend === 'BULLISH' ? 'green' : chartNarrative.trend === 'BEARISH' ? 'red' : 'amber'}>{chartNarrative.trend}</Pill>
                       <Pill tone="gray">{chartNarrative.momentum} momentum</Pill>
+                      {'breakout' in chartNarrative ? <Pill tone="purple">{chartNarrative.breakout} breakout</Pill> : null}
                       <Pill tone="cyan">{chartNarrative.confidence}% confidence</Pill>
                     </div>
                     <p className="mt-3 text-[13px] leading-6 text-[var(--text-2)]">{chartNarrative.narrative}</p>
+                    {backendAnalysis.error ? <p className="mt-2 text-[11px] text-[var(--amber)]">Backend skill unavailable; showing deterministic browser fallback.</p> : null}
                     <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
                       <NarrativeMetric label="Range change" value={formatPercent(chartNarrative.changePct, 2)} />
                       <NarrativeMetric label="Volatility" value={formatPercent(chartNarrative.volatilityPct, 2)} />
@@ -217,6 +225,7 @@ export default function KlinesClient({ initialSymbol }: { initialSymbol: string 
                       <NarrativeMetric label="Resistance" value={formatPrice(chartNarrative.resistance)} />
                       <NarrativeMetric label="Volume ratio" value={chartNarrative.volumeRatio === null ? 'Unavailable' : `${chartNarrative.volumeRatio.toFixed(2)}x`} />
                     </div>
+                    {'evidence' in chartNarrative && chartNarrative.evidence.length ? <div className="mt-3 grid gap-2 md:grid-cols-2"><div className="rounded-lg border border-[var(--border)] p-3"><div className="text-[10px] uppercase text-[var(--green)]">Evidence</div>{chartNarrative.evidence.map((item) => <div key={item} className="mt-1 text-[11px] text-[var(--text-2)]">• {item}</div>)}</div><div className="rounded-lg border border-[var(--border)] p-3"><div className="text-[10px] uppercase text-[var(--amber)]">Conflicts</div>{chartNarrative.conflicts.length ? chartNarrative.conflicts.map((item) => <div key={item} className="mt-1 text-[11px] text-[var(--text-2)]">• {item}</div>) : <div className="mt-1 text-[11px] text-[var(--text-3)]">No major conflicts detected.</div>}</div></div> : null}
                     <p className="mt-3 text-[10px] text-[var(--text-3)]">{chartNarrative.disclaimer}</p>
                   </div>
                 ) : <EmptyState title="Not enough chart data" description="At least eight valid candles are required to create a graph narrative." />
