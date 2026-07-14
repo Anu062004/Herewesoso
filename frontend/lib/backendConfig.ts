@@ -1,10 +1,13 @@
 const DEPLOYED_PRODUCTION_BACKEND = 'https://35-175-76-98.sslip.io';
 
 export function backendBaseUrl(): string {
-  const configured = process.env.API_BASE_URL || process.env.NEXT_PUBLIC_API_BASE_URL;
-  const value = (configured || (process.env.NODE_ENV === 'production'
-    ? DEPLOYED_PRODUCTION_BACKEND
-    : 'http://localhost:3001')).trim();
+  const configured = String(process.env.API_BASE_URL || process.env.NEXT_PUBLIC_API_BASE_URL || '').trim();
+  const production = process.env.NODE_ENV === 'production';
+  // Existing Vercel deployments used the raw EC2 HTTP address. Never reuse
+  // that value in production; migrate transparently to the TLS endpoint.
+  const value = production
+    ? (configured.startsWith('https://') ? configured : DEPLOYED_PRODUCTION_BACKEND)
+    : (configured || 'http://localhost:3001');
 
   let parsed: URL;
   try {
@@ -16,7 +19,7 @@ export function backendBaseUrl(): string {
   if (!['http:', 'https:'].includes(parsed.protocol)) {
     throw new Error('API_BASE_URL must use HTTP or HTTPS.');
   }
-  if (process.env.NODE_ENV === 'production' && parsed.protocol !== 'https:') {
+  if (production && parsed.protocol !== 'https:') {
     throw new Error('API_BASE_URL must use HTTPS in production.');
   }
   if (parsed.username || parsed.password) {
