@@ -33,7 +33,8 @@ SECURITY DEFINER
 SET search_path = public
 AS $$
 BEGIN
-  DELETE FROM api_rate_limits WHERE reset_at < now() - interval '1 day';
+  DELETE FROM api_rate_limits AS expired_limits
+    WHERE expired_limits.reset_at < now() - interval '1 day';
   RETURN QUERY
   INSERT INTO api_rate_limits AS limits (rate_key, request_count, reset_at)
   VALUES (p_rate_key, 1, now() + make_interval(secs => GREATEST(1, LEAST(p_window_seconds, 86400))))

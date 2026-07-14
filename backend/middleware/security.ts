@@ -13,9 +13,63 @@ interface RateBucket {
 }
 
 const buckets = new Map<string, RateBucket>();
+let distributedRateLimitRpcAvailable: boolean | null = null;
 
 function clientKey(req: Request): string {
   return req.ip || req.socket.remoteAddress || 'unknown';
+}
+
+async function consumeLeaseRateLimit(
+  key: string,
+  options: { windowMs: number; max: number },
+  now: number
+): Promise<RateBucket> {
+  const windowStart = Math.floor(now / options.windowMs) * options.windowMs;
+  const resetAt = windowStart + options.windowMs;
+  const ttlSeconds = Math.max(1, Math.ceil((resetAt - now + 1_000) / 1_000));
+
+  for (let slot = 0; slot < options.max; slot += 1) {
+    const { data, error } = await supabase.rpc('acquire_system_lease', {
+      p_lease_key: `rate-limit:${key}:${windowStart}:${slot}`,
+      p_lease_owner: crypto.randomUUID(),
+      p_lease_ttl_seconds: ttlSeconds
+    });
+    if (error) throw error;
+    if (data === true) return { count: slot + 1, resetAt };
+  }
+
+  return { count: options.max + 1, resetAt };
+}
+
+async function consumeDistributedRateLimit(
+  key: string,
+  options: { windowMs: number; max: number },
+  now: number
+): Promise<RateBucket> {
+  if (distributedRateLimitRpcAvailable !== false) {
+    const { data, error } = await supabase.rpc('consume_api_rate_limit', {
+      p_rate_key: key,
+      p_window_seconds: Math.max(1, Math.ceil(options.windowMs / 1000))
+    });
+    if (!error) {
+      distributedRateLimitRpcAvailable = true;
+      const row = Array.isArray(data) ? data[0] : data;
+      return {
+        count: Number(row?.request_count || 0),
+        resetAt: new Date(String(row?.reset_at || now + options.windowMs)).getTime()
+      };
+    }
+
+    distributedRateLimitRpcAvailable = false;
+    console.error(JSON.stringify({
+      level: 'error',
+      event: 'rate_limit_rpc_unavailable',
+      code: error.code || 'unknown',
+      fallback: 'system_lease_slots'
+    }));
+  }
+
+  return consumeLeaseRateLimit(key, options, now);
 }
 
 export function rateLimit(options: { name: string; windowMs: number; max: number; distributed?: boolean }) {
@@ -29,16 +83,7 @@ export function rateLimit(options: { name: string; windowMs: number; max: number
         return res.status(503).json({ error: 'Rate-limit service is unavailable.', code: 'RATE_LIMIT_UNAVAILABLE' });
       }
       try {
-        const { data, error } = await supabase.rpc('consume_api_rate_limit', {
-          p_rate_key: key,
-          p_window_seconds: Math.max(1, Math.ceil(options.windowMs / 1000))
-        });
-        if (error) throw error;
-        const row = Array.isArray(data) ? data[0] : data;
-        bucket = {
-          count: Number(row?.request_count || 0),
-          resetAt: new Date(String(row?.reset_at || now + options.windowMs)).getTime()
-        };
+        bucket = await consumeDistributedRateLimit(key, options, now);
       } catch {
         return res.status(503).json({ error: 'Rate-limit service is unavailable.', code: 'RATE_LIMIT_UNAVAILABLE' });
       }
