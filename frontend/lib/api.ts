@@ -23,6 +23,7 @@ import type {
 } from '@/lib/types';
 import type { SodexConnection, SodexNetwork } from '@/lib/sodexConnection';
 
+import { backendBaseUrl } from '@/lib/backendConfig';
 import { buildSodexQuery, getSodexConnection } from '@/lib/sodexConnection';
 
 export type {
@@ -36,7 +37,7 @@ export type {
 
 const isServer = typeof window === 'undefined';
 const API_BASE = isServer
-  ? process.env.API_BASE_URL || process.env.NEXT_PUBLIC_API_BASE_URL || ''
+  ? backendBaseUrl()
   : '/api/proxy';
 
 function resolvePath(path: string) {
@@ -44,12 +45,6 @@ function resolvePath(path: string) {
 }
 
 async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
-  if (isServer && !API_BASE) {
-    throw new Error('API_BASE_URL is required for server-side API requests.');
-  }
-  if (isServer && process.env.NODE_ENV === 'production' && !API_BASE.startsWith('https://')) {
-    throw new Error('API_BASE_URL must use HTTPS in production.');
-  }
   const response = await fetch(`${API_BASE}${resolvePath(path)}`, {
     cache: 'no-store',
     credentials: 'include',
