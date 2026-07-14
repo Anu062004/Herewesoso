@@ -670,7 +670,7 @@ Gold & Grith implements this in `backend/services/sodexSigner.ts` with an atomic
 
 The frontend deploys to Vercel as a Next.js app. Set `NEXT_PUBLIC_API_BASE_URL` to your backend URL. The API proxy at `frontend/app/api/proxy/[...path]/route.ts` forwards dashboard requests to the backend.
 
-The current production backend is available at `https://35-175-76-98.sslip.io`. Deployment environment variables override this repository default, so it can be replaced with a custom API domain without another code change.
+The current production backend is available at `https://35-175-76-98.sslip.io`. Valid HTTPS deployment environment variables override this repository default, so it can be replaced with a custom API domain without another code change. Legacy HTTP values are ignored in production.
 
 ### Backend (Vercel Serverless)
 
