@@ -1,9 +1,12 @@
 import KlinesClient from './KlinesClient';
 
-export default function SodexKlinesPage({
+export default async function SodexKlinesPage({
   searchParams
 }: {
-  searchParams?: { symbol?: string };
+  searchParams?: Promise<{ symbol?: string | string[] }>;
 }) {
-  return <KlinesClient initialSymbol={searchParams?.symbol || 'BTC-USD'} />;
+  const query = await searchParams;
+  const requested = typeof query?.symbol === 'string' ? query.symbol.trim().toUpperCase() : '';
+  const initialSymbol = /^[A-Z0-9]{1,20}-[A-Z0-9]{1,20}$/.test(requested) ? requested : 'BTC-USD';
+  return <KlinesClient initialSymbol={initialSymbol} />;
 }

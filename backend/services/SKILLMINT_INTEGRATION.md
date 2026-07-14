@@ -12,19 +12,19 @@
 
 ## What changed in your repo
 
-Six surgical edits — no agent logic touched, no schemas migrated, no breaking
-changes for existing AI providers.
+The adapter is wired into the shared AI interface without breaking the other
+providers. Receipt metadata is persisted in the existing memo JSON payload.
 
 | File | Change |
 |---|---|
 | `backend/services/skillmint.ts` | **NEW** — 4th adapter implementing the same `{ generateNarrativeMemo, generateRiskMemo, generateDailySummary }` API as groq/gemini/claude. Calls `client.executeX402(...)` per memo, caches the receipt rootHash in a per-key Map, returns the memo string. |
 | `backend/services/ai.ts` | One-line patch — adds `service === 'skillmint' ? skillmint : claude` to the dispatch chain. Default stays `groq`. |
 | `.env.example` | Added the `SKILLMINT_*` config block with comments explaining each variable. |
-| `backend/agents/narrativeAgent.ts` | Reads `(claude as any).getLastReceipt?.('narrative:<sector>')` after each `generateNarrativeMemo` call. Stores receipt in `trade_memos.data.skillmint_receipt`. **Zero behavior change when AI_SERVICE is anything other than `skillmint`** — the optional chaining returns undefined and the new field is just `null`. |
+| `backend/agents/narrativeAgent.ts` | Reads `ai.getLastReceipt?.('narrative:<sector>')` after each `generateNarrativeMemo` call. Stores receipt in `trade_memos.data.skillmint_receipt`. **Zero behavior change when AI_SERVICE is anything other than `skillmint`** — the optional chaining returns undefined and the new field is just `null`. |
 | `backend/agents/shieldAgent.ts` | Same pattern for `generateRiskMemo` — captures `risk:<symbol>` receipt, stores in the same `trade_memos.data.skillmint_receipt` field. |
 | `backend/services/SKILLMINT_INTEGRATION.md` | This document. |
 
-`package.json` needs one new dependency:
+The required SDK is already declared in `package.json`:
 
 ```bash
 npm install @skillmint/sdk ethers
@@ -107,21 +107,19 @@ version range so no conflict.)
 
 ### Failure handling
 
-The adapter is built for **graceful degradation**. If anything goes wrong
-(no SDK installed, no agent key, no USDC.E balance, x402 endpoint down,
-0G mainnet RPC stalled, skill paused, etc.), `runSkill()` returns `null` and
-the adapter falls back to the same local plaintext memo that groq.ts would have
-produced on its own failure. The agent cycle never crashes.
+Local development supports graceful degradation. If the SDK, key, balance, or
+upstream service is unavailable, development can use a deterministic local
+memo. Production fails closed: the cycle fails and no unattested output is
+stored or delivered as if it had a valid receipt.
 
 You'll see warnings in the logs:
 
 ```
-[Skillmint] Skill 2 call failed (narrative:DeFi): <reason>. Falling back to local memo.
+[Skillmint] Skill 2 call failed (narrative:DeFi): <reason>.
 ```
 
-These are non-fatal. The memo still goes out to Telegram, gets stored in
-Supabase, and the cycle completes. The only thing missing in that moment is the
-on-chain receipt provenance.
+In production this is a fatal cycle error and should page the operator. This
+boundary prevents an unverifiable memo from being mistaken for attested output.
 
 ### Cost monitoring
 
@@ -145,10 +143,8 @@ hot path.
 
 ### Quality
 
-SkillMint skill #2 (the default) is a general-purpose analyst skill running on
-0G's open-weight models (Qwen, DeepSeek, GLM-5-FP8). It's solid but not
-GPT-5 / Claude 4.6 sharp. If you want production-grade reasoning quality,
-publish your own SkillMint skill with a tuned Sentinel-specific system prompt
+SkillMint skill #2 is a general-purpose analyst skill. For domain-specific
+reasoning quality, publish a SkillMint skill with a tuned Sentinel system prompt
 (encrypted on 0G Storage — buyers run it but never see the prompt) and put its
 skillId in `SKILLMINT_NARRATIVE_SKILL_ID`.
 
@@ -214,7 +210,7 @@ longer running.
 2. A new `buildXPrompt` function in `services/skillmint.ts`
 3. A new method on the `skillmint` object
 4. Make sure groq/gemini/claude adapters get the matching method too
-5. Update the agent call site to use `(claude as any).getLastReceipt?.(<key>)`
+5. Update the agent call site to use `ai.getLastReceipt?.(<key>)`
 
 The receipt key convention is `<memoType>:<entityId>` — e.g. `narrative:DeFi`,
 `risk:BTC-USD`, `summary:daily`. Stick to this so the lookups stay predictable.

@@ -19,7 +19,7 @@ function providerMode(): KeyProviderMode {
   if (configured === 'env' || configured === 'local_file' || configured === 'managed' || configured === 'disabled') {
     return configured;
   }
-  return 'local_file';
+  return 'disabled';
 }
 
 function normalize(privateKey: string): string {
@@ -80,14 +80,11 @@ function getKeyStatus(): KeyStatus {
   const fileKey = hasLocalFile();
   const configured =
     provider === 'managed' ? managedKey : provider === 'env' ? envKey : provider === 'local_file' ? envKey || fileKey : false;
-  const source: KeyStatus['source'] =
-    provider === 'managed' && managedKey
-      ? 'managed'
-      : envKey
-        ? 'env'
-        : fileKey
-          ? 'local_file'
-          : 'none';
+  let source: KeyStatus['source'] = 'none';
+  if (provider === 'managed' && managedKey) source = 'managed';
+  else if (provider === 'env' && envKey) source = 'env';
+  else if (provider === 'local_file' && envKey) source = 'env';
+  else if (provider === 'local_file' && fileKey) source = 'local_file';
 
   return {
     configured,

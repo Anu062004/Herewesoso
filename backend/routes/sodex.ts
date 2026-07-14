@@ -7,6 +7,8 @@ import sodex = require('../services/sodex');
 import errorUtils = require('../utils/error');
 import walletAuth = require('../services/walletAuth');
 import technicalGraphAnalysis = require('../services/technicalGraphAnalysis');
+import { rateLimit, requireOperator } from '../middleware/security';
+import { asyncHandler } from '../utils/asyncHandler';
 
 const { getErrorMessage } = errorUtils;
 
@@ -55,7 +57,7 @@ function parseSymbol(value: unknown): string | null {
   }
 
   const symbol = value.trim().toUpperCase();
-  return symbol || null;
+  return /^[A-Z0-9]{2,20}-[A-Z0-9]{2,10}$/.test(symbol) ? symbol : null;
 }
 
 function parseInterval(value: unknown): string {
@@ -124,11 +126,11 @@ router.get('/account', async (req: Request, res: Response) => {
     return res.json({ ...enriched, network });
   } catch (error) {
     console.error('[SoDEX Route] /account error:', getErrorMessage(error));
-    return res.status(500).json({ error: getErrorMessage(error) });
+    return res.status(503).json({ error: 'SoDEX account data is temporarily unavailable.' });
   }
 });
 
-router.get('/smoke', async (req: Request, res: Response) => {
+router.get('/smoke', requireOperator, asyncHandler(async (req: Request, res: Response) => {
   const network = parseNetwork(req.query.network);
   const symbol = parseSymbol(req.query.symbol) || 'BTC-USD';
   const session = walletAuth.getWalletSession(req);
@@ -189,7 +191,7 @@ router.get('/smoke', async (req: Request, res: Response) => {
     checks,
     checkedAt: new Date().toISOString()
   });
-});
+}));
 
 router.get('/markets', async (req: Request, res: Response) => {
   const symbol = typeof req.query.symbol === 'string' ? req.query.symbol.trim().toUpperCase() : null;
@@ -200,7 +202,7 @@ router.get('/markets', async (req: Request, res: Response) => {
     return res.json(markPrices);
   } catch (error) {
     console.error('[SoDEX Route] /markets error:', getErrorMessage(error));
-    return res.status(500).json({ error: getErrorMessage(error) });
+    return res.status(503).json({ error: 'SoDEX market data is temporarily unavailable.' });
   }
 });
 
@@ -218,7 +220,7 @@ router.get('/orderbook/:symbol', async (req: Request, res: Response) => {
     return res.json(orderbook);
   } catch (error) {
     console.error('[SoDEX Route] /orderbook error:', getErrorMessage(error));
-    return res.status(500).json({ error: getErrorMessage(error) });
+    return res.status(503).json({ error: 'SoDEX order-book data is temporarily unavailable.' });
   }
 });
 
@@ -234,7 +236,7 @@ router.get('/orders', async (req: Request, res: Response) => {
     return res.json(orders);
   } catch (error) {
     console.error('[SoDEX Route] /orders error:', getErrorMessage(error));
-    return res.status(500).json({ error: getErrorMessage(error) });
+    return res.status(503).json({ error: 'SoDEX order data is temporarily unavailable.' });
   }
 });
 
@@ -253,7 +255,7 @@ router.get('/klines/:symbol', async (req: Request, res: Response) => {
     return res.json(klines);
   } catch (error) {
     console.error('[SoDEX Route] /klines error:', getErrorMessage(error));
-    return res.status(500).json({ error: getErrorMessage(error) });
+    return res.status(503).json({ error: 'SoDEX candle data is temporarily unavailable.' });
   }
 });
 
@@ -269,11 +271,14 @@ router.get('/chart-analysis/:symbol', async (req: Request, res: Response) => {
     return res.json(technicalGraphAnalysis.analyzeTechnicalGraph({ symbol, interval, points }));
   } catch (error) {
     const message = getErrorMessage(error);
-    return res.status(message.includes('At least 20') ? 422 : 500).json({ error: message });
+    console.error('[SoDEX Route] /chart-analysis error:', message);
+    return message.includes('At least 20')
+      ? res.status(422).json({ error: message })
+      : res.status(503).json({ error: 'Chart analysis is temporarily unavailable.' });
   }
 });
 
-router.get('/login-challenge', (req: Request, res: Response) => {
+router.get('/login-challenge', rateLimit({ name: 'wallet-challenge', windowMs: 60_000, max: 10, distributed: true }), asyncHandler(async (req: Request, res: Response) => {
   const network = parseNetwork(req.query.network);
   const address = typeof req.query.address === 'string' ? req.query.address.trim() : '';
 
@@ -282,7 +287,7 @@ router.get('/login-challenge', (req: Request, res: Response) => {
   }
 
   const checksumAddress = ethers.getAddress(address);
-  const challenge = walletAuth.createChallenge(checksumAddress, network);
+  const challenge = await walletAuth.createChallenge(checksumAddress, network);
 
   return res.json({
     challengeId: challenge.id,
@@ -293,9 +298,9 @@ router.get('/login-challenge', (req: Request, res: Response) => {
     expiresAt: challenge.expiresAt,
     message: challenge.message
   });
-});
+}));
 
-router.post('/connect', async (req: Request, res: Response) => {
+router.post('/connect', rateLimit({ name: 'wallet-connect', windowMs: 60_000, max: 10, distributed: true }), asyncHandler(async (req: Request, res: Response) => {
   const payload = (req.body || {}) as Record<string, unknown>;
   const network = parseNetwork(payload.network);
   const address = typeof payload.address === 'string' ? payload.address.trim() : '';
@@ -311,7 +316,7 @@ router.post('/connect', async (req: Request, res: Response) => {
   }
 
   const checksumAddress = ethers.getAddress(address);
-  const challenge = walletAuth.consumeChallenge(challengeId, checksumAddress, network);
+  const challenge = await walletAuth.consumeChallenge(challengeId, checksumAddress, network);
   if (!challenge) {
     return res.status(401).json({ error: 'The wallet login challenge is invalid, expired, or already used.' });
   }
@@ -322,10 +327,8 @@ router.post('/connect', async (req: Request, res: Response) => {
     if (ethers.getAddress(recovered) !== checksumAddress) {
       return res.status(401).json({ error: 'The signature does not match the selected wallet.' });
     }
-  } catch (error) {
-    return res.status(401).json({
-      error: `Could not verify the wallet signature: ${getErrorMessage(error)}`
-    });
+  } catch {
+    return res.status(401).json({ error: 'Could not verify the wallet signature.' });
   }
 
   const { token, session } = walletAuth.createSession(checksumAddress, network);
@@ -338,7 +341,8 @@ router.post('/connect', async (req: Request, res: Response) => {
     const result = await sodex.getAccountState(checksumAddress, network);
     accountState = result.data;
   } catch (error) {
-    accountError = getErrorMessage(error);
+    console.error('[SoDEX Route] account state after connect:', getErrorMessage(error));
+    accountError = 'Account details are temporarily unavailable.';
   }
 
   return res.json({
@@ -353,7 +357,7 @@ router.post('/connect', async (req: Request, res: Response) => {
     connectedAt: new Date().toISOString(),
     sessionExpiresAt: new Date(session.expiresAt).toISOString()
   });
-});
+}));
 
 router.get('/session', async (req: Request, res: Response) => {
   const session = walletAuth.getWalletSession(req);
@@ -365,7 +369,8 @@ router.get('/session', async (req: Request, res: Response) => {
     const result = await sodex.getAccountState(session.address, session.network);
     accountState = result.data;
   } catch (error) {
-    accountError = getErrorMessage(error);
+    console.error('[SoDEX Route] account state for session:', getErrorMessage(error));
+    accountError = 'Account details are temporarily unavailable.';
   }
 
   return res.json({
@@ -379,6 +384,17 @@ router.get('/session', async (req: Request, res: Response) => {
     accountError,
     connectedAt: new Date(session.issuedAt).toISOString(),
     sessionExpiresAt: new Date(session.expiresAt).toISOString()
+  });
+});
+
+router.get('/session/verify', (req: Request, res: Response) => {
+  const session = walletAuth.getWalletSession(req);
+  if (!session) return res.status(401).json({ error: 'No active SoDEX wallet session.' });
+  return res.json({
+    authenticated: true,
+    address: session.address,
+    network: session.network,
+    expiresAt: new Date(session.expiresAt).toISOString()
   });
 });
 

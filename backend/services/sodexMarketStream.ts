@@ -13,6 +13,7 @@ interface MarketTick {
 const ticks = new Map<string, MarketTick>();
 const sockets = new Map<SodexNetwork, any>();
 const reconnectTimers = new Map<SodexNetwork, ReturnType<typeof setTimeout>>();
+let stopped = true;
 
 function key(network: SodexNetwork, symbol: string) {
   return `${network}:${symbol.toUpperCase()}`;
@@ -27,6 +28,7 @@ function number(value: unknown) {
 }
 
 function scheduleReconnect(network: SodexNetwork) {
+  if (stopped) return;
   if (reconnectTimers.has(network)) return;
   reconnectTimers.set(network, setTimeout(() => {
     reconnectTimers.delete(network);
@@ -35,6 +37,7 @@ function scheduleReconnect(network: SodexNetwork) {
 }
 
 function connect(network: SodexNetwork) {
+  if (stopped) return;
   const existing = sockets.get(network);
   if (existing && (existing.readyState === 0 || existing.readyState === 1)) return;
   const socket = new WebSocketClient(url(network));
@@ -75,8 +78,20 @@ function connect(network: SodexNetwork) {
 }
 
 function start() {
+  if (!stopped) return;
+  stopped = false;
   connect('testnet');
   connect('mainnet');
+}
+
+function stop() {
+  stopped = true;
+  reconnectTimers.forEach((timer) => clearTimeout(timer));
+  reconnectTimers.clear();
+  sockets.forEach((socket) => {
+    try { socket.close(); } catch {}
+  });
+  sockets.clear();
 }
 
 function getMarketTick(symbol: string, network: SodexNetwork): MarketTick | null {
@@ -88,4 +103,4 @@ function status(network: SodexNetwork) {
   return { connected: socket?.readyState === 1, tickCount: [...ticks.keys()].filter((item) => item.startsWith(`${network}:`)).length };
 }
 
-export = { start, getMarketTick, status };
+export = { start, stop, getMarketTick, status };

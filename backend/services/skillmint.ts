@@ -44,11 +44,9 @@
 //
 // WHEN SKILLMINT FAILS
 // ───────────────────
-// We follow the exact same pattern as groq/gemini/claude: if the SkillMint call
-// throws (network down, no USDC.E balance, skill not found, etc.) we fall back
-// to a local plaintext memo so the agent cycle never crashes. The fallback
-// memos are byte-for-byte identical to the ones in groq.ts so the user-facing
-// behavior is unchanged on failure.
+// Local development follows the other adapters and can use a deterministic
+// memo if SkillMint is unavailable. Production throws and fails the cycle so
+// an unattested memo can never be mistaken for a verified result.
 //
 // CONFIG (read from .env)
 // ──────────────────────
@@ -82,13 +80,13 @@
 //     orchestrator cycle, not fine for sub-second hot paths.
 //   - ~$0.01 USDC.E per call. With 3 narrative memos × 48 cycles/day +
 //     occasional risk memos, expect ~$1-2/day in stablecoin spend.
-//   - On failure, the agent falls back to plaintext local memos — zero risk
-//     of breaking the cycle, but in those moments the receipt provenance
-//     story is bypassed. Monitor [Skillmint] WARN logs to detect this.
+//   - Local development can fall back to deterministic memos. Production
+//     fails the cycle so missing receipt provenance can never be hidden.
 // ─────────────────────────────────────────────────────────────────────────────
 
 import type { Headline, MacroEvent } from '../types/domain';
 import errorUtils = require('../utils/error');
+import { isProduction } from '../config/env';
 
 const { getErrorMessage } = errorUtils;
 
@@ -151,36 +149,41 @@ const X402_URL = process.env.SKILLMINT_X402_URL; // optional override
 // We initialise the SkillMint client lazily on first call. Two reasons:
 //   1. If AI_SERVICE is set but SKILLMINT_AGENT_KEY isn't, we still want the
 //      adapter to be requireable so `services/ai.ts` doesn't crash at boot.
-//      Instead we'll fall through to local memos at call time.
+//      Development can use local memos at call time; production fails closed.
 //   2. The SDK pulls in ethers etc. — keeping the import lazy means projects
 //      that don't use SkillMint don't pay the cold-start cost.
 
 let client: any = null;
-let clientInitTried = false;
+let clientInitPromise: Promise<any> | null = null;
 
-function getClient(): any {
-  if (clientInitTried) return client;
-  clientInitTried = true;
+async function getClient(): Promise<any> {
+  if (client) return client;
 
   if (!process.env.SKILLMINT_AGENT_KEY) {
-    console.warn('[Skillmint] SKILLMINT_AGENT_KEY not set — falling back to local memos.');
+    if (isProduction()) throw new Error('SkillMint is not configured.');
+    console.warn('[Skillmint] SKILLMINT_AGENT_KEY not set — using local development memos.');
     return null;
   }
 
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const { SkillMintClient } = require('@skillmint/sdk');
-    client = new SkillMintClient({
-      privateKey: process.env.SKILLMINT_AGENT_KEY,
-      network: NETWORK,
-      ...(X402_URL ? { x402Url: X402_URL } : {}),
-    });
-    console.log(`[Skillmint] Client ready on ${NETWORK}. NARRATIVE_SKILL=${NARRATIVE_SKILL_ID} RISK_SKILL=${RISK_SKILL_ID} SUMMARY_SKILL=${SUMMARY_SKILL_ID}`);
-    return client;
-  } catch (error) {
-    console.warn(`[Skillmint] SDK init failed (is @skillmint/sdk installed?): ${getErrorMessage(error)}`);
-    return null;
+  if (!clientInitPromise) {
+    clientInitPromise = (async () => {
+      try {
+        const { SkillMintClient } = await import('@skillmint/sdk');
+        client = new SkillMintClient({
+          privateKey: process.env.SKILLMINT_AGENT_KEY as `0x${string}`,
+          network: NETWORK,
+          ...(X402_URL ? { x402Url: X402_URL } : {})
+        });
+        console.log(`[Skillmint] Client ready on ${NETWORK}. NARRATIVE_SKILL=${NARRATIVE_SKILL_ID} RISK_SKILL=${RISK_SKILL_ID} SUMMARY_SKILL=${SUMMARY_SKILL_ID}`);
+        return client;
+      } catch (error) {
+        console.warn(`[Skillmint] SDK init failed: ${getErrorMessage(error)}`);
+        if (isProduction()) throw new Error('SkillMint initialization failed.');
+        return null;
+      }
+    })();
   }
+  return clientInitPromise;
 }
 
 // ── Fallback memos — IDENTICAL to the ones in groq.ts ───────────────────────
@@ -216,7 +219,7 @@ async function runSkill(
   prompt: string,
   receiptKey: string,
 ): Promise<string | null> {
-  const sm = getClient();
+  const sm = await getClient();
   if (!sm) return null;
 
   try {
@@ -230,19 +233,27 @@ async function runSkill(
     //   }
     const r = await sm.executeX402(skillId, prompt);
 
+    const receiptRootHash = String(r.receiptRootHash || '').trim();
+    if (!/^0x[0-9a-fA-F]{64}$/.test(receiptRootHash)) {
+      throw new Error('SkillMint response did not include a valid receipt root hash.');
+    }
+
     // Stash the audit receipt under the caller-provided key so the agent can
     // pick it up immediately after this call returns.
     lastReceipts.set(receiptKey, {
-      receiptRootHash: r.receiptRootHash,
+      receiptRootHash,
       settlementTx: r.settlement?.transaction,
       skillId,
       paidUSDC: r.paidUSDC,
       capturedAt: Date.now(),
     });
 
-    return (r.output || '').trim() || null;
+    const output = (r.output || '').trim() || null;
+    if (!output && isProduction()) throw new Error('SkillMint returned an empty response.');
+    return output;
   } catch (error) {
-    console.warn(`[Skillmint] Skill ${skillId} call failed (${receiptKey}): ${getErrorMessage(error)}. Falling back to local memo.`);
+    console.warn(`[Skillmint] Skill ${skillId} call failed (${receiptKey}): ${getErrorMessage(error)}.`);
+    if (isProduction()) throw new Error('SkillMint generation failed.');
     return null;
   }
 }
@@ -310,6 +321,7 @@ const skillmint = {
     const prompt = buildNarrativePrompt(input);
     const key = `narrative:${input.sector}`;
     const result = await runSkill(NARRATIVE_SKILL_ID, prompt, key);
+    if (!result && isProduction()) throw new Error('SkillMint narrative generation failed.');
     return result || fallbackNarrativeMemo(input);
   },
 
@@ -317,6 +329,7 @@ const skillmint = {
     const prompt = buildRiskPrompt(input);
     const key = `risk:${input.symbol}`;
     const result = await runSkill(RISK_SKILL_ID, prompt, key);
+    if (!result && isProduction()) throw new Error('SkillMint risk generation failed.');
     return result || fallbackRiskMemo(input);
   },
 
@@ -324,6 +337,7 @@ const skillmint = {
     const prompt = buildSummaryPrompt(input);
     const key = 'summary:daily';
     const result = await runSkill(SUMMARY_SKILL_ID, prompt, key);
+    if (!result && isProduction()) throw new Error('SkillMint summary generation failed.');
     return result || fallbackDailySummary(input);
   },
 
@@ -332,7 +346,7 @@ const skillmint = {
   // call them right after a generate* call. Other adapters (groq/gemini/
   // claude) don't expose these — agents should use optional chaining:
   //
-  //     const receipt = (ai as any).getLastReceipt?.('narrative:DeFi');
+  //     const receipt = ai.getLastReceipt?.('narrative:DeFi');
   //
   // so that switching AI_SERVICE doesn't crash the agent.
 
@@ -347,8 +361,8 @@ const skillmint = {
   },
 
   /** Whether the SkillMint client successfully initialised (for /health). */
-  isReady(): boolean {
-    return getClient() !== null;
+  async isReady(): Promise<boolean> {
+    return (await getClient()) !== null;
   },
 };
 

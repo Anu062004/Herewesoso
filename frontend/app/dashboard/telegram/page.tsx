@@ -90,11 +90,11 @@ const SODEX_STEPS = [
   },
   {
     index: '4',
-    title: 'Load a key at runtime if needed',
-    body: 'You can also load the signing key through Telegram. Send /setkey, paste the private key, then verify it with /keyinfo.',
-    code: '/setkey\n/keyinfo\n/removekey',
-    label: 'Telegram key flow',
-    note: 'The key is stored on the backend in .sodex_key, not in the browser.'
+    title: 'Load the key securely',
+    body: 'Inject the signing key from your deployment secret manager. Telegram can report configuration status with /keyinfo, but it never accepts private keys.',
+    code: 'KEY_PROVIDER=managed\nSODEX_API_PRIVATE_KEY=<injected-secret>\n\n# Telegram status only\n/keyinfo',
+    label: 'Managed secret flow',
+    note: 'Never paste a private key into Telegram, a browser, source control, or a local project file.'
   }
 ];
 
@@ -357,7 +357,7 @@ export default function TelegramSetupPage() {
               <div className="rounded-[14px] border border-[var(--border)] bg-[var(--bg-panel)] p-4">
                 <div className="text-[13px] font-medium text-[var(--text-1)]">Need to remove access</div>
                 <p className="mt-2 text-[12px] leading-6 text-[var(--text-3)]">
-                  Use /removekey to clear the Telegram-loaded key and remove TELEGRAM_CHAT_ID if you want to disable the bot.
+                  Revoke or rotate the signing secret in your deployment manager, then remove TELEGRAM_CHAT_ID if you also want to disable the bot.
                 </p>
               </div>
             </div>
@@ -401,13 +401,13 @@ export default function TelegramSetupPage() {
           </Panel>
 
           <Panel>
-            <PanelHeader title="Runtime key flow" accent="amber" />
+            <PanelHeader title="Secure key flow" accent="amber" />
             <div className="space-y-3 p-4">
               <div className="rounded-[14px] border border-[var(--border)] bg-[var(--bg-panel)] px-3 py-3 text-[12px] leading-6 text-[var(--text-2)]">
-                Send <span className="font-mono text-[var(--text-1)]">/setkey</span> to the Telegram bot when you want to load a key without editing the env file.
+                Inject the signing key through your deployment platform or secret manager. Production startup rejects the local-file key provider.
               </div>
               <div className="rounded-[14px] border border-[var(--border)] bg-[var(--bg-panel)] px-3 py-3 text-[12px] leading-6 text-[var(--text-2)]">
-                The bot stores the key on the backend only. Use <span className="font-mono text-[var(--text-1)]">/keyinfo</span> to confirm it and <span className="font-mono text-[var(--text-1)]">/removekey</span> to clear it.
+                Telegram never accepts secret material. Use <span className="font-mono text-[var(--text-1)]">/keyinfo</span> only to confirm whether a backend key provider is configured.
               </div>
             </div>
           </Panel>

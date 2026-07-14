@@ -1,6 +1,7 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import type { Headline, MacroEvent, NarrativeScoreRow, RiskLevel } from '../types/domain';
 import errorUtils = require('../utils/error');
+import { isProduction } from '../config/env';
 
 const { getErrorMessage } = errorUtils;
 
@@ -61,6 +62,7 @@ function fallbackDailySummary({ narrativeScores, alerts, positions }: DailySumma
 
 async function generate(prompt: string, maxTokens: number): Promise<string | null> {
   if (!client) {
+    if (isProduction()) throw new Error('Gemini is not configured.');
     return null;
   }
 
@@ -71,9 +73,12 @@ async function generate(prompt: string, maxTokens: number): Promise<string | nul
       generationConfig: { maxOutputTokens: maxTokens }
     });
 
-    return result.response.text().trim() || null;
+    const output = result.response.text().trim() || null;
+    if (!output && isProduction()) throw new Error('Gemini returned an empty response.');
+    return output;
   } catch (error) {
-    console.warn(`[Gemini] Falling back to local memo: ${getErrorMessage(error)}`);
+    console.warn(`[Gemini] Generation failed: ${getErrorMessage(error)}`);
+    if (isProduction()) throw new Error('Gemini generation failed.');
     return null;
   }
 }

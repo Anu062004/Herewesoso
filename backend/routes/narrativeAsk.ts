@@ -5,6 +5,8 @@ import walletAuth = require('../services/walletAuth');
 import supabaseService = require('../services/supabase');
 import sodex = require('../services/sodex');
 import { answerNarrativeQuestion, type AdvisorPosition, type AdvisorRiskMode } from '../services/narrativeAdvisor';
+import { boundedNumber } from '../utils/validation';
+import { asyncHandler } from '../utils/asyncHandler';
 
 const router = express.Router();
 const { safeInsert, safeSelect, safeUpdate } = supabaseService;
@@ -27,14 +29,14 @@ async function latestSignals(): Promise<NarrativeScoreRow[]> {
   });
 }
 
-router.post('/', async (req: Request, res: Response) => {
+router.post('/', asyncHandler(async (req: Request, res: Response) => {
   const session = sessionOr401(req, res);
   if (!session) return;
   const body = (req.body || {}) as Record<string, unknown>;
   const question = typeof body.question === 'string' ? body.question.trim().slice(0, 1000) : '';
   if (question.length < 3) return res.status(400).json({ error: 'Ask a trading or narrative question.' });
   const riskMode: AdvisorRiskMode = body.riskMode === 'conservative' || body.riskMode === 'aggressive' ? body.riskMode : 'balanced';
-  const investableAmount = Math.max(0, Math.min(1_000_000, Number(body.investableAmount || 0)));
+  const investableAmount = boundedNumber(body.investableAmount, 0, 0, 1_000_000);
   const signals = await latestSignals();
   let positions: AdvisorPosition[] = [];
   try {
@@ -66,35 +68,41 @@ router.post('/', async (req: Request, res: Response) => {
     }
     return res.json({ ...answer, conversationId: rows?.[0]?.id || null, recommendationId });
   } catch (error: any) {
-    return res.status(400).json({ error: error?.message || 'Could not answer from current narrative data.' });
+    console.error('[Narrative Ask Route]', error?.message || error);
+    return res.status(500).json({ error: 'Could not answer from current narrative data.' });
   }
-});
+}));
 
-router.get('/history', async (req: Request, res: Response) => {
+router.get('/history', asyncHandler(async (req: Request, res: Response) => {
   const session = sessionOr401(req, res); if (!session) return;
-  const { data } = await safeSelect('narrative_conversations', (query: any) =>
+  const { data, error } = await safeSelect('narrative_conversations', (query: any) =>
     query.eq('wallet_address', session.address.toLowerCase()).order('created_at', { ascending: false }).limit(30)
   );
+  if (error) return res.status(503).json({ error: 'Conversation history is temporarily unavailable.' });
   return res.json(data);
-});
+}));
 
-router.get('/recommendations', async (req: Request, res: Response) => {
+router.get('/recommendations', asyncHandler(async (req: Request, res: Response) => {
   const session = sessionOr401(req, res); if (!session) return;
-  const { data } = await safeSelect('narrative_recommendations', (query: any) =>
+  const { data, error } = await safeSelect('narrative_recommendations', (query: any) =>
     query.eq('wallet_address', session.address.toLowerCase()).order('created_at', { ascending: false }).limit(30)
   );
+  if (error) return res.status(503).json({ error: 'Recommendations are temporarily unavailable.' });
   return res.json(data);
-});
+}));
 
-router.post('/recommendations/:id/feedback', async (req: Request, res: Response) => {
+router.post('/recommendations/:id/feedback', asyncHandler(async (req: Request, res: Response) => {
   const session = sessionOr401(req, res); if (!session) return;
   const status = ['ACCEPTED', 'REJECTED', 'SAVED'].includes(String(req.body?.status)) ? String(req.body.status) : null;
   if (!status) return res.status(400).json({ error: 'Use ACCEPTED, REJECTED, or SAVED.' });
+  if (!/^[0-9a-f]{8}-[0-9a-f-]{27}$/i.test(String(req.params.id))) {
+    return res.status(400).json({ error: 'A valid recommendation ID is required.' });
+  }
   await safeUpdate('narrative_recommendations', { status, feedback_at: new Date().toISOString() }, {
     id: String(req.params.id),
     wallet_address: session.address.toLowerCase()
   });
   return res.json({ saved: true, status });
-});
+}));
 
 export = router;

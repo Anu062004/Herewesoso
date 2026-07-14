@@ -3,6 +3,7 @@ import type { AlertSeverity, RiskLevel, SignalType, TelegramAlertResult, Telegra
 import axios from 'axios';
 import errorUtils = require('../utils/error');
 import runtimeStatus = require('./runtimeStatus');
+import { allowedOrigins } from '../config/env';
 
 const { getErrorMessage } = errorUtils;
 const { recordTelegramMessage } = runtimeStatus;
@@ -62,7 +63,7 @@ function getChatId(): string | undefined {
 }
 
 function getAppUrl(): string {
-  return process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
+  return process.env.NEXT_PUBLIC_APP_URL || allowedOrigins()[0] || 'http://localhost:3000';
 }
 
 function getSeverityFromSignal(signal: SignalType): AlertSeverity {
@@ -101,7 +102,7 @@ const telegram = {
     }
 
     try {
-      await axios.post(`${apiBase}/sendMessage`, body);
+      await axios.post(`${apiBase}/sendMessage`, body, { timeout: 10_000 });
       recordTelegramMessage();
       return true;
     } catch (error) {

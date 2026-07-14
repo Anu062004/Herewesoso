@@ -108,7 +108,7 @@ export default function DashboardPage() {
     <div className="space-y-4">
       {openPositions.fallbackActive && openPositions.positions.length > 0 ? (
         <div className="flex h-9 items-center rounded-[10px] border border-[rgba(245,158,11,0.24)] bg-[rgba(245,158,11,0.12)] px-4 text-[13px] text-[var(--amber)]">
-          Warning: SoDEX position fetch failed - showing demo {openPositions.positions[0]?.symbol || 'BTC-USD'} testnet position
+          SoDEX is unavailable. Showing the last stored risk snapshot; execution controls are disabled.
         </div>
       ) : null}
 
@@ -120,7 +120,7 @@ export default function DashboardPage() {
 
       {tradingKeyConfigured === false ? (
         <div className="flex flex-col gap-2 rounded-[10px] border border-[rgba(220,38,38,0.24)] bg-[rgba(220,38,38,0.12)] px-4 py-3 text-[13px] text-[var(--red)] sm:flex-row sm:items-center sm:justify-between">
-          <span>SoDEX trading is not enabled on the backend yet. Close and reduce actions are disabled until a signer is configured on EC2.</span>
+          <span>SoDEX trading is not enabled on the backend yet. Close and reduce actions are disabled until a deployment-managed signer is configured.</span>
           <Link href="/dashboard/telegram" className="text-[12px] text-[var(--text-1)] underline underline-offset-4">
             Check setup
           </Link>
@@ -148,7 +148,7 @@ export default function DashboardPage() {
         <MetricCard
           label={`SoDEX ${sodexNetworkLabel} Positions`}
           value={openPositions.positions.length}
-          supporting={`${openPositions.fallbackActive ? 'Fallback' : 'Live'} position view`}
+          supporting={`${openPositions.fallbackActive ? 'Historical snapshot' : 'Live'} position view`}
         />
         <MetricCard
           label="Highest Risk Level"
@@ -352,6 +352,8 @@ export default function DashboardPage() {
                 </>
               ) : positions.error ? (
                 <ErrorCard message={positions.error} onRetry={() => void positions.refresh()} />
+              ) : openPositions.fallbackActive && openPositions.positions.length === 0 && positionsState.liveError ? (
+                <ErrorCard message={positionsState.liveError} onRetry={() => void positions.refresh()} />
               ) : openPositions.positions.length === 0 ? (
                 <EmptyState
                   title="No open positions"
@@ -373,7 +375,7 @@ export default function DashboardPage() {
                         <div>
                           <div className="flex items-center gap-2">
                             <div className="text-[14px] font-medium text-[var(--text-1)]">{position.symbol}</div>
-                            {openPositions.fallbackActive ? <Pill tone="gray">Demo Position</Pill> : null}
+                            {openPositions.fallbackActive ? <Pill tone="gray">Stored Snapshot</Pill> : null}
                           </div>
                           <div className="mt-1 text-[11px] text-[var(--text-3)]">{risk.label}</div>
                         </div>
@@ -404,7 +406,7 @@ export default function DashboardPage() {
                       </div>
                       <div className="mt-3 flex flex-wrap gap-2">
                         <Button
-                          disabled={mainnetReadOnly || tradingKeyConfigured === false}
+                          disabled={openPositions.fallbackActive || mainnetReadOnly || tradingKeyConfigured === false}
                           onClick={() =>
                             setPendingAction({
                               action: 'REDUCE_LEVERAGE',
@@ -418,7 +420,7 @@ export default function DashboardPage() {
                           Reduce Leverage
                         </Button>
                         <Button
-                          disabled={mainnetReadOnly || tradingKeyConfigured === false}
+                          disabled={openPositions.fallbackActive || mainnetReadOnly || tradingKeyConfigured === false}
                           onClick={() =>
                             setPendingAction({
                               action: 'CLOSE_POSITION',
@@ -498,7 +500,7 @@ export default function DashboardPage() {
           mainnetReadOnly
             ? 'Mainnet execution is blocked in this dashboard'
             : tradingKeyConfigured === false
-              ? 'The backend SoDEX signer is not configured on EC2'
+              ? 'The backend SoDEX signer is not configured in the deployment environment'
               : 'Testnet execution - signs through the configured SoDEX key'
         }
         onClose={() => setPendingAction(null)}
@@ -508,7 +510,7 @@ export default function DashboardPage() {
           }
 
           if (tradingKeyConfigured === false) {
-            throw new Error('The EC2 backend does not have a SoDEX API signing key configured.');
+            throw new Error('The backend does not have a deployment-managed SoDEX signing key configured.');
           }
 
           const result = await queueDashboardAction({
@@ -530,7 +532,7 @@ export default function DashboardPage() {
 
           if (!result.queued && /api key|signer/i.test(result.message)) {
             throw new Error(
-              'SoDEX rejected the backend API key name or account registration. Re-check SODEX_API_KEY_NAME on EC2, or re-run /setkey with a key that is registered on the connected SoDEX account.'
+              'SoDEX rejected the configured signer. Verify the account, API key name, and deployment-managed signing secret.'
             );
           }
 

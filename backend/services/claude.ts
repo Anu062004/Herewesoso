@@ -2,6 +2,7 @@ import type { Headline, MacroEvent, NarrativeScoreRow, RiskLevel } from '../type
 
 import Anthropic from '@anthropic-ai/sdk';
 import errorUtils = require('../utils/error');
+import { isProduction } from '../config/env';
 
 const { getErrorMessage } = errorUtils;
 
@@ -83,6 +84,7 @@ function fallbackDailySummary({ narrativeScores, alerts, positions }: DailySumma
 
 async function createMessage(prompt: string, maxTokens: number): Promise<string | null> {
   if (!client) {
+    if (isProduction()) throw new Error('Anthropic is not configured.');
     return null;
   }
 
@@ -93,9 +95,12 @@ async function createMessage(prompt: string, maxTokens: number): Promise<string 
       messages: [{ role: 'user', content: prompt }]
     })) as ClaudeResponse;
 
-    return extractText(response);
+    const output = extractText(response);
+    if (!output && isProduction()) throw new Error('Anthropic returned an empty response.');
+    return output || null;
   } catch (error) {
-    console.warn(`[Claude] Falling back to local memo: ${getErrorMessage(error)}`);
+    console.warn(`[Claude] Generation failed: ${getErrorMessage(error)}`);
+    if (isProduction()) throw new Error('Anthropic generation failed.');
     return null;
   }
 }

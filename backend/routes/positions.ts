@@ -9,6 +9,7 @@ import errorUtils = require('../utils/error');
 import walletAuth = require('../services/walletAuth');
 import riskCalculator = require('../utils/riskCalculator');
 import sodexMarketStream = require('../services/sodexMarketStream');
+import { isProduction } from '../config/env';
 
 const { safeSelect } = supabaseService;
 const { getErrorMessage } = errorUtils;
@@ -202,7 +203,8 @@ router.get('/', async (req: Request, res: Response) => {
       } catch (err) {
         // API unavailable — leave live as null so the frontend can distinguish
         // "no positions" (live=[]) from "can't reach SoDEX" (live=null)
-        liveError = getErrorMessage(err);
+        console.error('[Positions Route] SoDEX fetch failed:', getErrorMessage(err));
+        liveError = 'SoDEX account data is temporarily unavailable.';
         live = null;
       }
     }
@@ -219,7 +221,7 @@ router.get('/', async (req: Request, res: Response) => {
 
       historyData = (!error && history && history.length > 0)
         ? history
-        : memoryStore.getPositionRisks();
+        : (isProduction() ? [] : memoryStore.getPositionRisks());
     }
 
     return res.json({
@@ -231,10 +233,11 @@ router.get('/', async (req: Request, res: Response) => {
       stream: sodexMarketStream.status(network)
     });
   } catch (error) {
+    console.error('[Positions Route]', getErrorMessage(error));
     return res.status(500).json({
-      error: getErrorMessage(error),
+      error: 'Position data is temporarily unavailable.',
       live: null,
-      liveError: getErrorMessage(error),
+      liveError: 'Position data is temporarily unavailable.',
       history: [],
       network,
       updatedAt: new Date().toISOString()

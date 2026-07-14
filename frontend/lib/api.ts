@@ -6,7 +6,6 @@ import type {
   DashboardActionResponse,
   ExecutionActionRow,
   ExecutionSimulationResponse,
-  DashboardData,
   HealthStatus,
   KlinePoint,
   MacroEvent,
@@ -37,7 +36,7 @@ export type {
 
 const isServer = typeof window === 'undefined';
 const API_BASE = isServer
-  ? process.env.API_BASE_URL || process.env.NEXT_PUBLIC_API_BASE_URL || 'http://3.87.110.3:3001'
+  ? process.env.API_BASE_URL || process.env.NEXT_PUBLIC_API_BASE_URL || ''
   : '/api/proxy';
 
 function resolvePath(path: string) {
@@ -45,6 +44,12 @@ function resolvePath(path: string) {
 }
 
 async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
+  if (isServer && !API_BASE) {
+    throw new Error('API_BASE_URL is required for server-side API requests.');
+  }
+  if (isServer && process.env.NODE_ENV === 'production' && !API_BASE.startsWith('https://')) {
+    throw new Error('API_BASE_URL must use HTTPS in production.');
+  }
   const response = await fetch(`${API_BASE}${resolvePath(path)}`, {
     cache: 'no-store',
     credentials: 'include',
@@ -63,6 +68,8 @@ async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
     const message =
       typeof payload === 'object' && payload && 'error' in payload
         ? String((payload as { error?: unknown }).error || 'Request failed.')
+        : typeof payload === 'object' && payload && 'message' in payload
+          ? String((payload as { message?: unknown }).message || 'Request failed.')
         : response.statusText || 'Request failed.';
 
     throw new Error(message);
@@ -260,18 +267,6 @@ function normalizeKlines(symbol: string, interval: string, input: unknown): SoDe
     updatedAt: new Date().toISOString(),
     raw: input
   };
-}
-
-export async function getDashboardData(): Promise<DashboardData> {
-  const [signals, positions, alerts, memos, macro] = await Promise.all([
-    requestFallback<SignalRow[]>('/api/signals', []),
-    requestFallback<PositionsResponse>('/api/positions', { live: null, history: [] }),
-    requestFallback<AlertRow[]>('/api/alerts', []),
-    requestFallback<MemoRow[]>('/api/memos', []),
-    requestFallback<MacroEvent[]>('/api/macro', [])
-  ]);
-
-  return { signals, positions, alerts, memos, macro };
 }
 
 export async function fetchSignals() {
@@ -574,33 +569,18 @@ export async function fetchSosoIndexHistory(identifier: string, days = 90) {
 }
 
 export async function fetchNews(limit = 30): Promise<NewsResponse> {
-  return requestFallback<NewsResponse>(`/api/news?limit=${limit}`, {
-    success: false,
-    count: 0,
-    articles: []
-  });
+  return requestJson<NewsResponse>(`/api/news?limit=${limit}`);
 }
 
 export async function fetchHotNews(): Promise<NewsResponse> {
-  return requestFallback<NewsResponse>('/api/news/hot', {
-    success: false,
-    count: 0,
-    articles: []
-  });
+  return requestJson<NewsResponse>('/api/news/hot');
 }
 
 export async function fetchETFData() {
-  return requestFallback('/api/news/etf', {
-    success: false,
-    flows: [],
-    summary: {}
-  });
+  return requestJson('/api/news/etf');
 }
 
 export async function fetchMacroEvents(date?: string): Promise<MacroResponse> {
   const query = date ? `?date=${date}` : '';
-  return requestFallback<MacroResponse>(`/api/news/macro${query}`, {
-    success: false,
-    events: []
-  });
+  return requestJson<MacroResponse>(`/api/news/macro${query}`);
 }

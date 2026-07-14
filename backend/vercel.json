@@ -6,6 +6,11 @@
       "destination": "/api"
     }
   ],
+  "functions": {
+    "api/index.ts": {
+      "maxDuration": 300
+    }
+  },
   "crons": [
     {
       "path": "/api/trigger",
@@ -13,7 +18,7 @@
     },
     {
       "path": "/api/daily-summary",
-      "schedule": "30 2 * * *"
+      "schedule": "0 8 * * *"
     }
   ]
 }

@@ -14,12 +14,13 @@ const PORT = process.env.PORT || '3001';
 
 let offset = 0;
 let polling = false;
+let botEnabled = false;
+let pollTimer: ReturnType<typeof setTimeout> | null = null;
 
 // ── Conversation state machine ────────────────────────────────────────────────
 
 type ConvStep =
   | { type: 'idle' }
-  | { type: 'setkey' }
   | { type: 'buy_symbol' }
   | { type: 'buy_side'; symbol: string }
   | { type: 'buy_size'; symbol: string; side: 'BUY' | 'SELL' }
@@ -91,7 +92,7 @@ async function sendMessage(
   if (keyboard) body.reply_markup = keyboard;
   if (parseMode) body.parse_mode = parseMode;
   try {
-    const r = await axios.post(`${base}/sendMessage`, body);
+    const r = await axios.post(`${base}/sendMessage`, body, { timeout: 10_000 });
     return r.data?.result;
   } catch { return null; }
 }
@@ -101,19 +102,19 @@ async function editMessage(chatId: string | number, msgId: number, text: string,
   if (!base) return;
   const body: Record<string, unknown> = { chat_id: chatId, message_id: msgId, text, disable_web_page_preview: true };
   if (keyboard) body.reply_markup = keyboard;
-  try { await axios.post(`${base}/editMessageText`, body); } catch {}
+  try { await axios.post(`${base}/editMessageText`, body, { timeout: 10_000 }); } catch {}
 }
 
 async function deleteMessage(chatId: string | number, msgId: number) {
   const base = apiBase();
   if (!base) return;
-  try { await axios.post(`${base}/deleteMessage`, { chat_id: chatId, message_id: msgId }); } catch {}
+  try { await axios.post(`${base}/deleteMessage`, { chat_id: chatId, message_id: msgId }, { timeout: 10_000 }); } catch {}
 }
 
 async function answerCallback(queryId: string, text?: string) {
   const base = apiBase();
   if (!base) return;
-  try { await axios.post(`${base}/answerCallbackQuery`, { callback_query_id: queryId, text }); } catch {}
+  try { await axios.post(`${base}/answerCallbackQuery`, { callback_query_id: queryId, text }, { timeout: 10_000 }); } catch {}
 }
 
 // ── Keyboard builders ─────────────────────────────────────────────────────────
@@ -227,7 +228,7 @@ async function buildMenuText(): Promise<string> {
   }
   const keyLine = keySet
     ? `🔑 Key: ${keyAddr?.slice(0, 8)}... (ready to trade)`
-    : '🔑 Key: not set (use /setkey to enable trading)';
+    : '🔑 Key: not provisioned by the server operator';
   return `🛡️ SENTINEL FINANCE\n${DIV}\n${accountLine}\n${keyLine}\n${DIV}\nTestnet Mode`;
 }
 
@@ -355,7 +356,7 @@ async function buildPanicMode(): Promise<{ text: string; keyboard: InlineKeyboar
 
 async function buildSignals(): Promise<{ text: string; keyboard: InlineKeyboard }> {
   try {
-    const res = await axios.get(`http://localhost:${PORT}/api/signals`);
+    const res = await axios.get(`http://localhost:${PORT}/api/signals`, { timeout: 10_000 });
     const signals: any[] = res.data || [];
     if (!signals.length) return { text: '📡 No signals yet. Run a cycle first.', keyboard: navBar('cmd_signals') };
 
@@ -386,16 +387,11 @@ async function buildKeyInfo(): Promise<{ text: string; keyboard: InlineKeyboard 
       ? `Status: ✅ Key is set\nAddress: ${addr}`
       : 'Status: ❌ No key set',
     DIV,
-    'To set your key, send:\n/setkey <your_private_key>',
-    '',
-    'Your message will be deleted immediately.',
-    'Key stored on server — testnet use only.',
-    DIV,
-    keySet ? 'To remove key, send: /removekey' : '',
+    'Signing credentials are provisioned only through the deployment secret manager.',
+    'Never send a private key through Telegram.',
   ];
   const kb: InlineKeyboard = {
     inline_keyboard: [
-      ...(keySet ? [[{ text: '🗑 Remove Key', callback_data: 'cmd_removekey' }]] : []),
       [{ text: '🏠 Menu', callback_data: 'cmd_menu' }],
     ]
   };
@@ -566,31 +562,12 @@ async function handleCommand(chatId: string | number, command: string, args: str
     // ── Key management ─────────────────────────────────────────────────────────
 
     case '/setkey': {
-      if (args[0]) {
-        try {
-          sodexTrader.saveKey(args[0]);
-          const addr = sodexTrader.getWalletAddress();
-          await sendMessage(chatId,
-            `✅ PRIVATE KEY SET\n${DIV}\nWallet: ${addr}\n\nReady to execute trades on SoDEX testnet.\n\n⚠️ Testnet use only. Never share this key.`,
-            navBar('cmd_menu')
-          );
-        } catch (err: any) {
-          await sendMessage(chatId, `❌ Invalid private key: ${err.message}`, cancelBar());
-        }
-      } else {
-        resetStep(cid);
-        setStep(cid, { type: 'setkey' });
-        await sendMessage(chatId,
-          `🔑 SET PRIVATE KEY\n${DIV}\nSend your private key as the next message.\n\nIt will be stored on the EC2 server and deleted from chat immediately.\n\n⚠️ TESTNET USE ONLY. Never use your main wallet.\n\n/cancel to abort.`,
-          cancelBar()
-        );
-      }
+      await sendMessage(chatId, '🔒 Runtime key entry is disabled. Ask the server operator to provision a revocable API key through the deployment secret manager.', navBar('cmd_keyinfo'));
       break;
     }
 
     case '/removekey': {
-      sodexTrader.removeKey();
-      await sendMessage(chatId, `🗑 Private key removed.\n\nSend /setkey to add a new one.`, navBar('cmd_menu'));
+      await sendMessage(chatId, '🔒 Runtime key management is disabled.', navBar('cmd_keyinfo'));
       break;
     }
 
@@ -618,7 +595,7 @@ async function handleCommand(chatId: string | number, command: string, args: str
         `Network: SoDEX Testnet`,
         `Alert threshold: ${ALERT_THRESHOLD}/100`,
         DIV,
-        `Use /setkey to enable trade execution`,
+        `Ask the server operator to provision a revocable API key`,
       ];
       await sendMessage(chatId, lines.join('\n'), navBar('cmd_status'));
       break;
@@ -684,7 +661,7 @@ async function handleCommand(chatId: string | number, command: string, args: str
     case '/summary': {
       await sendMessage(chatId, '⏳ Fetching AI summary...');
       try {
-        const res = await axios.get(`http://localhost:${PORT}/api/memos`);
+        const res = await axios.get(`http://localhost:${PORT}/api/memos`, { timeout: 10_000 });
         const memos: any[] = res.data || [];
         const lines = ['🤖 AI MARKET BRIEFS', DIV];
         if (!memos.length) { lines.push('No memos yet. Run a cycle first.'); }
@@ -717,8 +694,6 @@ async function handleCommand(chatId: string | number, command: string, args: str
         '/reduce     — Reduce leverage',
         '',
         '🔑 KEY MANAGEMENT',
-        '/setkey     — Add private key for trading',
-        '/removekey  — Remove stored key',
         '/keyinfo    — Key status',
         '',
         '📡 INTEL',
@@ -732,7 +707,7 @@ async function handleCommand(chatId: string | number, command: string, args: str
         '/menu       — Main menu',
         '',
         DIV,
-        `Key status: ${keySet ? '✅ Set and ready' : '❌ Not set — /setkey to enable trading'}`,
+        `Key status: ${keySet ? '✅ Provisioned and ready' : '❌ Not provisioned by the server operator'}`,
       ];
       await sendMessage(chatId, lines.join('\n'), navBar('cmd_help'));
       break;
@@ -748,24 +723,6 @@ async function handleCommand(chatId: string | number, command: string, args: str
 
 async function handleConversationStep(chatId: string, text: string, msgId: number) {
   const step = getStep(chatId);
-
-  if (step.type === 'setkey') {
-    // Delete the message immediately for security
-    await deleteMessage(chatId, msgId);
-    resetStep(chatId);
-    const key = text.trim();
-    try {
-      sodexTrader.saveKey(key);
-      const addr = sodexTrader.getWalletAddress();
-      await sendMessage(chatId,
-        `✅ PRIVATE KEY SET\n${DIV}\nWallet: ${addr}\n\n⚠️ Message deleted. Key stored securely.\n\nReady to execute trades on SoDEX testnet.`,
-        navBar('cmd_menu')
-      );
-    } catch (err: any) {
-      await sendMessage(chatId, `❌ Invalid key: ${err.message}\n\nSend /setkey to try again.`, MAIN_MENU);
-    }
-    return;
-  }
 
   if (step.type === 'buy_symbol') {
     const symbol = text.trim().toUpperCase().replace('/', '-');
@@ -933,8 +890,7 @@ async function handleCallbackQuery(queryId: string, chatId: string | number, msg
 
   // cmd_removekey
   if (data === 'cmd_removekey') {
-    sodexTrader.removeKey();
-    await sendMessage(chatId, `🗑 Private key removed.`, navBar('cmd_menu'));
+    await sendMessage(chatId, '🔒 Runtime key management is disabled.', navBar('cmd_keyinfo'));
     return;
   }
 
@@ -987,7 +943,7 @@ async function handleUpdate(update: any) {
 
 async function poll() {
   const base = apiBase();
-  if (!base || polling) return;
+  if (!botEnabled || !base || polling) return;
   polling = true;
   try {
     const res = await axios.get(`${base}/getUpdates`, {
@@ -1002,7 +958,7 @@ async function poll() {
   } catch { }
   finally {
     polling = false;
-    setTimeout(poll, 500);
+    if (botEnabled) pollTimer = setTimeout(poll, 500);
   }
 }
 
@@ -1011,8 +967,16 @@ export function startBot() {
   const chatId = process.env.TELEGRAM_CHAT_ID;
   if (!token) { console.warn('[TelegramBot] No TELEGRAM_BOT_TOKEN set.'); return; }
   if (!chatId) { console.warn('[TelegramBot] No TELEGRAM_CHAT_ID set.'); return; }
+  if (botEnabled) return;
+  botEnabled = true;
   console.log('[TelegramBot] Polling started. Send /menu to your bot.');
-  poll();
+  void poll();
+}
+
+export function stopBot() {
+  botEnabled = false;
+  if (pollTimer) clearTimeout(pollTimer);
+  pollTimer = null;
 }
 
 // ── Outbound alert helpers (used by agents) ───────────────────────────────────

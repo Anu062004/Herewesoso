@@ -1,7 +1,7 @@
 import type { Headline, MacroEvent, NarrativeScoreRow } from '../types/domain';
 
 import sosovalue = require('../services/sosovalue');
-import claude = require('../services/ai');
+import ai = require('../services/ai');
 import telegram = require('../services/telegram');
 import narrativeScorer = require('../utils/narrativeScorer');
 import delayUtils = require('../utils/delay');
@@ -11,6 +11,7 @@ import errorUtils = require('../utils/error');
 import performanceService = require('../services/performance');
 import sodex = require('../services/sodex');
 import { analyzeNarrative, assetsForSector, NARRATIVE_MODEL_VERSION, type MarketConfirmation } from '../services/narrativeEngine';
+import { isProduction } from '../config/env';
 import { loadCalibratedWeights, loadNarrativeBaselines, loadSourceReliability } from '../services/narrativeLearning';
 
 const { delay } = delayUtils;
@@ -161,6 +162,7 @@ async function runNarrativeAgent(): Promise<NarrativeAgentResult> {
   console.log('[NarrativeAgent] Starting cycle...');
   const startTime = Date.now();
   const runRecord = await createAgentRun('narrative');
+  const walletAddress = String(process.env.USER_WALLET_ADDRESS || process.env.SODEX_ACCOUNT_ADDRESS || '').toLowerCase() || null;
 
   try {
     const { news, etfHistory, macroEvents } = await fetchNarrativeInputs();
@@ -229,7 +231,7 @@ async function runNarrativeAgent(): Promise<NarrativeAgentResult> {
 
     for (const sig of signalsToReason) {
       try {
-        const reasoning = await claude.generateNarrativeMemo({
+        const reasoning = await ai.generateNarrativeMemo({
           sector: sig.sector,
           headlines: headlines.filter((headline) => sig.top_headlines.includes(String(headline.title || '').trim())).slice(0, 5),
           etfFlow: etfNetFlow,
@@ -243,11 +245,13 @@ async function runNarrativeAgent(): Promise<NarrativeAgentResult> {
         // and remember it so we can persist it alongside the memo in Supabase.
         // Optional chaining + cast keeps us compatible with groq/gemini/claude
         // adapters that don't expose this method.
-        const receipt = (claude as any).getLastReceipt?.(`narrative:${sig.sector}`);
+        const receipt = ai.getLastReceipt?.(`narrative:${sig.sector}`);
         if (receipt) receiptMap.set(sig.sector, receipt);
 
         await delay(300);
-      } catch { /* use fallback */ }
+      } catch (error) {
+        if (isProduction()) throw error;
+      }
     }
 
     let topSignal: NarrativeScoreRow | null = strongSignals[0] || null;
@@ -267,6 +271,7 @@ async function runNarrativeAgent(): Promise<NarrativeAgentResult> {
       });
 
       await safeInsert('trade_memos', {
+        wallet_address: walletAddress,
         memo_type: 'ENTRY_SIGNAL',
         content: reasoning,
         related_symbol: topSignal.sector,
@@ -314,6 +319,7 @@ async function runNarrativeAgent(): Promise<NarrativeAgentResult> {
       });
 
       await safeInsert('alerts', {
+        wallet_address: walletAddress,
         alert_type: alertResult.alertType,
         severity: alertResult.severity,
         title: alertResult.title,

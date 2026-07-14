@@ -1,5 +1,6 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import errorUtils = require('../utils/error');
+import { isProduction } from '../config/env';
 
 // Polyfill WebSocket for Node.js < 22 before any supabase-js initialisation
 // eslint-disable-next-line @typescript-eslint/no-var-requires
@@ -81,6 +82,7 @@ async function safeInsert<T extends RowObject>(
   payload: T | T[]
 ): Promise<Record<string, unknown>[] | null> {
   if (!isSupabaseConfigured || !client) {
+    if (isProduction()) throw new SupabaseConfigurationError();
     console.warn(`[Supabase] Skipping insert into ${table}; client is not configured.`);
     return null;
   }
@@ -91,8 +93,19 @@ async function safeInsert<T extends RowObject>(
     return (data as Record<string, unknown>[]) || null;
   } catch (error) {
     console.error(`[Supabase] Insert into ${table} failed: ${getErrorMessage(error)}`);
+    if (isProduction()) throw error;
     return null;
   }
+}
+
+async function strictInsert<T extends RowObject>(
+  table: string,
+  payload: T | T[]
+): Promise<Record<string, unknown>[]> {
+  const activeClient = ensureClient();
+  const { data, error } = await activeClient.from(table).insert(payload).select();
+  if (error) throw error;
+  return (data as Record<string, unknown>[]) || [];
 }
 
 async function safeUpdate(
@@ -101,6 +114,7 @@ async function safeUpdate(
   filters: Record<string, FilterValue> = {}
 ): Promise<Record<string, unknown>[] | null> {
   if (!isSupabaseConfigured || !client) {
+    if (isProduction()) throw new SupabaseConfigurationError();
     console.warn(`[Supabase] Skipping update on ${table}; client is not configured.`);
     return null;
   }
@@ -117,6 +131,66 @@ async function safeUpdate(
     return (data as Record<string, unknown>[]) || null;
   } catch (error) {
     console.error(`[Supabase] Update on ${table} failed: ${getErrorMessage(error)}`);
+    if (isProduction()) throw error;
+    return null;
+  }
+}
+
+async function strictUpdate(
+  table: string,
+  values: RowObject,
+  filters: Record<string, FilterValue> = {}
+): Promise<Record<string, unknown>[]> {
+  const activeClient = ensureClient();
+  let query = activeClient.from(table).update(values);
+  for (const [key, value] of Object.entries(filters)) query = query.eq(key, value);
+  const { data, error } = await query.select();
+  if (error) throw error;
+  return (data as Record<string, unknown>[]) || [];
+}
+
+async function strictSelect<T = Record<string, unknown>>(
+  table: string,
+  configureQuery?: QueryConfigurator
+): Promise<T[]> {
+  const activeClient = ensureClient();
+  let query = activeClient.from(table).select('*');
+  if (configureQuery) query = configureQuery(query) || query;
+  const { data, error } = await query;
+  if (error) throw error;
+  return (data as T[]) || [];
+}
+
+async function safeCount(table: string, configureQuery?: QueryConfigurator): Promise<number | null> {
+  if (!isSupabaseConfigured || !client) return null;
+  try {
+    let query = client.from(table).select('*', { count: 'exact', head: true });
+    if (configureQuery) query = configureQuery(query) || query;
+    const { count, error } = await query;
+    if (error) throw error;
+    return count ?? 0;
+  } catch (error) {
+    console.error(`[Supabase] Count on ${table} failed: ${getErrorMessage(error)}`);
+    return null;
+  }
+}
+
+async function safeUpsert<T extends RowObject>(
+  table: string,
+  payload: T | T[],
+  onConflict: string
+): Promise<Record<string, unknown>[] | null> {
+  if (!isSupabaseConfigured || !client) {
+    if (isProduction()) throw new SupabaseConfigurationError();
+    return null;
+  }
+  try {
+    const { data, error } = await client.from(table).upsert(payload, { onConflict }).select();
+    if (error) throw error;
+    return (data as Record<string, unknown>[]) || null;
+  } catch (error) {
+    console.error(`[Supabase] Upsert into ${table} failed: ${getErrorMessage(error)}`);
+    if (isProduction()) throw error;
     return null;
   }
 }
@@ -126,7 +200,7 @@ async function safeSelect<T = Record<string, unknown>>(
   configureQuery?: QueryConfigurator
 ): Promise<{ data: T[]; error: Error | null }> {
   if (!isSupabaseConfigured || !client) {
-    return { data: [], error: null };
+    return { data: [], error: isProduction() ? new SupabaseConfigurationError() : null };
   }
 
   try {
@@ -168,8 +242,13 @@ async function failAgentRun(
 export = {
   supabase,
   safeInsert,
+  safeCount,
+  safeUpsert,
+  strictInsert,
   safeSelect,
+  strictSelect,
   safeUpdate,
+  strictUpdate,
   createAgentRun,
   completeAgentRun,
   failAgentRun,

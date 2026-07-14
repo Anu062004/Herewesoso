@@ -14,11 +14,11 @@ router.get('/', async (req: Request, res: Response) => {
   const session = walletAuth.getWalletSession(req);
   if (!session) return res.status(401).json({ error: 'Connect and sign in with your SoDEX wallet.', data: [] });
   const { data, error } = await safeSelect<PositionRiskSnapshot>('position_risks', (query: any) =>
-    query.eq('wallet_address', session.address).order('created_at', { ascending: false }).limit(100)
+    query.eq('wallet_address', session.address.toLowerCase()).order('created_at', { ascending: false }).limit(100)
   );
 
   if (error) {
-    return res.status(500).json({ error: error.message, data: [] });
+    return res.status(503).json({ error: 'Risk history is temporarily unavailable.', data: [] });
   }
 
   return res.json(data || []);
@@ -28,9 +28,9 @@ router.get('/backtest', async (req: Request, res: Response) => {
   const session = walletAuth.getWalletSession(req);
   if (!session) return res.status(401).json({ error: 'Connect and sign in with your SoDEX wallet.' });
   const { data, error } = await safeSelect<PositionRiskSnapshot & { created_at?: string }>('position_risks', (query: any) =>
-    query.eq('wallet_address', session.address).order('created_at', { ascending: true }).limit(2000)
+    query.eq('wallet_address', session.address.toLowerCase()).order('created_at', { ascending: true }).limit(2000)
   );
-  if (error) return res.status(500).json({ error: error.message });
+  if (error) return res.status(503).json({ error: 'Risk history is temporarily unavailable.' });
 
   const rows = data || [];
   const samples = rows.map((row, index) => {

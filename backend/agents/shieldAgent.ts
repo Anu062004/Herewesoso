@@ -2,7 +2,7 @@ import type { MacroEvent, PositionRiskSnapshot, ShieldState } from '../types/dom
 
 import sodex = require('../services/sodex');
 import sosovalue = require('../services/sosovalue');
-import claude = require('../services/ai');
+import ai = require('../services/ai');
 import telegram = require('../services/telegram');
 import riskCalculator = require('../utils/riskCalculator');
 import supabaseService = require('../services/supabase');
@@ -28,34 +28,6 @@ const ALERT_THRESHOLD = Number.parseInt(process.env.RISK_ALERT_THRESHOLD || '65'
 const ALERT_COOLDOWN_MS = Number.parseInt(process.env.RISK_ALERT_COOLDOWN_MS || '1800000', 10);
 const HIGH_IMPACT_EVENTS = ['CPI', 'FOMC', 'Federal Reserve', 'GDP', 'NFP', 'Jobs', 'PCE'];
 const recentAlerts = new Map<string, { score: number; level: string; sentAt: number }>();
-
-function buildDemoShieldState(walletAddress?: string): ShieldState {
-  return {
-    positions: [
-      {
-        symbol: 'BTC-USD',
-        marginMode: 'CROSS',
-        positionSide: 'BOTH',
-        side: 'LONG',
-        positionSize: 0.03116,
-        entryPrice: 80381,
-        markPrice: 81240,
-        liquidationPrice: 76320,
-        leverage: 20
-      }
-    ],
-    accountState: {
-      walletAddress: walletAddress || process.env.USER_WALLET_ADDRESS || null,
-      accountId: null,
-      accountValue: 0,
-      availableMargin: 0,
-      initialMargin: 0,
-      crossMargin: 0,
-      positions: [],
-      balances: []
-    }
-  };
-}
 
 function toDateParts(daysFromNow = 0): string {
   return new Date(Date.now() + daysFromNow * 86400000).toISOString().split('T')[0];
@@ -127,21 +99,19 @@ async function runShieldAgent(): Promise<ShieldAgentResult> {
   const runRecord = await createAgentRun('shield');
 
   try {
-    const wallet = process.env.USER_WALLET_ADDRESS;
+    const wallet = process.env.USER_WALLET_ADDRESS || process.env.SODEX_ACCOUNT_ADDRESS;
     const network = process.env.SODEX_NETWORK === 'mainnet' ? 'mainnet' : 'testnet';
     if (!wallet) {
       throw new Error('USER_WALLET_ADDRESS is not configured.');
     }
+    const walletAddress = wallet.toLowerCase();
 
     let shieldState: ShieldState;
 
     try {
       shieldState = await sodex.getEnrichedPositions(wallet, network);
     } catch (error) {
-      console.warn(`[ShieldAgent] SoDEX API unreachable — skipping cycle: ${getErrorMessage(error)}`);
-      const duration = Date.now() - startTime;
-      await completeAgentRun(runRecord?.id, { duration_ms: duration, summary: { positionsMonitored: 0 } });
-      return { success: true, positionsMonitored: 0, snapshots: [] };
+      throw new Error(`SoDEX account monitoring failed: ${getErrorMessage(error)}`);
     }
 
     const { positions = [] } = shieldState;
@@ -234,7 +204,7 @@ async function runShieldAgent(): Promise<ShieldAgentResult> {
 
       if (combinedRisk >= ALERT_THRESHOLD) {
         const positionValue = analysis.notional;
-        claudeMemo = await claude.generateRiskMemo({
+        claudeMemo = await ai.generateRiskMemo({
           symbol,
           side: positionSide,
           leverage: parsedLeverage,
@@ -259,7 +229,7 @@ async function runShieldAgent(): Promise<ShieldAgentResult> {
         // receipt is the on-chain proof that this exact risk reasoning was
         // produced by a TEE-attested skill on 0G — critical for defending
         // "you didn't warn me about this liquidation" disputes after the fact.
-        const riskReceipt = (claude as any).getLastReceipt?.(`risk:${symbol}`) || null;
+        const riskReceipt = ai.getLastReceipt?.(`risk:${symbol}`) || null;
 
         memoryStore.pushMemo({
           memo_type: 'RISK_ALERT',
@@ -269,6 +239,7 @@ async function runShieldAgent(): Promise<ShieldAgentResult> {
         });
 
         await safeInsert('trade_memos', {
+          wallet_address: walletAddress,
           memo_type: 'RISK_ALERT',
           content: claudeMemo,
           related_symbol: symbol,
@@ -286,7 +257,7 @@ async function runShieldAgent(): Promise<ShieldAgentResult> {
       }
 
       const snapshot: PositionRiskSnapshot = {
-        wallet_address: wallet,
+        wallet_address: walletAddress,
         symbol,
         entry_price: entryPrice,
         mark_price: parsedMarkPrice,
@@ -335,6 +306,7 @@ async function runShieldAgent(): Promise<ShieldAgentResult> {
         });
 
         await safeInsert('alerts', {
+          wallet_address: walletAddress,
           alert_type: alertResult.alertType,
           severity: alertResult.severity,
           title: alertResult.title,
@@ -388,6 +360,7 @@ async function runShieldAgent(): Promise<ShieldAgentResult> {
       });
 
       await safeInsert('alerts', {
+        wallet_address: walletAddress,
         alert_type: alertResult.alertType,
         severity: alertResult.severity,
         title: alertResult.title,
@@ -403,7 +376,7 @@ async function runShieldAgent(): Promise<ShieldAgentResult> {
     if (riskSnapshots.length > 0) {
       memoryStore.pushPositionRisks(riskSnapshots);
       await safeInsert('position_risks', riskSnapshots);
-      await performanceService.recordPortfolioSnapshot(wallet, shieldState, riskSnapshots);
+      await performanceService.recordPortfolioSnapshot(walletAddress, shieldState, riskSnapshots);
     }
 
     const duration = Date.now() - startTime;

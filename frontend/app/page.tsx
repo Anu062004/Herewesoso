@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import Image from 'next/image';
 import type { ReactNode } from 'react';
 import styles from './page.module.css';
 
@@ -206,7 +207,7 @@ export default function HomePage() {
     <main className={styles.page}>
       <header className={styles.header}>
         <Link href="/" className={styles.wordmark} aria-label="Gold and Grith home">
-          <img src="/brand/gold-and-grith-mark.svg" alt="" className={styles.logoMark} />
+          <Image src="/brand/gold-and-grith-mark.svg" alt="" width={512} height={512} priority className={styles.logoMark} />
           <span className={styles.logoType}>
             <strong>Gold</strong>
             <b>&amp;</b>

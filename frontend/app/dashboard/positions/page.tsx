@@ -64,7 +64,7 @@ export default function PositionsPage() {
     <div className="space-y-4">
       {resolved.fallbackActive && resolved.positions.length > 0 ? (
         <div className="flex h-9 items-center rounded-[10px] border border-[rgba(245,158,11,0.24)] bg-[rgba(245,158,11,0.12)] px-4 text-[13px] text-[var(--amber)]">
-          Warning: SoDEX position fetch failed - showing demo BTC-USD testnet position
+          SoDEX is unavailable. Showing the last stored risk snapshot; execution controls are disabled.
         </div>
       ) : null}
 
@@ -79,9 +79,9 @@ export default function PositionsPage() {
 
       {tradingKeyConfigured === false ? (
         <div className="flex flex-col gap-2 rounded-[10px] border border-[rgba(220,38,38,0.24)] bg-[rgba(220,38,38,0.12)] px-4 py-3 text-[13px] text-[var(--red)] sm:flex-row sm:items-center sm:justify-between">
-          <span>The EC2 backend does not have a SoDEX API signing key configured. Closing and leverage changes cannot execute yet.</span>
+          <span>The backend does not have a deployment-managed SoDEX signing key configured. Closing and leverage changes cannot execute yet.</span>
           <Link href="/dashboard/telegram" className="text-[12px] text-[var(--text-1)] underline underline-offset-4">
-            Check Telegram /setkey
+            Review secure key setup
           </Link>
         </div>
       ) : null}
@@ -117,6 +117,8 @@ export default function PositionsPage() {
             <div className="p-4">
               <ErrorCard message={positions.error} onRetry={() => void positions.refresh()} />
             </div>
+          ) : resolved.fallbackActive && resolved.positions.length === 0 && state.liveError ? (
+            <div className="p-4"><ErrorCard message={state.liveError} onRetry={() => void positions.refresh()} /></div>
           ) : resolved.positions.length === 0 ? (
             <EmptyState title="No open positions" description="The table will populate after a SoDEX position is opened." />
           ) : (
@@ -169,7 +171,7 @@ export default function PositionsPage() {
                         <div className="flex items-center gap-2">
                           <button
                             type="button"
-                            disabled={mainnetReadOnly || tradingKeyConfigured === false}
+                            disabled={resolved.fallbackActive || mainnetReadOnly || tradingKeyConfigured === false}
                             onClick={() =>
                               setPendingAction({
                                 action: 'REDUCE_LEVERAGE',
@@ -184,7 +186,7 @@ export default function PositionsPage() {
                           </button>
                           <button
                             type="button"
-                            disabled={mainnetReadOnly || tradingKeyConfigured === false}
+                            disabled={resolved.fallbackActive || mainnetReadOnly || tradingKeyConfigured === false}
                             onClick={() =>
                               setPendingAction({
                                 action: 'CLOSE_POSITION',
@@ -220,7 +222,7 @@ export default function PositionsPage() {
           mainnetReadOnly
             ? 'Mainnet execution is blocked in this dashboard'
             : tradingKeyConfigured === false
-              ? 'The backend SoDEX signer is not configured on EC2'
+              ? 'The backend SoDEX signer is not configured in the deployment environment'
               : 'Testnet execution - signs through the configured SoDEX key'
         }
         onClose={() => setPendingAction(null)}
@@ -230,7 +232,7 @@ export default function PositionsPage() {
           }
 
           if (tradingKeyConfigured === false) {
-            throw new Error('The EC2 backend does not have a SoDEX API signing key configured.');
+            throw new Error('The backend does not have a deployment-managed SoDEX signing key configured.');
           }
 
           const result = await queueDashboardAction({
@@ -251,7 +253,7 @@ export default function PositionsPage() {
 
           if (!result.queued && /api key|signer/i.test(result.message)) {
             throw new Error(
-              'SoDEX rejected the backend API key name or account registration. Re-check SODEX_API_KEY_NAME on EC2, or re-run /setkey with a key that is registered on the connected SoDEX account.'
+              'SoDEX rejected the configured signer. Verify the account, API key name, and deployment-managed signing secret.'
             );
           }
 

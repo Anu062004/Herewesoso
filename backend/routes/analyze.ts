@@ -2,10 +2,12 @@ import type { Request, Response } from 'express';
 import type { Headline, MacroEvent } from '../types/domain';
 
 import express from 'express';
+import { rateLimit, requireOperator } from '../middleware/security';
 import sosovalue = require('../services/sosovalue');
-import claude = require('../services/ai');
+import ai = require('../services/ai');
 import narrativeScorer = require('../utils/narrativeScorer');
 import delayUtils = require('../utils/delay');
+import { isProduction } from '../config/env';
 
 const { delay } = delayUtils;
 
@@ -38,6 +40,7 @@ function sectorHeadlines(headlines: Headline[], sector: string): Headline[] {
 }
 
 const router = express.Router();
+router.use(rateLimit({ name: 'analysis', windowMs: 60_000, max: 5 }), requireOperator);
 
 router.post('/', async (_req: Request, res: Response) => {
   const startTime = Date.now();
@@ -85,7 +88,7 @@ router.post('/', async (_req: Request, res: Response) => {
         await delay(i * 300); // stagger to avoid Groq rate limits
         try {
           const sectorNews = sectorHeadlines(headlines, s.sector);
-          const reasoning = await claude.generateNarrativeMemo({
+          const reasoning = await ai.generateNarrativeMemo({
             sector: s.sector,
             headlines: sectorNews,
             etfFlow: etfNetFlow,
@@ -93,7 +96,8 @@ router.post('/', async (_req: Request, res: Response) => {
             scores: { combined: s.combined_score, signal: s.signal }
           });
           return reasoning;
-        } catch {
+        } catch (error) {
+          if (isProduction()) throw error;
           return `${s.sector} scored ${s.combined_score}/100 (${s.signal}). ETF flow: $${etfNetFlow.toLocaleString()}. Macro context: ${macroEvents.length} upcoming events.`;
         }
       })
@@ -106,7 +110,7 @@ router.post('/', async (_req: Request, res: Response) => {
 
     // Build a top-level summary
     const topSectors = [...results].sort((a, b) => b.combined_score - a.combined_score).slice(0, 3);
-    const summary = await claude.generateDailySummary({
+    const summary = await ai.generateDailySummary({
       narrativeScores: results,
       alerts: [],
       positions: []
@@ -125,7 +129,8 @@ router.post('/', async (_req: Request, res: Response) => {
       analyzed_at: new Date().toISOString()
     });
   } catch (error: any) {
-    return res.status(500).json({ success: false, message: error.message });
+    console.error('[Analyze Route]', error?.message || error);
+    return res.status(500).json({ success: false, message: 'Market analysis is temporarily unavailable.' });
   }
 });
 

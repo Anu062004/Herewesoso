@@ -21,11 +21,26 @@ import narrativePreferencesRoute = require('./routes/narrativePreferences');
 import narrativeFeedbackRoute = require('./routes/narrativeFeedback');
 import narrativeAskRoute = require('./routes/narrativeAsk');
 import indicesRoute = require('./routes/indices');
+import { allowedOrigins } from './config/env';
+import { rateLimit, requestContext, securityHeaders } from './middleware/security';
 
 const app = express();
 
-app.use(cors());
-app.use(express.json());
+app.set('trust proxy', 1);
+app.disable('x-powered-by');
+app.use(requestContext);
+app.use(securityHeaders);
+app.use(cors({
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Request-Id'],
+  origin(origin, callback) {
+    if (!origin || allowedOrigins().includes(origin)) return callback(null, true);
+    return callback(new Error('Origin is not allowed by CORS.'));
+  }
+}));
+app.use(express.json({ limit: '64kb', strict: true }));
+app.use(rateLimit({ name: 'api', windowMs: 60_000, max: 300 }));
 
 app.use('/health', healthRoute);
 app.use('/api/health', healthRoute);
@@ -49,5 +64,21 @@ app.use('/api/analyze', analyzeRoute);
 app.use('/api/sodex', sodexRoute);
 app.use('/api/news', newsRoute);
 app.use('/api/indices', indicesRoute);
+
+app.use((_req, res) => {
+  res.status(404).json({ error: 'Route not found.', code: 'NOT_FOUND' });
+});
+
+app.use((error: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+  const requestId = String(res.locals.requestId || 'unknown');
+  const message = error instanceof Error ? error.message : 'Unexpected error';
+  console.error(JSON.stringify({ level: 'error', requestId, message }));
+  if (res.headersSent) return;
+  if (message === 'Origin is not allowed by CORS.') {
+    res.status(403).json({ error: 'Request origin is not allowed.', code: 'CORS_ORIGIN_DENIED', requestId });
+    return;
+  }
+  res.status(500).json({ error: 'An unexpected server error occurred.', code: 'INTERNAL_ERROR', requestId });
+});
 
 export default app;

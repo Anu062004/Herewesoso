@@ -1,6 +1,7 @@
 import axios from 'axios';
 import type { Headline, MacroEvent } from '../types/domain';
 import errorUtils = require('../utils/error');
+import { isProduction } from '../config/env';
 
 const { getErrorMessage } = errorUtils;
 
@@ -56,7 +57,10 @@ function fallbackDailySummary({ narrativeScores, alerts, positions }: DailySumma
 
 async function generate(prompt: string, maxTokens: number): Promise<string | null> {
   const apiKey = process.env.XAI_API_KEY;
-  if (!apiKey) return null;
+  if (!apiKey) {
+    if (isProduction()) throw new Error('xAI is not configured.');
+    return null;
+  }
   try {
     const res = await axios.post(
       `${XAI_BASE}/chat/completions`,
@@ -74,9 +78,12 @@ async function generate(prompt: string, maxTokens: number): Promise<string | nul
         timeout: 30000
       }
     );
-    return res.data?.choices?.[0]?.message?.content?.trim() || null;
+    const output = res.data?.choices?.[0]?.message?.content?.trim() || null;
+    if (!output && isProduction()) throw new Error('xAI returned an empty response.');
+    return output;
   } catch (error) {
-    console.warn(`[Grok/xAI] Falling back to local memo: ${getErrorMessage(error)}`);
+    console.warn(`[Grok/xAI] Generation failed: ${getErrorMessage(error)}`);
+    if (isProduction()) throw new Error('xAI generation failed.');
     return null;
   }
 }
