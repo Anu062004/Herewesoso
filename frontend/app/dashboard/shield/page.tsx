@@ -48,7 +48,7 @@ export default function ShieldPage() {
     <div className="space-y-4">
       {openPositions.fallbackActive && openPositions.positions.length > 0 ? (
         <div className="flex h-9 items-center rounded-[10px] border border-[rgba(245,158,11,0.24)] bg-[rgba(245,158,11,0.12)] px-4 text-[13px] text-[var(--amber)]">
-          Warning: SoDEX position fetch failed - showing demo BTC-USD testnet position
+          SoDEX is unavailable. Showing the last stored risk snapshot; values may be stale.
         </div>
       ) : null}
 
@@ -83,6 +83,8 @@ export default function ShieldPage() {
               </>
             ) : positions.error ? (
               <ErrorCard message={positions.error} onRetry={() => void positions.refresh()} />
+            ) : openPositions.fallbackActive && openPositions.positions.length === 0 && positionsState.liveError ? (
+              <ErrorCard message={positionsState.liveError} onRetry={() => void positions.refresh()} />
             ) : openPositions.positions.length === 0 ? (
               <EmptyState title="No active protection targets" description="Open a SoDEX position to monitor liquidation distance and risk." />
             ) : (
@@ -100,7 +102,7 @@ export default function ShieldPage() {
                           <div className="text-[15px] font-medium text-[var(--text-1)]">{position.symbol}</div>
                           <Pill tone={position.positionSide === 'SHORT' ? 'red' : 'green'}>{position.positionSide}</Pill>
                           {analysis ? <Pill tone={analysis.confidence === 'HIGH' ? 'green' : analysis.confidence === 'MEDIUM' ? 'amber' : 'gray'}>{analysis.confidence} confidence</Pill> : null}
-                          {openPositions.fallbackActive ? <Pill tone="gray">Demo Position</Pill> : null}
+                          {openPositions.fallbackActive ? <Pill tone="gray">Stored Snapshot</Pill> : null}
                         </div>
                         <div className="mt-2 text-[11px] text-[var(--text-3)]">Leverage {position.leverage}x</div>
                       </div>

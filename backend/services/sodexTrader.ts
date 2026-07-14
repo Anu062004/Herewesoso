@@ -624,7 +624,7 @@ export interface OrderResult {
 
 export async function closePosition(symbol: string, sizeHint = '', network: SodexTradingNetwork = 'testnet'): Promise<OrderResult> {
   const key = loadKey();
-  if (!key) return { success: false, message: 'No SoDEX API signing key set. Use SODEX_API_PRIVATE_KEY or /setkey to add one.' };
+  if (!key) return { success: false, message: 'No SoDEX API signing key is provisioned by the server operator.' };
 
   const wallet = sodexSigner.createWallet(key);
   let side: 'BUY' | 'SELL' = 'SELL';
@@ -672,7 +672,7 @@ export async function closePosition(symbol: string, sizeHint = '', network: Sode
 
 export async function placeOrder(params: PlaceOrderParams, network: SodexTradingNetwork = 'testnet'): Promise<OrderResult> {
   const key = loadKey();
-  if (!key) return { success: false, message: 'No SoDEX API signing key set. Use SODEX_API_PRIVATE_KEY or /setkey to add one.' };
+  if (!key) return { success: false, message: 'No SoDEX API signing key is provisioned by the server operator.' };
 
   const wallet = sodexSigner.createWallet(key);
 
@@ -766,7 +766,7 @@ function buildCancelItem(symbolID: number, item: CancelOrderItem): CancelItemPay
 export async function cancelOrders(params: CancelOrdersParams, network: SodexTradingNetwork = 'testnet'): Promise<OrderResult> {
   const key = loadKey();
   if (!key) {
-    return { success: false, message: 'No SoDEX API signing key set. Use SODEX_API_PRIVATE_KEY or /setkey to add one.' };
+    return { success: false, message: 'No SoDEX API signing key is provisioned by the server operator.' };
   }
 
   if (!Array.isArray(params.cancels) || params.cancels.length === 0) {
@@ -842,7 +842,7 @@ export async function cancelOrder(params: CancelOrderParams, network: SodexTradi
 
 export async function reduceLeverage(symbol: string, newLeverage: number, network: SodexTradingNetwork = 'testnet'): Promise<OrderResult> {
   const key = loadKey();
-  if (!key) return { success: false, message: 'No SoDEX API signing key set. Use SODEX_API_PRIVATE_KEY or /setkey to add one.' };
+  if (!key) return { success: false, message: 'No SoDEX API signing key is provisioned by the server operator.' };
 
   const wallet = sodexSigner.createWallet(key);
 

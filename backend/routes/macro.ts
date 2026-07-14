@@ -29,7 +29,8 @@ router.get('/', async (_req: Request, res: Response) => {
       return res.json(stale.data);
     }
 
-    return res.status(500).json({ error: getErrorMessage(error), data: [] });
+    console.error('[Macro Route]', getErrorMessage(error));
+    return res.status(503).json({ error: 'Macro data is temporarily unavailable.', data: [] });
   }
 });
 

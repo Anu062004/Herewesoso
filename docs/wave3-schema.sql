@@ -10,6 +10,10 @@ CREATE TABLE IF NOT EXISTS signal_outcomes (
   combined_score INTEGER NOT NULL,
   model_version TEXT NOT NULL,
   score_breakdown JSONB DEFAULT '{}',
+  proxy_symbol TEXT,
+  benchmark_symbol TEXT DEFAULT 'BTC-USD',
+  entry_price NUMERIC,
+  benchmark_entry_price NUMERIC,
   forward_return_1h NUMERIC,
   forward_return_6h NUMERIC,
   forward_return_24h NUMERIC,
@@ -17,10 +21,19 @@ CREATE TABLE IF NOT EXISTS signal_outcomes (
   benchmark_return_24h NUMERIC,
   alpha_24h NUMERIC,
   max_drawdown_24h NUMERIC,
+  directional_hit BOOLEAN,
+  resolved_horizons JSONB DEFAULT '{}',
   outcome_status TEXT NOT NULL DEFAULT 'PENDING',
   source_snapshot JSONB DEFAULT '{}',
   resolved_at TIMESTAMPTZ
 );
+
+ALTER TABLE signal_outcomes ADD COLUMN IF NOT EXISTS proxy_symbol TEXT;
+ALTER TABLE signal_outcomes ADD COLUMN IF NOT EXISTS benchmark_symbol TEXT DEFAULT 'BTC-USD';
+ALTER TABLE signal_outcomes ADD COLUMN IF NOT EXISTS entry_price NUMERIC;
+ALTER TABLE signal_outcomes ADD COLUMN IF NOT EXISTS benchmark_entry_price NUMERIC;
+ALTER TABLE signal_outcomes ADD COLUMN IF NOT EXISTS directional_hit BOOLEAN;
+ALTER TABLE signal_outcomes ADD COLUMN IF NOT EXISTS resolved_horizons JSONB DEFAULT '{}';
 
 CREATE TABLE IF NOT EXISTS performance_snapshots (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -75,6 +88,7 @@ CREATE TABLE IF NOT EXISTS model_versions (
 
 CREATE INDEX IF NOT EXISTS idx_signal_outcomes_signal_at ON signal_outcomes (signal_at DESC);
 CREATE INDEX IF NOT EXISTS idx_signal_outcomes_signal ON signal_outcomes (signal, outcome_status);
+CREATE INDEX IF NOT EXISTS idx_signal_outcomes_proxy ON signal_outcomes (proxy_symbol, signal_at DESC);
 CREATE INDEX IF NOT EXISTS idx_performance_snapshots_created ON performance_snapshots (created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_portfolio_snapshots_created ON portfolio_snapshots (created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_execution_actions_created ON execution_actions (created_at DESC);

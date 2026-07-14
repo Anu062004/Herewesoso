@@ -121,15 +121,15 @@ test('nonce manager increases monotonically per signer', () => {
   assert.equal(otherSigner, 1000n);
 });
 
-test('wallet login challenges are one-time and bound to wallet and network', () => {
+test('wallet login challenges are one-time and bound to wallet and network', async () => {
   const wallet = sodexSigner.createWallet(PRIVATE_KEY);
-  const challenge = walletAuth.createChallenge(wallet.address, 'mainnet');
+  const challenge = await walletAuth.createChallenge(wallet.address, 'mainnet');
 
   assert.match(challenge.message, /Environment: mainnet/);
   assert.match(challenge.message, /Nonce: [0-9a-f]+/);
-  assert.equal(walletAuth.consumeChallenge(challenge.id, wallet.address, 'testnet'), null);
-  assert.ok(walletAuth.consumeChallenge(challenge.id, wallet.address, 'mainnet'));
-  assert.equal(walletAuth.consumeChallenge(challenge.id, wallet.address, 'mainnet'), null);
+  assert.equal(await walletAuth.consumeChallenge(challenge.id, wallet.address, 'testnet'), null);
+  assert.ok(await walletAuth.consumeChallenge(challenge.id, wallet.address, 'mainnet'));
+  assert.equal(await walletAuth.consumeChallenge(challenge.id, wallet.address, 'mainnet'), null);
 });
 
 test('wallet sessions reject tampering and preserve authenticated identity', () => {

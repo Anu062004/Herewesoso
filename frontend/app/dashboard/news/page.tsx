@@ -61,7 +61,7 @@ export default function NewsPage() {
     intervalMs: 60000
   });
 
-  const articles = news.data?.articles || [];
+  const articles = useMemo(() => news.data?.articles || [], [news.data?.articles]);
   const categories = useMemo(
     () => [...new Set(articles.map((article) => article.category).filter(Boolean))].sort(),
     [articles]
@@ -109,7 +109,7 @@ export default function NewsPage() {
       <PageHeader
         title="Market News"
         description="Follow market-moving crypto stories, filter the noise, and open the original coverage."
-        right={<PollingIndicator freshness={news.freshness} nextPollInMs={news.nextPollInMs} />}
+        right={<div className="flex items-center gap-2">{news.data?.stale ? <Pill tone="amber">Cached data</Pill> : null}<PollingIndicator freshness={news.freshness} nextPollInMs={news.nextPollInMs} /></div>}
       />
 
       <Panel>

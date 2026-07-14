@@ -8,9 +8,9 @@ import { EmptyState, ErrorCard, PageHeader, Panel, PanelHeader, Pill, PollingInd
 
 function statusTone(status: string): 'green' | 'amber' | 'red' | 'cyan' | 'gray' {
   if (status === 'SUCCEEDED') return 'green';
-  if (status === 'FAILED' || status === 'REJECTED') return 'red';
+  if (status === 'FAILED' || status === 'REJECTED' || status === 'UNKNOWN') return 'red';
   if (status === 'DRY_RUN' || status === 'SIMULATED') return 'cyan';
-  if (status === 'SUBMITTED' || status === 'CONFIRMED') return 'amber';
+  if (status === 'PENDING' || status === 'SUBMITTED' || status === 'CONFIRMED') return 'amber';
   return 'gray';
 }
 

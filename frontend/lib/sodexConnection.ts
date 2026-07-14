@@ -28,8 +28,8 @@ export interface SodexConnection {
   sessionExpiresAt?: string;
 }
 
-const STORAGE_KEY = 'gold-grith:sodex-connection';
 const CHANGE_EVENT = 'gold-grith:sodex-connection-change';
+let activeConnection: SodexConnection | null = null;
 
 export const SODEX_NETWORK_CONFIG: Record<SodexNetwork, SodexNetworkConfig> = {
   testnet: {
@@ -83,35 +83,24 @@ function isConnection(value: unknown): value is SodexConnection {
 }
 
 export function getSodexConnection(): SodexConnection | null {
-  if (typeof window === 'undefined') {
-    return null;
-  }
-
-  try {
-    const value = JSON.parse(window.localStorage.getItem(STORAGE_KEY) || 'null') as unknown;
-    return isConnection(value) ? value : null;
-  } catch {
-    return null;
-  }
+  return isConnection(activeConnection) ? activeConnection : null;
 }
 
 export function saveSodexConnection(connection: SodexConnection) {
-  window.localStorage.setItem(STORAGE_KEY, JSON.stringify(connection));
+  activeConnection = connection;
   window.dispatchEvent(new Event(CHANGE_EVENT));
 }
 
 export function clearSodexConnection() {
-  window.localStorage.removeItem(STORAGE_KEY);
+  activeConnection = null;
   window.dispatchEvent(new Event(CHANGE_EVENT));
 }
 
 export function subscribeSodexConnection(listener: () => void) {
   window.addEventListener(CHANGE_EVENT, listener);
-  window.addEventListener('storage', listener);
 
   return () => {
     window.removeEventListener(CHANGE_EVENT, listener);
-    window.removeEventListener('storage', listener);
   };
 }
 

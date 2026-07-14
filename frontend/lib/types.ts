@@ -190,17 +190,11 @@ export interface DashboardActionResponse {
   message: string;
 }
 
-export interface DashboardData {
-  signals: SignalRow[];
-  positions: PositionsResponse;
-  alerts: AlertRow[];
-  memos: MemoRow[];
-  macro: MacroEvent[];
-}
-
 export interface HealthStatus {
   status: string;
   time: string;
+  persistence?: { configured: boolean; reachable: boolean };
+  ai?: { provider: string; configured: boolean };
   telegram: {
     configured: boolean;
     connected: boolean;
@@ -323,6 +317,8 @@ export interface NewsResponse {
   count: number;
   articles: NewsArticle[];
   error?: string;
+  stale?: boolean;
+  cachedAt?: string | null;
 }
 
 export interface ETFResponse {
@@ -348,6 +344,10 @@ export interface SignalOutcomeRow {
   combined_score: number;
   model_version: string;
   score_breakdown?: Record<string, number>;
+  proxy_symbol?: string | null;
+  benchmark_symbol?: string | null;
+  entry_price?: number | null;
+  benchmark_entry_price?: number | null;
   forward_return_1h: number | null;
   forward_return_6h: number | null;
   forward_return_24h: number | null;
@@ -355,7 +355,9 @@ export interface SignalOutcomeRow {
   benchmark_return_24h: number | null;
   alpha_24h: number | null;
   max_drawdown_24h: number | null;
-  outcome_status: 'PENDING' | 'READY' | 'INSUFFICIENT_DATA' | 'FAILED';
+  directional_hit?: boolean | null;
+  resolved_horizons?: Record<string, unknown> | null;
+  outcome_status: 'PENDING' | 'PARTIAL' | 'READY' | 'INSUFFICIENT_DATA' | 'FAILED';
   source_snapshot?: Record<string, unknown> | null;
   resolved_at?: string | null;
 }
@@ -384,7 +386,7 @@ export interface ExecutionActionRow {
   symbol: string;
   network: 'testnet' | 'mainnet';
   execution_mode: 'dry_run' | 'testnet' | 'mainnet_canary';
-  status: 'SIMULATED' | 'CONFIRMED' | 'SUBMITTED' | 'SUCCEEDED' | 'FAILED' | 'REJECTED' | 'DRY_RUN';
+  status: 'PENDING' | 'SIMULATED' | 'CONFIRMED' | 'SUBMITTED' | 'UNKNOWN' | 'SUCCEEDED' | 'FAILED' | 'REJECTED' | 'DRY_RUN';
   requested_by?: string | null;
   idempotency_key: string;
   policy_snapshot?: Record<string, unknown>;
@@ -399,6 +401,7 @@ export interface PerformanceResponse {
   generatedAt: string;
   summary: {
     totalSignals: number;
+    sampledSignals: number;
     validatedSignals: number;
     pendingSignals: number;
     winRate: number | null;
@@ -406,6 +409,8 @@ export interface PerformanceResponse {
     benchmarkReturn24h: number | null;
     alpha24h: number | null;
     maxDrawdown24h: number | null;
+    maxDrawdownMethodology: string;
+    sampleWindow: string;
     modelVersions: string[];
     readiness: { status: string; message: string };
   };

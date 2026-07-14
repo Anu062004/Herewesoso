@@ -206,11 +206,11 @@ export default function ScannerPage() {
           <div className="grid gap-4 md:grid-cols-2">
             <label className="text-[12px] text-[var(--text-2)]">
               <span className="flex justify-between"><span>Minimum confidence</span><span>{preferences.minConfidence}</span></span>
-              <input className="mt-2 w-full accent-[var(--brand)]" type="range" min="0" max="100" value={preferences.minConfidence} onChange={(event) => setPreferences((current) => ({ ...current, minConfidence: Number(event.target.value) }))} />
+              <input aria-label="Minimum narrative confidence" aria-valuetext={`${preferences.minConfidence} percent`} className="mt-2 w-full accent-[var(--brand)]" type="range" min="0" max="100" value={preferences.minConfidence} onChange={(event) => setPreferences((current) => ({ ...current, minConfidence: Number(event.target.value) }))} />
             </label>
             <label className="text-[12px] text-[var(--text-2)]">
               <span className="flex justify-between"><span>Maximum crowding</span><span>{preferences.maxCrowding}</span></span>
-              <input className="mt-2 w-full accent-[var(--brand)]" type="range" min="0" max="100" value={preferences.maxCrowding} onChange={(event) => setPreferences((current) => ({ ...current, maxCrowding: Number(event.target.value) }))} />
+              <input aria-label="Maximum narrative crowding" aria-valuetext={`${preferences.maxCrowding} percent`} className="mt-2 w-full accent-[var(--brand)]" type="range" min="0" max="100" value={preferences.maxCrowding} onChange={(event) => setPreferences((current) => ({ ...current, maxCrowding: Number(event.target.value) }))} />
             </label>
           </div>
           <div className="flex items-center gap-3">

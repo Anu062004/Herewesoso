@@ -7,6 +7,7 @@ import errorUtils = require('../utils/error');
 const router = express.Router();
 const { getErrorMessage } = errorUtils;
 const cache = new Map<string, { expiresAt: number; payload: Record<string, unknown> }>();
+const MAX_CACHE_ENTRIES = 1_000;
 
 function cached(key: string) {
   const entry = cache.get(key);
@@ -14,6 +15,15 @@ function cached(key: string) {
 }
 
 function remember(key: string, payload: Record<string, unknown>, ttlMs: number) {
+  const now = Date.now();
+  for (const [entryKey, entry] of cache) {
+    if (entry.expiresAt <= now) cache.delete(entryKey);
+  }
+  while (cache.size >= MAX_CACHE_ENTRIES) {
+    const oldest = cache.keys().next().value as string | undefined;
+    if (!oldest) break;
+    cache.delete(oldest);
+  }
   cache.set(key, { payload, expiresAt: Date.now() + ttlMs });
   return payload;
 }
@@ -33,12 +43,19 @@ function rows(value: any): any[] {
   return [];
 }
 
+function text(value: unknown, fallback: string, maxLength: number): string {
+  const normalized = typeof value === 'string' || typeof value === 'number'
+    ? String(value).trim()
+    : '';
+  return (normalized || fallback).slice(0, maxLength);
+}
+
 function normalizeIndex(item: any, index: number) {
-  const symbol = String(item.symbol || item.indexSymbol || item.ticker || item.code || item.name || `SSI-${index + 1}`);
+  const symbol = text(item.symbol || item.indexSymbol || item.ticker || item.code || item.name, `SSI-${index + 1}`, 64);
   return {
-    id: String(item.id || item.index_id || item.indexId || item.slug || symbol),
+    id: text(item.id || item.index_id || item.indexId || item.slug, symbol, 128),
     symbol,
-    name: String(item.fullName || item.indexName || item.name || symbol),
+    name: text(item.fullName || item.indexName || item.name, symbol, 160),
     price: number(item.price ?? item.indexValue ?? item.value ?? item.nav ?? item.currentPrice),
     change24h: number(item.change24h ?? item.change_24h ?? item.priceChange24h ?? item.ratio24h),
     roi7d: number(item.roi7d ?? item.roi_7d ?? item.change7d),
@@ -47,8 +64,7 @@ function normalizeIndex(item: any, index: number) {
     roi1y: number(item.roi1y ?? item.roi_1y ?? item.change1y),
     ytd: number(item.ytd ?? item.roiYtd ?? item.roi_ytd),
     marketCap: number(item.marketCap ?? item.market_cap),
-    description: item.description || item.introduction || null,
-    raw: item
+    description: text(item.description || item.introduction, '', 2_000) || null
   };
 }
 
@@ -76,13 +92,16 @@ router.get('/', async (_req: Request, res: Response) => {
       count: 0,
       updatedAt: new Date().toISOString(),
       unavailable: true,
-      message: message.includes('429') ? 'SoSoValue rate limit reached. The index feed will retry automatically.' : message
+      message: message.includes('429') ? 'SoSoValue rate limit reached. The index feed will retry automatically.' : 'The index feed is temporarily unavailable.'
     }, 60000));
   }
 });
 
 router.get('/:identifier/history', async (req: Request, res: Response) => {
   const identifier = String(req.params.identifier || '').trim();
+  if (!/^[A-Za-z0-9._-]{1,64}$/.test(identifier)) {
+    return res.status(400).json({ error: 'A valid index identifier is required.' });
+  }
   const days = Math.min(365, Math.max(7, Number.parseInt(String(req.query.days || 90), 10) || 90));
   if (!identifier) return res.status(400).json({ error: 'Index identifier is required.', points: [] });
   const cacheKey = `history:${identifier}:${days}`;
@@ -101,7 +120,7 @@ router.get('/:identifier/history', async (req: Request, res: Response) => {
       points: [],
       updatedAt: new Date().toISOString(),
       unavailable: true,
-      message: message.includes('429') ? 'SoSoValue rate limit reached. Index history will retry automatically.' : message
+      message: message.includes('429') ? 'SoSoValue rate limit reached. Index history will retry automatically.' : 'Index history is temporarily unavailable.'
     }, 60000));
   }
 });

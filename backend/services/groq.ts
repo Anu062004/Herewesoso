@@ -1,6 +1,7 @@
 import Groq from 'groq-sdk';
 import type { Headline, MacroEvent } from '../types/domain';
 import errorUtils = require('../utils/error');
+import { isProduction } from '../config/env';
 
 const { getErrorMessage } = errorUtils;
 
@@ -50,7 +51,10 @@ function fallbackDailySummary({ narrativeScores, alerts, positions }: DailySumma
 }
 
 async function generate(prompt: string, maxTokens: number): Promise<string | null> {
-  if (!client) return null;
+  if (!client) {
+    if (isProduction()) throw new Error('Groq is not configured.');
+    return null;
+  }
   try {
     const completion = await client.chat.completions.create({
       model: MODEL,
@@ -58,9 +62,12 @@ async function generate(prompt: string, maxTokens: number): Promise<string | nul
       max_tokens: maxTokens,
       temperature: 0.7
     });
-    return completion.choices[0]?.message?.content?.trim() || null;
+    const output = completion.choices[0]?.message?.content?.trim() || null;
+    if (!output && isProduction()) throw new Error('Groq returned an empty response.');
+    return output;
   } catch (error) {
-    console.warn(`[Groq] Falling back to local memo: ${getErrorMessage(error)}`);
+    console.warn(`[Groq] Generation failed: ${getErrorMessage(error)}`);
+    if (isProduction()) throw new Error('Groq generation failed.');
     return null;
   }
 }

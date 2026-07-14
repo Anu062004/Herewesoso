@@ -1,12 +1,14 @@
 export type SignalType = 'STRONG_BUY' | 'BUY' | 'WATCH' | 'NEUTRAL' | 'AVOID';
 export type RiskLevel = 'SAFE' | 'CAUTION' | 'DANGER' | 'CRITICAL';
 export type AlertSeverity = 'INFO' | 'WARNING' | 'DANGER' | 'CRITICAL';
-export type SignalOutcomeStatus = 'PENDING' | 'READY' | 'INSUFFICIENT_DATA' | 'FAILED';
+export type SignalOutcomeStatus = 'PENDING' | 'PARTIAL' | 'READY' | 'INSUFFICIENT_DATA' | 'FAILED';
 export type ExecutionMode = 'dry_run' | 'testnet' | 'mainnet_canary';
 export type ExecutionStatus =
+  | 'PENDING'
   | 'SIMULATED'
   | 'CONFIRMED'
   | 'SUBMITTED'
+  | 'UNKNOWN'
   | 'SUCCEEDED'
   | 'FAILED'
   | 'REJECTED'
@@ -104,6 +106,10 @@ export interface SignalOutcomeRow {
   combined_score: number;
   model_version: string;
   score_breakdown: Record<string, number>;
+  proxy_symbol?: string | null;
+  benchmark_symbol?: string | null;
+  entry_price?: number | null;
+  benchmark_entry_price?: number | null;
   forward_return_1h: number | null;
   forward_return_6h: number | null;
   forward_return_24h: number | null;
@@ -111,6 +117,8 @@ export interface SignalOutcomeRow {
   benchmark_return_24h: number | null;
   alpha_24h: number | null;
   max_drawdown_24h: number | null;
+  directional_hit?: boolean | null;
+  resolved_horizons?: Record<string, unknown> | null;
   outcome_status: SignalOutcomeStatus;
   source_snapshot?: Record<string, unknown> | null;
   resolved_at?: string | null;

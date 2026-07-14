@@ -26,9 +26,21 @@ function readinessTone(status: string): 'green' | 'amber' | 'red' | 'gray' {
 
 function statusTone(status: string): 'green' | 'amber' | 'red' | 'gray' | 'cyan' {
   if (status === 'READY') return 'green';
-  if (status === 'PENDING') return 'amber';
+  if (status === 'PENDING' || status === 'PARTIAL') return 'amber';
   if (status === 'FAILED') return 'red';
   return 'gray';
+}
+
+function hitTone(value: boolean | null | undefined): 'green' | 'red' | 'gray' {
+  if (value === true) return 'green';
+  if (value === false) return 'red';
+  return 'gray';
+}
+
+function hitLabel(value: boolean | null | undefined): string {
+  if (value === true) return 'HIT';
+  if (value === false) return 'MISS';
+  return '-';
 }
 
 export default function PerformancePage() {
@@ -67,10 +79,10 @@ export default function PerformancePage() {
           </div>
 
           <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-            <MetricCard label="Validated Signals" value={formatNumber(data.summary.validatedSignals)} supporting={`${data.summary.pendingSignals} pending outcomes`} />
-            <MetricCard label="24h Hit Rate" value={data.summary.winRate === null ? '-' : formatPercent(data.summary.winRate, 1)} tone={data.summary.winRate && data.summary.winRate >= 50 ? 'green' : 'default'} supporting="Positive 24h forward return" />
+            <MetricCard label="Validated Signals" value={formatNumber(data.summary.validatedSignals)} supporting={`${data.summary.pendingSignals} pending · ${data.summary.sampledSignals}/${data.summary.totalSignals} sampled`} />
+            <MetricCard label="24h Hit Rate" value={data.summary.winRate === null ? '-' : formatPercent(data.summary.winRate, 1)} tone={data.summary.winRate && data.summary.winRate >= 50 ? 'green' : 'default'} supporting="Direction-adjusted 24h alpha" />
             <MetricCard label="24h Alpha" value={<ValueChange value={data.summary.alpha24h} />} supporting={`Benchmark ${formatPercent(data.summary.benchmarkReturn24h, 2)}`} />
-            <MetricCard label="Max Drawdown" value={formatPercent(data.summary.maxDrawdown24h, 2)} tone={data.summary.maxDrawdown24h && data.summary.maxDrawdown24h > 10 ? 'red' : 'default'} supporting="Resolved signal equity curve" />
+            <MetricCard label="Max Adverse Move" value={formatPercent(data.summary.maxDrawdown24h, 2)} tone={data.summary.maxDrawdown24h && data.summary.maxDrawdown24h > 10 ? 'red' : 'default'} supporting={data.summary.maxDrawdownMethodology} />
           </div>
 
           <div className="grid gap-4 xl:grid-cols-[minmax(0,1.3fr)_minmax(320px,0.7fr)]">
@@ -169,9 +181,11 @@ export default function PerformancePage() {
                       <tr>
                         <th className="px-4 py-3 font-medium">Time</th>
                         <th className="px-4 py-3 font-medium">Sector</th>
+                        <th className="px-4 py-3 font-medium">Proxy</th>
                         <th className="px-4 py-3 font-medium">Signal</th>
                         <th className="px-4 py-3 font-medium">Score</th>
                         <th className="px-4 py-3 font-medium">24h</th>
+                        <th className="px-4 py-3 font-medium">Hit</th>
                         <th className="px-4 py-3 font-medium">Status</th>
                       </tr>
                     </thead>
@@ -180,9 +194,11 @@ export default function PerformancePage() {
                         <tr key={row.id || `${row.signal_at}-${row.sector}`} className="border-t border-[var(--border)] text-[13px]">
                           <td className="px-4 py-3 text-[var(--text-2)]">{formatDateTime(row.signal_at)}</td>
                           <td className="px-4 py-3 text-[var(--text-1)]">{row.sector}</td>
+                          <td className="px-4 py-3 text-[var(--text-2)]">{row.proxy_symbol || '-'}</td>
                           <td className="px-4 py-3"><Pill tone={row.signal === 'STRONG_BUY' || row.signal === 'BUY' ? 'green' : row.signal === 'WATCH' ? 'amber' : 'gray'}>{row.signal}</Pill></td>
                           <td className="px-4 py-3 text-[var(--text-1)]">{row.combined_score}</td>
                           <td className="px-4 py-3"><ValueChange value={row.forward_return_24h} /></td>
+                          <td className="px-4 py-3"><Pill tone={hitTone(row.directional_hit)}>{hitLabel(row.directional_hit)}</Pill></td>
                           <td className="px-4 py-3"><Pill tone={statusTone(row.outcome_status)}>{row.outcome_status}</Pill></td>
                         </tr>
                       ))}

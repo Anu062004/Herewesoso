@@ -3,6 +3,7 @@
 import type { FormEvent, ReactNode } from 'react';
 
 import Link from 'next/link';
+import Image from 'next/image';
 import { usePathname, useRouter } from 'next/navigation';
 import { useEffect, useMemo, useRef, useState } from 'react';
 
@@ -123,6 +124,7 @@ export default function DashboardShell({ children }: DashboardShellProps) {
   const [moreOpen, setMoreOpen] = useState(false);
   const moreMenuRef = useRef<HTMLDivElement>(null);
   const [telegramOpen, setTelegramOpen] = useState(false);
+  const [sessionReady, setSessionReady] = useState(pathname === '/dashboard/sodex/connect');
   const [actionModal, setActionModal] = useState<{
     title: string;
     description: string;
@@ -154,10 +156,18 @@ export default function DashboardShell({ children }: DashboardShellProps) {
   }, [pathname]);
 
   useEffect(() => {
-    if (pathname === '/dashboard/sodex/connect') return;
+    if (pathname === '/dashboard/sodex/connect') {
+      setSessionReady(true);
+      return;
+    }
+
+    setSessionReady(false);
 
     void fetchSodexSession()
-      .then((session) => saveSodexConnection(session))
+      .then((session) => {
+        saveSodexConnection(session);
+        setSessionReady(true);
+      })
       .catch(() => {
         clearSodexConnection();
         router.replace('/dashboard/sodex/connect');
@@ -203,7 +213,7 @@ export default function DashboardShell({ children }: DashboardShellProps) {
         <header className="border-b border-[var(--border)] bg-[var(--bg-surface)]/95">
           <div className="mx-auto flex min-h-[68px] max-w-[1180px] items-center justify-between gap-4 px-4 py-3 sm:px-6">
             <Link href="/" className="flex items-center gap-2.5 transition-opacity hover:opacity-90" aria-label="Gold and Grith home">
-              <img src="/brand/gold-and-grith-mark.svg" alt="" className="h-10 w-10" />
+              <Image src="/brand/gold-and-grith-mark.svg" alt="" width={40} height={40} priority className="h-10 w-10" />
               <span className="inline-flex items-baseline gap-1.5 whitespace-nowrap font-headline text-[17px] font-bold tracking-[-0.035em] text-[var(--text-1)]">
                 <span>Gold</span><span className="text-[var(--brand)]">&amp;</span><span>Grith</span>
               </span>
@@ -224,6 +234,14 @@ export default function DashboardShell({ children }: DashboardShellProps) {
           </div>
         </header>
         <main className="mx-auto max-w-[1180px] px-4 py-8 sm:px-6">{children}</main>
+      </div>
+    );
+  }
+
+  if (!sessionReady) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-[var(--bg-app)] text-[13px] text-[var(--text-2)]" role="status" aria-live="polite">
+        Verifying secure wallet session…
       </div>
     );
   }
@@ -256,7 +274,7 @@ export default function DashboardShell({ children }: DashboardShellProps) {
 
           <header className="mx-auto flex min-h-[68px] max-w-[1520px] flex-wrap items-center gap-3 px-4 py-3.5 sm:px-6">
             <Link href="/" className="flex min-w-0 max-w-[230px] flex-1 items-center gap-2.5 transition-opacity hover:opacity-90 sm:min-w-[240px] sm:max-w-none sm:flex-none" aria-label="Gold and Grith home">
-              <img src="/brand/gold-and-grith-mark.svg" alt="" className="h-10 w-10 shrink-0" />
+              <Image src="/brand/gold-and-grith-mark.svg" alt="" width={40} height={40} priority className="h-10 w-10 shrink-0" />
               <span className="inline-flex items-baseline gap-1.5 whitespace-nowrap font-headline text-[17px] font-bold tracking-[-0.035em] text-[var(--text-1)]">
                 <span>Gold</span>
                 <span className="text-[var(--brand)]">&amp;</span>
@@ -267,6 +285,7 @@ export default function DashboardShell({ children }: DashboardShellProps) {
             <form onSubmit={handleSearch} className="relative order-3 min-w-full flex-1 md:order-none md:min-w-[320px]">
               <SearchIcon className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--text-3)]" />
               <input
+                aria-label="Search dashboard sections, sectors, symbols, macro events, or alerts"
                 value={searchTerm}
                 onChange={(event) => setSearchTerm(event.target.value)}
                 placeholder="Search sector / symbol / macro / alert"
@@ -371,7 +390,7 @@ export default function DashboardShell({ children }: DashboardShellProps) {
               </Button>
 
               <div className="hidden h-9 w-9 items-center justify-center rounded-full border border-[var(--border)] bg-[var(--bg-panel)] p-1.5 sm:flex">
-                <img src="/brand/gold-and-grith-mark.svg" alt="" className="h-full w-full" />
+                <Image src="/brand/gold-and-grith-mark.svg" alt="" width={36} height={36} className="h-full w-full" />
               </div>
             </div>
           </header>
@@ -412,7 +431,7 @@ export default function DashboardShell({ children }: DashboardShellProps) {
                       : 'text-[var(--text-2)] hover:bg-[rgba(255,255,255,0.04)] hover:text-[var(--text-1)]'
                   )}
                   aria-expanded={moreOpen}
-                  aria-haspopup="menu"
+                  aria-haspopup="true"
                   aria-controls="dashboard-more-menu"
                 >
                   <NotesIcon className={hasActiveSecondaryNav || moreOpen ? 'h-4 w-4 text-[var(--brand)]' : 'h-4 w-4 text-[var(--text-3)]'} />
@@ -420,7 +439,7 @@ export default function DashboardShell({ children }: DashboardShellProps) {
                 </button>
 
                 {moreOpen ? (
-                  <div id="dashboard-more-menu" role="menu" className="absolute right-0 top-[calc(100%+10px)] z-[var(--z-dropdown)] w-[268px] rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--bg-elevated)] p-2 shadow-[var(--shadow-md)]">
+                  <div id="dashboard-more-menu" className="absolute right-0 top-[calc(100%+10px)] z-[var(--z-dropdown)] w-[268px] rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--bg-elevated)] p-2 shadow-[var(--shadow-md)]">
                     <div className="px-3 pb-2 pt-1 text-[11px] font-medium uppercase tracking-[0.14em] text-[var(--text-3)]">
                       Secondary sections
                     </div>
@@ -432,7 +451,6 @@ export default function DashboardShell({ children }: DashboardShellProps) {
                           <Link
                             key={item.href}
                             href={item.href}
-                            role="menuitem"
                             onClick={() => setMoreOpen(false)}
                             className={cx(
                               'flex items-center gap-2 rounded-[var(--radius-md)] px-3 py-2 text-[13px] transition',

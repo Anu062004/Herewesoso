@@ -12,6 +12,8 @@ interface ExecutionPolicyInput {
   currentLeverage?: number | null;
   targetLeverage?: number | null;
   notionalUsd?: number | null;
+  idempotencyScope?: string | null;
+  requestedBy?: string | null;
 }
 
 interface ExecutionPolicyCheck {
@@ -36,7 +38,7 @@ interface ExecutionPolicyResult {
 function parseExecutionMode(): ExecutionMode {
   const value = String(process.env.EXECUTION_MODE || '').toLowerCase();
   if (value === 'dry_run' || value === 'testnet' || value === 'mainnet_canary') return value;
-  return 'testnet';
+  return 'dry_run';
 }
 
 function numberFromEnv(name: string, fallback: number): number {
@@ -58,9 +60,11 @@ function buildIdempotencyKey(input: ExecutionPolicyInput) {
     action: input.action,
     symbol: input.symbol,
     network: input.network,
-    currentLeverage: input.currentLeverage || null,
-    targetLeverage: input.targetLeverage || null,
-    notionalUsd: input.notionalUsd || null,
+    currentLeverage: input.currentLeverage ?? null,
+    targetLeverage: input.targetLeverage ?? null,
+    notionalUsd: input.notionalUsd ?? null,
+    idempotencyScope: input.idempotencyScope ?? null,
+    requestedBy: input.requestedBy?.toLowerCase() || null,
     bucket
   });
 
@@ -98,17 +102,17 @@ function evaluateExecutionPolicy(input: ExecutionPolicyInput): ExecutionPolicyRe
     },
     {
       name: 'leverage_cap',
-      passed: targetLeverage === null || targetLeverage <= maxLeverage,
+      passed: targetLeverage === null || (Number.isFinite(targetLeverage) && targetLeverage >= 1 && targetLeverage <= maxLeverage),
       message:
-        targetLeverage === null || targetLeverage <= maxLeverage
+        targetLeverage === null || (Number.isFinite(targetLeverage) && targetLeverage >= 1 && targetLeverage <= maxLeverage)
           ? 'Target leverage is inside the policy cap.'
           : `Target leverage ${targetLeverage}x exceeds MAX_LEVERAGE=${maxLeverage}.`
     },
     {
       name: 'notional_cap',
-      passed: notionalUsd === null || notionalUsd <= maxNotionalUsd,
+      passed: notionalUsd === null || (Number.isFinite(notionalUsd) && notionalUsd >= 0 && notionalUsd <= maxNotionalUsd),
       message:
-        notionalUsd === null || notionalUsd <= maxNotionalUsd
+        notionalUsd === null || (Number.isFinite(notionalUsd) && notionalUsd >= 0 && notionalUsd <= maxNotionalUsd)
           ? 'Requested notional is inside the policy cap.'
           : `Requested notional ${notionalUsd} exceeds MAX_NOTIONAL_USD=${maxNotionalUsd}.`
     }
@@ -131,4 +135,3 @@ function evaluateExecutionPolicy(input: ExecutionPolicyInput): ExecutionPolicyRe
 export = {
   evaluateExecutionPolicy
 };
-

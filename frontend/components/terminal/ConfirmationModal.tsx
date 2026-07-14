@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 
 interface ActionResult {
   title?: string;
@@ -29,22 +29,54 @@ export function ConfirmationModal({
   const [submitting, setSubmitting] = useState(false);
   const [result, setResult] = useState<ActionResult | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const confirmRef = useRef<HTMLButtonElement>(null);
+  const submittingRef = useRef(false);
+  const titleId = useId();
+  const descriptionId = useId();
 
   useEffect(() => {
+    submittingRef.current = false;
     setSubmitting(false);
     setResult(null);
     setError(null);
   }, [open, title, description, confirmLabel]);
+
+  useEffect(() => {
+    if (!open) return;
+    const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    confirmRef.current?.focus();
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === 'Escape' && !submittingRef.current) onClose();
+      if (event.key !== 'Tab' || !dialogRef.current) return;
+      const controls = [...dialogRef.current.querySelectorAll<HTMLElement>('button:not([disabled]), [href], input, select, textarea, [tabindex]:not([tabindex="-1"])')];
+      if (controls.length === 0) return;
+      const first = controls[0];
+      const last = controls[controls.length - 1];
+      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+    }
+
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('keydown', handleKeyDown);
+      document.body.style.overflow = previousOverflow;
+      previousFocus?.focus();
+    };
+  }, [open, onClose]);
 
   if (!open) {
     return null;
   }
 
   return (
-    <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/70 px-4 backdrop-blur-sm">
-      <div className="w-full max-w-[420px] rounded-lg border border-[var(--border)] bg-[var(--bg-elevated)] p-5 shadow-[var(--shadow-md)]">
-        <h2 className="text-[15px] font-semibold text-[var(--text-1)]">{title}</h2>
-        <p className="mt-3 text-[13px] leading-6 text-[var(--text-2)]">{description}</p>
+    <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/70 px-4 backdrop-blur-sm" onMouseDown={(event) => { if (event.target === event.currentTarget && !submitting) onClose(); }}>
+      <div ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby={titleId} aria-describedby={descriptionId} className="w-full max-w-[420px] rounded-lg border border-[var(--border)] bg-[var(--bg-elevated)] p-5 shadow-[var(--shadow-md)]">
+        <h2 id={titleId} className="text-[15px] font-semibold text-[var(--text-1)]">{title}</h2>
+        <p id={descriptionId} className="mt-3 text-[13px] leading-6 text-[var(--text-2)]">{description}</p>
 
         <div className="mt-4 inline-flex h-7 items-center rounded-md border border-[rgba(245,158,11,0.28)] bg-[rgba(245,158,11,0.12)] px-2 text-[11px] font-medium text-[var(--amber)]">
           {disclaimer}
@@ -70,11 +102,13 @@ export function ConfirmationModal({
             disabled={submitting}
             className="inline-flex h-9 items-center rounded-md border border-[var(--border)] bg-[var(--bg-panel)] px-4 text-[13px] font-medium text-[var(--text-2)] transition hover:border-[var(--border-hover)] hover:text-[var(--text-1)] disabled:cursor-not-allowed disabled:opacity-60"
           >
-            Cancel
+            {result ? 'Close' : 'Cancel'}
           </button>
           <button
+            ref={confirmRef}
             type="button"
             onClick={async () => {
+              submittingRef.current = true;
               setSubmitting(true);
               setError(null);
 
@@ -84,10 +118,11 @@ export function ConfirmationModal({
               } catch (confirmError) {
                 setError(confirmError instanceof Error ? confirmError.message : 'Action failed.');
               } finally {
+                submittingRef.current = false;
                 setSubmitting(false);
               }
             }}
-            disabled={submitting}
+            disabled={submitting || Boolean(result)}
             className="inline-flex h-9 items-center rounded-md border border-[rgba(255,107,0,0.56)] bg-[var(--brand)] px-4 text-[13px] font-medium text-black transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60"
           >
             {submitting ? (

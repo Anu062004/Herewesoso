@@ -2,6 +2,7 @@ node_modules/
 
 # Local environment/config files
 .env*
+.sodex_key
 
 # Local AI/tool state
 .claude/
@@ -12,6 +13,7 @@ dist/
 frontend/node_modules/
 frontend/.next/
 *.log
+*.tsbuildinfo
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*

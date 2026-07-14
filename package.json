@@ -7,13 +7,16 @@
     "dev": "tsx watch backend/server.ts",
     "test": "tsx backend/tests/run.ts",
     "typecheck": "tsc -p backend/tsconfig.json --noEmit",
+    "lint": "npm --prefix frontend run lint",
     "frontend:dev": "npm --prefix frontend run dev",
     "frontend:build": "npm --prefix frontend run build",
-    "frontend:start": "npm --prefix frontend run start"
+    "frontend:start": "npm --prefix frontend run start",
+    "check": "npm run typecheck && npm run lint && npm test && npm run frontend:build"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.24.3",
     "@google/generative-ai": "^0.24.1",
+    "@skillmint/sdk": "^0.4.1",
     "@supabase/supabase-js": "^2.39.0",
     "axios": "^1.6.0",
     "cors": "^2.8.5",
@@ -25,9 +28,14 @@
   },
   "devDependencies": {
     "@types/cors": "^2.8.19",
-    "@types/express": "^5.0.6",
+    "@types/express": "^4.17.21",
     "nodemon": "^3.0.0",
     "tsx": "^4.21.0",
     "typescript": "^6.0.3"
+  },
+  "overrides": {
+    "tsx": {
+      "esbuild": "0.28.1"
+    }
   }
 }

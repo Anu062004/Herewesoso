@@ -55,7 +55,7 @@ export default function KlinesClient({ initialSymbol }: { initialSymbol: string 
 
   const symbols = (markets.data?.markets || []).map((market) => market.symbol);
   const options = symbols.length > 0 ? symbols : FALLBACK_SYMBOLS;
-  const points = klines.data?.points || [];
+  const points = useMemo(() => klines.data?.points || [], [klines.data?.points]);
   const stats = useMemo(() => {
     const latest = points[points.length - 1] || null;
     const previous = points[points.length - 2] || null;
@@ -103,6 +103,7 @@ export default function KlinesClient({ initialSymbol }: { initialSymbol: string 
 
           <div className="flex flex-col gap-3 lg:flex-row lg:items-center">
             <select
+              aria-label="Kline market symbol"
               value={symbol}
               onChange={(event) => setSymbol(event.target.value)}
               className="h-9 rounded-md border border-[var(--border)] bg-[var(--bg-card)] px-3 text-[13px] text-[var(--text-1)] outline-none focus:border-[var(--brand)]"
@@ -143,6 +144,7 @@ export default function KlinesClient({ initialSymbol }: { initialSymbol: string 
             </div>
 
             <select
+              aria-label="Number of candles"
               value={limit}
               onChange={(event) => setLimit(Number(event.target.value))}
               className="h-9 rounded-md border border-[var(--border)] bg-[var(--bg-card)] px-3 text-[13px] text-[var(--text-1)] outline-none focus:border-[var(--brand)]"

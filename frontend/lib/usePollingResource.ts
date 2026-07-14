@@ -1,6 +1,7 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { useSharedNow } from '@/lib/useSharedNow';
 
 type PollingState = 'fresh' | 'stale' | 'error';
 
@@ -34,14 +35,21 @@ export function usePollingResource<T>({
   const [loading, setLoading] = useState(initialData === undefined);
   const [isFetching, setIsFetching] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [lastSuccessAt, setLastSuccessAt] = useState<number | null>(initialData ? Date.now() : null);
-  const [now, setNow] = useState(Date.now());
+  const [lastSuccessAt, setLastSuccessAt] = useState<number | null>(initialData !== undefined ? Date.now() : null);
+  const now = useSharedNow();
   const mountedRef = useRef(true);
   const fetcherRef = useRef(fetcher);
+  const dataRef = useRef(data);
+  const initialFetchRef = useRef(false);
+  const inFlightRef = useRef(false);
+  const failuresRef = useRef(0);
+  const nextAllowedAtRef = useRef(0);
 
   useEffect(() => {
     fetcherRef.current = fetcher;
   }, [fetcher]);
+
+  dataRef.current = data;
 
   useEffect(() => {
     mountedRef.current = true;
@@ -51,13 +59,15 @@ export function usePollingResource<T>({
     };
   }, []);
 
-  async function runFetch(silent = false) {
-    if (!enabled) {
+  const runFetch = useCallback(async (silent = false) => {
+    if (!enabled || inFlightRef.current || Date.now() < nextAllowedAtRef.current) {
       return;
     }
 
+    inFlightRef.current = true;
+
     if (!silent) {
-      setLoading(data === undefined);
+      setLoading(dataRef.current === undefined);
     }
 
     setIsFetching(true);
@@ -70,15 +80,21 @@ export function usePollingResource<T>({
       }
 
       setData(next);
+      dataRef.current = next;
       setError(null);
       setLastSuccessAt(Date.now());
+      failuresRef.current = 0;
+      nextAllowedAtRef.current = 0;
     } catch (fetchError) {
       if (!mountedRef.current) {
         return;
       }
 
       setError(fetchError instanceof Error ? fetchError.message : 'Request failed.');
+      failuresRef.current += 1;
+      nextAllowedAtRef.current = Date.now() + Math.min(intervalMs * 4, 1000 * 2 ** failuresRef.current);
     } finally {
+      inFlightRef.current = false;
       if (!mountedRef.current) {
         return;
       }
@@ -86,13 +102,14 @@ export function usePollingResource<T>({
       setLoading(false);
       setIsFetching(false);
     }
-  }
+  }, [enabled, intervalMs]);
 
   useEffect(() => {
-    if (initialData === undefined) {
+    if (enabled && !initialFetchRef.current && initialData === undefined) {
+      initialFetchRef.current = true;
       void runFetch();
     }
-  }, []);
+  }, [enabled, initialData, runFetch]);
 
   useEffect(() => {
     if (!enabled || !key) {
@@ -101,7 +118,7 @@ export function usePollingResource<T>({
 
     setError(null);
     void runFetch(true);
-  }, [key, enabled]);
+  }, [key, enabled, runFetch]);
 
   useEffect(() => {
     if (!enabled) {
@@ -109,19 +126,11 @@ export function usePollingResource<T>({
     }
 
     const interval = window.setInterval(() => {
-      void runFetch(true);
+      if (document.visibilityState === 'visible') void runFetch(true);
     }, intervalMs);
 
     return () => window.clearInterval(interval);
-  }, [enabled, intervalMs]);
-
-  useEffect(() => {
-    const interval = window.setInterval(() => {
-      setNow(Date.now());
-    }, 1000);
-
-    return () => window.clearInterval(interval);
-  }, []);
+  }, [enabled, intervalMs, runFetch]);
 
   const ageMs = lastSuccessAt ? now - lastSuccessAt : intervalMs;
   const nextPollInMs = lastSuccessAt ? Math.max(0, intervalMs - ageMs) : intervalMs;

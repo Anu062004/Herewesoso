@@ -10,10 +10,11 @@ import type {
 } from '../types/domain';
 
 import supabaseService = require('./supabase');
+import { isProduction } from '../config/env';
 
-const { safeInsert, safeSelect } = supabaseService;
+const { safeCount, safeInsert, safeSelect, safeUpsert } = supabaseService;
 
-const DEFAULT_MODEL_VERSION = process.env.NARRATIVE_MODEL_VERSION || 'narrative-v1.0.0';
+const DEFAULT_MODEL_VERSION = process.env.NARRATIVE_MODEL_VERSION || 'narrative-v2.0.0';
 const OUTCOME_LIMIT = 250;
 
 type HorizonKey = 'forward_return_1h' | 'forward_return_6h' | 'forward_return_24h' | 'forward_return_7d';
@@ -28,6 +29,8 @@ type PerformanceSnapshotRow = {
   created_at?: string;
   metric_date?: string;
   summary?: Record<string, unknown> | null;
+  model_version?: string;
+  wallet_address?: string;
 };
 
 function toNumber(value: unknown): number | null {
@@ -51,35 +54,30 @@ function round(value: number | null, digits = 2): number | null {
   return Math.round(value * factor) / factor;
 }
 
-function calculateMaxDrawdown(outcomes: SignalOutcomeRow[]): number | null {
-  const ordered = [...outcomes]
-    .filter((row) => typeof row.forward_return_24h === 'number')
-    .sort((left, right) => {
-      const leftTime = new Date(left.resolved_at || left.created_at || left.signal_at).getTime();
-      const rightTime = new Date(right.resolved_at || right.created_at || right.signal_at).getTime();
-      return leftTime - rightTime;
-    });
-
-  if (ordered.length === 0) return null;
-
-  let equity = 1;
-  let peak = 1;
-  let maxDrawdown = 0;
-
-  for (const row of ordered) {
-    equity *= 1 + Number(row.forward_return_24h || 0) / 100;
-    peak = Math.max(peak, equity);
-    maxDrawdown = Math.max(maxDrawdown, (peak - equity) / peak);
-  }
-
-  return round(maxDrawdown * 100, 2);
+function calculateMaxAdverseMove(outcomes: SignalOutcomeRow[]): number | null {
+  const moves = outcomes
+    .map((row) => toNumber(row.max_drawdown_24h))
+    .filter((value): value is number => value !== null && value >= 0);
+  return moves.length > 0 ? round(Math.max(...moves), 2) : null;
 }
 
 function hitRate(outcomes: SignalOutcomeRow[]): number | null {
-  const resolved = outcomes.filter((row) => typeof row.forward_return_24h === 'number');
-  if (resolved.length === 0) return null;
-  const wins = resolved.filter((row) => Number(row.forward_return_24h) > 0).length;
-  return round((wins / resolved.length) * 100, 1);
+  const directional = outcomes
+    .map((row) => {
+      if (typeof row.directional_hit === 'boolean') return row.directional_hit;
+      const forwardReturn = toNumber(row.forward_return_24h);
+      if (forwardReturn === null) return null;
+
+      const metric = toNumber(row.alpha_24h) ?? forwardReturn;
+      if (row.signal === 'STRONG_BUY' || row.signal === 'BUY') return metric > 0;
+      if (row.signal === 'AVOID') return metric < 0;
+      return null;
+    })
+    .filter((value): value is boolean => typeof value === 'boolean');
+
+  if (directional.length === 0) return null;
+  const wins = directional.filter(Boolean).length;
+  return round((wins / directional.length) * 100, 1);
 }
 
 function summarizeBySignal(outcomes: SignalOutcomeRow[]) {
@@ -87,9 +85,9 @@ function summarizeBySignal(outcomes: SignalOutcomeRow[]) {
 
   return buckets.map((signal) => {
     const rows = outcomes.filter((row) => row.signal === signal);
-    const resolved = rows.filter((row) => typeof row.forward_return_24h === 'number');
-    const avg24h = average(resolved.map((row) => row.forward_return_24h));
-    const avgAlpha = average(resolved.map((row) => row.alpha_24h));
+    const resolved = rows.filter((row) => toNumber(row.forward_return_24h) !== null);
+    const avg24h = average(resolved.map((row) => toNumber(row.forward_return_24h)));
+    const avgAlpha = average(resolved.map((row) => toNumber(row.alpha_24h)));
 
     return {
       signal,
@@ -112,8 +110,8 @@ function summarizeHorizons(outcomes: SignalOutcomeRow[]) {
 
   return horizonKeys.map(({ key, label }) => ({
     horizon: label,
-    avgReturn: round(average(outcomes.map((row) => row[key])), 2),
-    sampleSize: outcomes.filter((row) => typeof row[key] === 'number').length
+    avgReturn: round(average(outcomes.map((row) => toNumber(row[key]))), 2),
+    sampleSize: outcomes.filter((row) => toNumber(row[key]) !== null).length
   }));
 }
 
@@ -142,7 +140,7 @@ function summarizeAlerts(alerts: AlertRow[], risks: PositionRiskSnapshot[]) {
 
 function summarizeExecutions(executions: ExecutionActionRow[]) {
   const submitted = executions.filter((execution) =>
-    ['SUBMITTED', 'SUCCEEDED', 'FAILED'].includes(execution.status)
+    ['SUBMITTED', 'UNKNOWN', 'SUCCEEDED', 'FAILED'].includes(execution.status)
   );
   const succeeded = executions.filter((execution) => execution.status === 'SUCCEEDED');
   const rejected = executions.filter((execution) => execution.status === 'REJECTED');
@@ -159,7 +157,7 @@ function summarizeExecutions(executions: ExecutionActionRow[]) {
 function latestModelVersions(outcomes: SignalOutcomeRow[], signals: NarrativeScoreRow[]) {
   const versions = new Set<string>();
   outcomes.forEach((outcome) => versions.add(outcome.model_version || DEFAULT_MODEL_VERSION));
-  if (signals.length > 0) versions.add(DEFAULT_MODEL_VERSION);
+  signals.forEach((signal) => versions.add(signal.model_version || DEFAULT_MODEL_VERSION));
   return [...versions].slice(0, 5);
 }
 
@@ -269,7 +267,7 @@ async function recordPortfolioSnapshot(
           : 'No portfolio-level action required.';
 
   const row: Omit<PortfolioSnapshotRow, 'id' | 'created_at'> = {
-    wallet_address: walletAddress,
+    wallet_address: walletAddress.toLowerCase(),
     account_value: account?.accountValue || 0,
     available_margin: account?.availableMargin || 0,
     position_count: positions.length,
@@ -291,55 +289,81 @@ async function recordPortfolioSnapshot(
   return safeInsert('portfolio_snapshots', row);
 }
 
-async function getPerformanceReport() {
+async function getPerformanceReport(walletAddress?: string | null) {
+  const normalizedWallet = walletAddress?.toLowerCase() || null;
   const [
-    { data: outcomes },
-    { data: snapshots },
-    { data: alerts },
-    { data: risks },
-    { data: executions },
-    { data: signals },
-    { data: portfolios }
+    { data: outcomes, error: outcomesError },
+    { data: snapshots, error: snapshotsError },
+    { data: alerts, error: alertsError },
+    { data: risks, error: risksError },
+    { data: executions, error: executionsError },
+    { data: signals, error: signalsError },
+    { data: portfolios, error: portfoliosError },
+    totalSignalCount
   ] = await Promise.all([
     safeSelect<SignalOutcomeRow>('signal_outcomes', (query: any) =>
       query.order('signal_at', { ascending: false }).limit(OUTCOME_LIMIT)
     ),
-    safeSelect<PerformanceSnapshotRow>('performance_snapshots', (query: any) =>
-      query.order('created_at', { ascending: false }).limit(30)
-    ),
-    safeSelect<AlertRow>('alerts', (query: any) => query.order('created_at', { ascending: false }).limit(250)),
-    safeSelect<PositionRiskSnapshot>('position_risks', (query: any) =>
-      query.order('created_at', { ascending: false }).limit(250)
-    ),
-    safeSelect<ExecutionActionRow>('execution_actions', (query: any) =>
-      query.order('created_at', { ascending: false }).limit(100)
-    ),
+    safeSelect<PerformanceSnapshotRow>('performance_snapshots', (query: any) => {
+      let next = query.order('created_at', { ascending: false }).limit(30);
+      if (normalizedWallet) next = next.eq('wallet_address', normalizedWallet);
+      return next;
+    }),
+    safeSelect<AlertRow>('alerts', (query: any) => {
+      let next = query.order('created_at', { ascending: false }).limit(250);
+      if (normalizedWallet) next = next.or(`wallet_address.is.null,wallet_address.eq.${normalizedWallet}`);
+      return next;
+    }),
+    safeSelect<PositionRiskSnapshot>('position_risks', (query: any) => {
+      let next = query.order('created_at', { ascending: false }).limit(250);
+      if (normalizedWallet) next = next.eq('wallet_address', normalizedWallet);
+      return next;
+    }),
+    safeSelect<ExecutionActionRow>('execution_actions', (query: any) => {
+      let next = query.order('created_at', { ascending: false }).limit(100);
+      if (normalizedWallet) next = next.eq('requested_by', normalizedWallet);
+      return next;
+    }),
     safeSelect<NarrativeScoreRow>('narrative_scores', (query: any) =>
       query.order('created_at', { ascending: false }).limit(64)
     ),
-    safeSelect<PortfolioSnapshotRow>('portfolio_snapshots', (query: any) =>
-      query.order('created_at', { ascending: false }).limit(20)
-    )
+    safeSelect<PortfolioSnapshotRow>('portfolio_snapshots', (query: any) => {
+      let next = query.order('created_at', { ascending: false }).limit(20);
+      if (normalizedWallet) next = next.eq('wallet_address', normalizedWallet);
+      return next;
+    }),
+    safeCount('signal_outcomes')
   ]);
 
-  const resolvedOutcomes = outcomes.filter((outcome) => typeof outcome.forward_return_24h === 'number');
-  const pendingSignals = outcomes.filter((outcome) => outcome.outcome_status === 'PENDING').length;
-  const avg24h = average(resolvedOutcomes.map((outcome) => outcome.forward_return_24h));
-  const avgBenchmark24h = average(resolvedOutcomes.map((outcome) => outcome.benchmark_return_24h));
-  const avgAlpha24h = average(resolvedOutcomes.map((outcome) => outcome.alpha_24h));
+  if (isProduction() && (
+    outcomesError || snapshotsError || alertsError || risksError || executionsError || signalsError || portfoliosError || totalSignalCount === null
+  )) {
+    throw new Error('Performance evidence storage is unavailable.');
+  }
+
+  const resolvedOutcomes = outcomes.filter((outcome) => toNumber(outcome.forward_return_24h) !== null);
+  const pendingSignals = outcomes.filter((outcome) =>
+    ['PENDING', 'PARTIAL', 'INSUFFICIENT_DATA'].includes(outcome.outcome_status)
+  ).length;
+  const avg24h = average(resolvedOutcomes.map((outcome) => toNumber(outcome.forward_return_24h)));
+  const avgBenchmark24h = average(resolvedOutcomes.map((outcome) => toNumber(outcome.benchmark_return_24h)));
+  const avgAlpha24h = average(resolvedOutcomes.map((outcome) => toNumber(outcome.alpha_24h)));
   const latestPortfolio = portfolios[0] || null;
 
   return {
     generatedAt: new Date().toISOString(),
     summary: {
-      totalSignals: outcomes.length,
+      totalSignals: totalSignalCount ?? outcomes.length,
+      sampledSignals: outcomes.length,
       validatedSignals: resolvedOutcomes.length,
       pendingSignals,
       winRate: hitRate(outcomes),
       avgReturn24h: round(avg24h, 2),
       benchmarkReturn24h: round(avgBenchmark24h, 2),
       alpha24h: round(avgAlpha24h, 2),
-      maxDrawdown24h: calculateMaxDrawdown(outcomes),
+      maxDrawdown24h: calculateMaxAdverseMove(outcomes),
+      maxDrawdownMethodology: 'Worst direction-adjusted intraday adverse price move within 24h.',
+      sampleWindow: `Latest ${OUTCOME_LIMIT} signal outcomes`,
       modelVersions: latestModelVersions(outcomes, signals),
       readiness: readiness(resolvedOutcomes.length, pendingSignals)
     },
@@ -354,11 +378,14 @@ async function getPerformanceReport() {
   };
 }
 
-async function recordPerformanceSnapshot() {
-  const report = await getPerformanceReport();
+async function recordPerformanceSnapshot(walletAddress?: string | null) {
+  const normalizedWallet = String(walletAddress || process.env.USER_WALLET_ADDRESS || process.env.SODEX_ACCOUNT_ADDRESS || 'global').toLowerCase();
+  const report = await getPerformanceReport(normalizedWallet === 'global' ? null : normalizedWallet);
 
-  return safeInsert('performance_snapshots', {
+  return safeUpsert('performance_snapshots', {
     metric_date: new Date().toISOString().split('T')[0],
+    model_version: DEFAULT_MODEL_VERSION,
+    wallet_address: normalizedWallet,
     summary: report.summary,
     data: {
       bySignal: report.bySignal,
@@ -366,7 +393,7 @@ async function recordPerformanceSnapshot() {
       alertValidation: report.alertValidation,
       execution: report.execution
     }
-  });
+  }, 'metric_date,model_version,wallet_address');
 }
 
 export = {

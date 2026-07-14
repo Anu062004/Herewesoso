@@ -7,6 +7,7 @@ import memoryStore = require('../services/memoryStore');
 import walletAuth = require('../services/walletAuth');
 import sodex = require('../services/sodex');
 import { assetsForSector } from '../services/narrativeEngine';
+import { isProduction } from '../config/env';
 
 const { safeSelect } = supabaseService;
 
@@ -51,7 +52,10 @@ router.get('/', async (req: Request, res: Response) => {
     query.order('created_at', { ascending: false }).limit(16)
   );
 
-  const rows = !error && data && data.length > 0 ? data : memoryStore.getSignals() as NarrativeScoreRow[];
+  if (isProduction() && error) return res.status(503).json({ error: 'Signal storage is temporarily unavailable.' });
+  const rows = isProduction()
+    ? data
+    : (!error && data && data.length > 0 ? data : memoryStore.getSignals() as NarrativeScoreRow[]);
   try {
     const enriched = await sodex.getEnrichedPositions(session.address, session.network);
     return res.json(withPortfolioRelevance(rows, enriched.positions || []));

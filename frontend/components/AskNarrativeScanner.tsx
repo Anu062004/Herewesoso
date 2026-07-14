@@ -47,9 +47,9 @@ export default function AskNarrativeScanner() {
           ))}
         </div>
         <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_150px_150px_auto]">
-          <input value={question} onChange={(event) => setQuestion(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') void submit(); }} placeholder="Ask about a narrative, asset, allocation, portfolio fit, or invalidation..." className="h-10 rounded-md border border-[var(--border)] bg-[var(--bg-panel)] px-3 text-[13px] text-[var(--text-1)] outline-none focus:border-[var(--brand)]" />
+          <input aria-label="Narrative question" value={question} onChange={(event) => setQuestion(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') void submit(); }} placeholder="Ask about a narrative, asset, allocation, portfolio fit, or invalidation..." className="h-10 rounded-md border border-[var(--border)] bg-[var(--bg-panel)] px-3 text-[13px] text-[var(--text-1)] outline-none focus:border-[var(--brand)]" />
           <input type="number" min="0" max="1000000" value={investableAmount} onChange={(event) => setInvestableAmount(Number(event.target.value))} aria-label="Investable amount" className="h-10 rounded-md border border-[var(--border)] bg-[var(--bg-panel)] px-3 text-[13px] text-[var(--text-1)] outline-none focus:border-[var(--brand)]" />
-          <select value={riskMode} onChange={(event) => setRiskMode(event.target.value as typeof riskMode)} className="h-10 rounded-md border border-[var(--border)] bg-[var(--bg-panel)] px-3 text-[13px] text-[var(--text-1)] outline-none focus:border-[var(--brand)]">
+          <select aria-label="Risk mode" value={riskMode} onChange={(event) => setRiskMode(event.target.value as typeof riskMode)} className="h-10 rounded-md border border-[var(--border)] bg-[var(--bg-panel)] px-3 text-[13px] text-[var(--text-1)] outline-none focus:border-[var(--brand)]">
             <option value="conservative">Conservative</option><option value="balanced">Balanced</option><option value="aggressive">Aggressive</option>
           </select>
           <Button tone="primary" disabled={loading || !question.trim()} onClick={() => void submit()}>{loading ? 'Analyzing...' : 'Ask Scanner'}</Button>

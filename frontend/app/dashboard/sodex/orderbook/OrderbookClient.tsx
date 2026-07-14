@@ -60,6 +60,7 @@ export default function OrderbookClient({ initialSymbol }: { initialSymbol: stri
           Klines
         </Link>
         <select
+          aria-label="Orderbook market symbol"
           value={symbol}
           onChange={(event) => setSymbol(event.target.value)}
           className="h-9 rounded-md border border-[var(--border)] bg-[var(--bg-card)] px-3 text-[13px] text-[var(--text-1)]"
