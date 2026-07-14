@@ -672,7 +672,13 @@ The frontend deploys to Vercel as a Next.js app. Set `NEXT_PUBLIC_API_BASE_URL` 
 
 The current production backend is available at `https://35-175-76-98.sslip.io`. Valid HTTPS deployment environment variables override this repository default, so it can be replaced with a custom API domain without another code change. Legacy HTTP values are ignored in production.
 
-### Backend (Vercel Serverless)
+### Backend (EC2 Production)
+
+The active backend runs on the `sentinel-finance-backend` EC2 instance under PM2, behind Nginx at `https://35-175-76-98.sslip.io`. The instance uses a stable Elastic IP, Let's Encrypt renewal through `certbot.timer`, and exposes only HTTP redirect, HTTPS, and operator-restricted SSH at the security-group boundary. Port 3001 is available only through the local Nginx reverse proxy.
+
+The EC2 process runs the in-process scheduler and one opted-in Telegram long-polling worker. Production execution remains explicitly set to `dry_run` until a controlled testnet or mainnet-canary rollout is approved.
+
+### Backend (Vercel-Compatible Alternative)
 
 The backend includes `backend/vercel.json` with:
 
@@ -680,7 +686,7 @@ The backend includes `backend/vercel.json` with:
 - Cron: `/api/trigger` every 30 minutes
 - Cron: `/api/daily-summary` at 08:00 UTC
 
-On Vercel, the in-process scheduler is disabled (`VERCEL=1`). Agent cycles are driven by cron instead.
+On a Vercel backend deployment, the in-process scheduler is disabled (`VERCEL=1`). Agent cycles are driven by cron instead.
 
 Set the variables from `.env.example` in your deployment environment. Vercel sends `Authorization: Bearer $CRON_SECRET` to cron routes. Production startup fails when session, cron, origin, operator, or Supabase service-role settings are missing. Do not upload `.env` or private keys to GitHub.
 
