@@ -1,16 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-
-function backendUrl(): string {
-  const configured = process.env.API_BASE_URL || process.env.NEXT_PUBLIC_API_BASE_URL;
-  if (configured) {
-    if (process.env.NODE_ENV === 'production' && !configured.startsWith('https://')) {
-      throw new Error('API_BASE_URL must use HTTPS in production.');
-    }
-    return configured.replace(/\/$/, '');
-  }
-  if (process.env.NODE_ENV !== 'production') return 'http://localhost:3001';
-  throw new Error('API_BASE_URL is required in production.');
-}
+import { backendBaseUrl } from '@/lib/backendConfig';
 
 const MUTATING_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
 const MAX_BODY_BYTES = 64 * 1024;
@@ -46,7 +35,7 @@ async function handler(req: NextRequest, { params }: { params: Promise<{ path: s
   }
 
   try {
-    const url = `${backendUrl()}/api/${path}${search}`;
+    const url = `${backendBaseUrl()}/api/${path}${search}`;
     const upstream = await fetch(url, {
       method: req.method,
       headers: {

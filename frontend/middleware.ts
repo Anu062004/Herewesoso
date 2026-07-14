@@ -1,14 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { backendBaseUrl } from '@/lib/backendConfig';
 
 const SESSION_COOKIE = 'gold_grith_wallet_session';
 const CONNECT_PATH = '/dashboard/sodex/connect';
-
-function backendUrl(): string | null {
-  const value = process.env.API_BASE_URL || process.env.NEXT_PUBLIC_API_BASE_URL;
-  if (!value) return process.env.NODE_ENV === 'production' ? null : 'http://localhost:3001';
-  if (process.env.NODE_ENV === 'production' && !value.startsWith('https://')) return null;
-  return value.replace(/\/$/, '');
-}
 
 export async function middleware(request: NextRequest) {
   const { pathname, search } = request.nextUrl;
@@ -17,7 +11,8 @@ export async function middleware(request: NextRequest) {
     return NextResponse.next();
   }
 
-  const backend = backendUrl();
+  let backend: string | null = null;
+  try { backend = backendBaseUrl(); } catch {}
   const cookie = request.headers.get('cookie');
   if (backend && cookie) {
     try {
