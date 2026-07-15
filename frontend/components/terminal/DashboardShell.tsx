@@ -119,12 +119,13 @@ function TapeItem({
 export default function DashboardShell({ children }: DashboardShellProps) {
   const pathname = usePathname();
   const router = useRouter();
+  const isSodexConnectRoute = pathname === '/dashboard/sodex/connect';
   const sodexConnection = useSodexConnection();
   const [searchTerm, setSearchTerm] = useState('');
   const [moreOpen, setMoreOpen] = useState(false);
   const moreMenuRef = useRef<HTMLDivElement>(null);
   const [telegramOpen, setTelegramOpen] = useState(false);
-  const [sessionReady, setSessionReady] = useState(pathname === '/dashboard/sodex/connect');
+  const [sessionReady, setSessionReady] = useState(isSodexConnectRoute);
   const [actionModal, setActionModal] = useState<{
     title: string;
     description: string;
@@ -156,23 +157,33 @@ export default function DashboardShell({ children }: DashboardShellProps) {
   }, [pathname]);
 
   useEffect(() => {
-    if (pathname === '/dashboard/sodex/connect') {
+    if (isSodexConnectRoute) {
       setSessionReady(true);
       return;
     }
+
+    let isCurrentRequest = true;
 
     setSessionReady(false);
 
     void fetchSodexSession()
       .then((session) => {
+        if (!isCurrentRequest) return;
+
         saveSodexConnection(session);
         setSessionReady(true);
       })
       .catch(() => {
+        if (!isCurrentRequest) return;
+
         clearSodexConnection();
         router.replace('/dashboard/sodex/connect');
       });
-  }, [pathname, router]);
+
+    return () => {
+      isCurrentRequest = false;
+    };
+  }, [isSodexConnectRoute, router]);
 
   useEffect(() => {
     if (!moreOpen) return;
@@ -207,7 +218,7 @@ export default function DashboardShell({ children }: DashboardShellProps) {
     }
   }
 
-  if (pathname === '/dashboard/sodex/connect') {
+  if (isSodexConnectRoute) {
     return (
       <div className="min-h-screen bg-[var(--bg-app)]">
         <header className="border-b border-[var(--border)] bg-[var(--bg-surface)]/95">
