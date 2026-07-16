@@ -4,6 +4,7 @@ import { ethers } from 'ethers';
 
 import nonceManager = require('../services/sodexNonceManager');
 import sodexSigner = require('../services/sodexSigner');
+import sodexTrader = require('../services/sodexTrader');
 import walletAuth = require('../services/walletAuth');
 
 const PRIVATE_KEY = '0x2222222222222222222222222222222222222222222222222222222222222222';
@@ -51,6 +52,30 @@ test('computePayloadHash hashes compact cancelOrder action JSON', () => {
   );
 
   assert.equal(sodexSigner.computePayloadHash('cancelOrder', params), expected);
+});
+
+test('perps order builder preserves the official SoDEX Go struct field order', () => {
+  const order = sodexTrader.buildOrderPayload({
+    symbol: 'BTC-USD',
+    side: 'SELL',
+    type: 'LIMIT',
+    timeInForce: 'IOC',
+    price: '100000.0',
+    quantity: '0.001',
+    reduceOnly: true
+  });
+
+  assert.deepEqual(Object.keys(order), [
+    'clOrdID',
+    'modifier',
+    'side',
+    'type',
+    'timeInForce',
+    'price',
+    'quantity',
+    'reduceOnly',
+    'positionSide'
+  ]);
 });
 
 test('signSodexAction signs cancelOrder actions for DELETE /trade/orders', async () => {
@@ -109,6 +134,32 @@ test('signSodexAction uses the SoDEX mainnet domain for mainnet requests', async
   assert.equal(sodexSigner.recoverSodexSigner(signed), wallet.address);
 });
 
+test('prepareSodexAction creates browser-signable typed data for an arbitrary wallet', async () => {
+  const wallet = ethers.Wallet.createRandom();
+  const prepared = sodexSigner.prepareSodexAction({
+    signerAddress: wallet.address,
+    marketType: 'perps',
+    actionType: 'newOrder',
+    params: sampleOrderRequest(),
+    baseUrl: 'https://testnet-gw.sodex.dev/api/v1/perps',
+    nonce: 1760373925010n
+  });
+  const signature = await wallet.signTypedData(
+    prepared.domain,
+    prepared.typedData.types,
+    prepared.typedData.message
+  );
+
+  assert.equal(prepared.domain.name, 'futures');
+  assert.equal(prepared.domain.chainId, 138565);
+  assert.equal(prepared.nonce, '1760373925010');
+  assert.equal(
+    ethers.verifyTypedData(prepared.domain, prepared.typedData.types, prepared.typedData.message, signature),
+    wallet.address
+  );
+  assert.equal((sodexSigner.toSodexHeaderSignature(signature).length - 2) / 2, 66);
+});
+
 test('nonce manager increases monotonically per signer', () => {
   nonceManager.resetNonceState();
 
@@ -140,6 +191,22 @@ test('wallet sessions reject tampering and preserve authenticated identity', () 
   assert.equal(session?.address, wallet.address);
   assert.equal(session?.network, 'testnet');
   assert.equal(walletAuth.verifySessionToken(`${token}tampered`), null);
+});
+
+test('wallet action intents are short-lived and reject payload tampering', () => {
+  const token = walletAuth.createActionIntentToken({
+    version: 1,
+    wallet: '0x2222222222222222222222222222222222222222',
+    network: 'testnet',
+    prepared: { payloadHash: `0x${'ab'.repeat(32)}` }
+  });
+  const intent = walletAuth.verifyActionIntentToken(token);
+  const [payload, signature] = token.split('.');
+
+  assert.equal(intent?.wallet, '0x2222222222222222222222222222222222222222');
+  assert.equal(intent?.network, 'testnet');
+  assert.equal(walletAuth.verifyActionIntentToken(`${payload}a.${signature}`), null);
+  assert.equal(walletAuth.verifyActionIntentToken(`${token}tampered`), null);
 });
 
 export {};

@@ -19,6 +19,7 @@ interface WalletChallenge extends WalletSession {
 }
 
 const CHALLENGE_TTL_MS = 5 * 60 * 1000;
+const ACTION_INTENT_TTL_MS = 2 * 60 * 1000;
 const configuredSessionTtlMs = Number(process.env.SODEX_SESSION_TTL_MS || 24 * 60 * 60 * 1000);
 const SESSION_TTL_MS = Number.isFinite(configuredSessionTtlMs)
   ? Math.max(5 * 60 * 1000, Math.min(7 * 24 * 60 * 60 * 1000, configuredSessionTtlMs))
@@ -40,6 +41,12 @@ function encode(value: string | Buffer): string {
 
 function sign(payload: string): string {
   return crypto.createHmac('sha256', sessionSecret).update(payload).digest('base64url');
+}
+
+function signatureMatches(actual: string, expected: string): boolean {
+  const actualBuffer = Buffer.from(actual);
+  const expectedBuffer = Buffer.from(expected);
+  return actualBuffer.length === expectedBuffer.length && crypto.timingSafeEqual(actualBuffer, expectedBuffer);
 }
 
 function parseCookies(header: string | undefined): Record<string, string> {
@@ -155,9 +162,7 @@ export function verifySessionToken(token: string | undefined): WalletSession | n
   if (!payload || !signature || extra) return null;
 
   const expected = sign(payload);
-  const actualBuffer = Buffer.from(signature);
-  const expectedBuffer = Buffer.from(expected);
-  if (actualBuffer.length !== expectedBuffer.length || !crypto.timingSafeEqual(actualBuffer, expectedBuffer)) return null;
+  if (!signatureMatches(signature, expected)) return null;
 
   try {
     const session = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8')) as WalletSession;
@@ -170,6 +175,38 @@ export function verifySessionToken(token: string | undefined): WalletSession | n
       && session.expiresAt - session.issuedAt <= SESSION_TTL_MS;
     if (!validAddress || !['testnet', 'mainnet'].includes(session.network) || !validTimes) return null;
     return session;
+  } catch {
+    return null;
+  }
+}
+
+export function createActionIntentToken(intent: Record<string, unknown>): string {
+  const issuedAt = Date.now();
+  const payload = encode(JSON.stringify({
+    ...intent,
+    issuedAt,
+    expiresAt: issuedAt + ACTION_INTENT_TTL_MS
+  }));
+  return `${payload}.${sign(`action-intent.${payload}`)}`;
+}
+
+export function verifyActionIntentToken(token: string | undefined): Record<string, unknown> | null {
+  if (!token) return null;
+  const [payload, signature, extra] = token.split('.');
+  if (!payload || !signature || extra) return null;
+  if (!signatureMatches(signature, sign(`action-intent.${payload}`))) return null;
+
+  try {
+    const intent = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8')) as Record<string, unknown>;
+    const issuedAt = Number(intent.issuedAt);
+    const expiresAt = Number(intent.expiresAt);
+    const now = Date.now();
+    const validTimes = Number.isFinite(issuedAt)
+      && Number.isFinite(expiresAt)
+      && issuedAt <= now + 30_000
+      && expiresAt > now
+      && expiresAt - issuedAt === ACTION_INTENT_TTL_MS;
+    return validTimes ? intent : null;
   } catch {
     return null;
   }
@@ -198,10 +235,12 @@ export const walletAuth = {
   buildLoginMessage,
   clearSessionCookie,
   consumeChallenge,
+  createActionIntentToken,
   createChallenge,
   createSession,
   getWalletSession,
   sessionCookie,
+  verifyActionIntentToken,
   verifySessionToken
 };
 

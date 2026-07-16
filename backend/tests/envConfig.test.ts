@@ -70,9 +70,18 @@ test('production environment rejects insecure origins, wallets, and shared secre
   });
 });
 
-test('mainnet canary requires a managed provider and signing key', () => {
+test('mainnet canary permits connected-wallet signing without a backend key', () => {
+  withEnv({ ...productionEnv, EXECUTION_MODE: 'mainnet_canary', KEY_PROVIDER: 'disabled' }, () => {
+    assert.doesNotThrow(assertProductionEnvironment);
+  });
+});
+
+test('mainnet server signing requires a managed provider and signing key', () => {
   withEnv({ ...productionEnv, EXECUTION_MODE: 'mainnet_canary', KEY_PROVIDER: 'env' }, () => {
-    assert.throws(assertProductionEnvironment, /KEY_PROVIDER=managed|deployment-managed signing key/);
+    assert.throws(assertProductionEnvironment, /KEY_PROVIDER=managed/);
+  });
+  withEnv({ ...productionEnv, EXECUTION_MODE: 'mainnet_canary', KEY_PROVIDER: 'managed' }, () => {
+    assert.throws(assertProductionEnvironment, /deployment-managed signing key/);
   });
 });
 

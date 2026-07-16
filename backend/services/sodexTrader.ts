@@ -114,6 +114,31 @@ type CancelOrderRequest = {
 
 type SignedRequestBody = NewOrderRequest | UpdateLeverageRequest | CancelOrderRequest;
 
+export interface WalletPreparedAction {
+  actionType: SignedActionType;
+  endpoint: '/trade/orders' | '/trade/leverage';
+  method: 'POST' | 'DELETE';
+  body: SignedRequestBody;
+  nonce: string;
+  payloadHash: string;
+  domain: {
+    name: 'spot' | 'futures';
+    version: '1';
+    chainId: number;
+    verifyingContract: string;
+  };
+  typedData: {
+    types: {
+      ExchangeAction: Array<{ name: 'payloadHash' | 'nonce'; type: 'bytes32' | 'uint64' }>;
+    };
+    primaryType: 'ExchangeAction';
+    message: {
+      payloadHash: string;
+      nonce: string;
+    };
+  };
+}
+
 function normalizeAddress(value: string): string {
   return value.trim().toLowerCase();
 }
@@ -371,6 +396,35 @@ async function resolveTradingContext(wallet: SodexWallet, symbol: string, baseUr
   };
 }
 
+async function resolveConnectedWalletContext(
+  accountAddress: string,
+  symbol: string,
+  baseUrl: string
+): Promise<TradingContext> {
+  const [stateResponse, symbolResponse] = await Promise.all([
+    client.get<PerpsRestResponse<PerpsStateResponse['data']>>(`${baseUrl}/accounts/${accountAddress}/state`),
+    client.get<PerpsRestResponse<PerpsSymbolResponse['data']>>(`${baseUrl}/markets/symbols`, {
+      params: { symbol }
+    })
+  ]);
+  const state = stateResponse.data?.data;
+  const symbolRecord = (symbolResponse.data?.data || []).find((entry) => entry?.name === symbol);
+
+  if (!symbolRecord?.id) {
+    throw new Error(`Could not resolve SoDEX symbol ID for ${symbol}.`);
+  }
+
+  const symbolConfig =
+    state?.S?.find((entry) => entry?.s === symbol) || state?.P?.find((entry) => entry?.s === symbol);
+
+  return {
+    accountID: parseRequiredNumber(state?.aid, 'account ID'),
+    symbolID: parseRequiredNumber(symbolRecord.id, 'symbol ID'),
+    marginMode: typeof symbolConfig?.m === 'number' ? symbolConfig.m : 2,
+    accountAddress
+  };
+}
+
 async function fetchClosePricing(symbol: string, baseUrl: string): Promise<{
   tickSize: string;
   markPrice: number;
@@ -489,27 +543,89 @@ async function postSigned<T>(
   return responseData;
 }
 
-function buildOrderPayload(params: PlaceOrderParams): SignedOrderPayload {
+function prepareWalletRequest(
+  accountAddress: string,
+  actionType: SignedActionType,
+  endpoint: WalletPreparedAction['endpoint'],
+  body: SignedRequestBody,
+  baseUrl: string,
+  method: WalletPreparedAction['method'] = 'POST'
+): WalletPreparedAction {
+  const prepared = sodexSigner.prepareSodexAction({
+    signerAddress: accountAddress,
+    marketType: 'perps',
+    actionType,
+    params: body,
+    baseUrl
+  });
+
+  return {
+    actionType,
+    endpoint,
+    method,
+    body,
+    ...prepared
+  };
+}
+
+export async function submitWalletPreparedAction(
+  prepared: WalletPreparedAction,
+  rawSignature: string,
+  signerAddress: string
+): Promise<PerpsRestResponse<unknown>> {
+  const signedHeaders: Record<string, string> = {
+    'Content-Type': 'application/json',
+    Accept: 'application/json',
+    'X-API-Sign': sodexSigner.toSodexHeaderSignature(rawSignature),
+    'X-API-Nonce': prepared.nonce,
+    'X-API-Chain': String(prepared.domain.chainId)
+  };
+  const network: SodexTradingNetwork = prepared.domain.chainId === 286623 ? 'mainnet' : 'testnet';
+  const response = await fetch(`${perpsBase(network)}${prepared.endpoint}`, {
+    method: prepared.method,
+    headers: signedHeaders,
+    body: JSON.stringify(prepared.body)
+  });
+  const text = await response.text();
+  let responseData: PerpsRestResponse<unknown>;
+
+  try {
+    responseData = (text ? JSON.parse(text) : {}) as PerpsRestResponse<unknown>;
+  } catch {
+    responseData = { error: response.statusText || 'SoDEX returned an invalid response.' };
+  }
+
+  (responseData as PerpsRestResponse<unknown> & { signed?: Record<string, unknown> }).signed = {
+    payloadHash: prepared.payloadHash,
+    nonce: prepared.nonce,
+    chainId: prepared.domain.chainId,
+    signerAddress,
+    actionType: prepared.actionType
+  };
+
+  if (!response.ok) {
+    const error: any = new Error(responseData.error || response.statusText || 'SoDEX signed request failed.');
+    error.response = { status: response.status, data: responseData };
+    throw error;
+  }
+
+  return responseData;
+}
+
+export function buildOrderPayload(params: PlaceOrderParams): SignedOrderPayload {
+  const price = trimToNull(params.price);
+  const quantity = trimToNull(params.quantity);
   const payload: SignedOrderPayload = {
     clOrdID: createClientOrderId(params.symbol),
     modifier: 1,
     side: params.side === 'BUY' ? 1 : 2,
     type: params.type === 'MARKET' ? 2 : 1,
     timeInForce: timeInForceCode(params.timeInForce, params.type),
+    ...(price ? { price } : {}),
+    ...(quantity ? { quantity } : {}),
     reduceOnly: Boolean(params.reduceOnly),
     positionSide: 1
   };
-
-  const price = trimToNull(params.price);
-  const quantity = trimToNull(params.quantity);
-
-  if (price) {
-    payload.price = price;
-  }
-
-  if (quantity) {
-    payload.quantity = quantity;
-  }
 
   return payload;
 }
@@ -620,6 +736,85 @@ export interface OrderResult {
   orderId?: string;
   message: string;
   raw?: unknown;
+}
+
+export async function prepareWalletClosePosition(
+  accountAddress: string,
+  symbol: string,
+  network: SodexTradingNetwork = 'testnet'
+): Promise<WalletPreparedAction> {
+  const baseUrl = perpsBase(network);
+  const [context, enriched] = await Promise.all([
+    resolveConnectedWalletContext(accountAddress, symbol, baseUrl),
+    require('./sodex').getEnrichedPositions(accountAddress, network)
+  ]);
+  const position = (enriched.positions || []).find((entry: any) =>
+    String(entry.symbol || '').toUpperCase() === symbol.toUpperCase() && Number(entry.positionSize || 0) !== 0
+  );
+
+  if (!position) {
+    throw new Error(`No open position found for ${symbol} on SoDEX.`);
+  }
+
+  const numericSize = Number(position.positionSize);
+  const quantity = String(Math.abs(numericSize));
+  const side: 'BUY' | 'SELL' = position.side === 'SHORT' || numericSize < 0 ? 'BUY' : 'SELL';
+  const price = await buildCloseLimitPrice(symbol, side, baseUrl);
+  const body: NewOrderRequest = {
+    accountID: context.accountID,
+    symbolID: context.symbolID,
+    orders: [buildOrderPayload({
+      symbol,
+      side,
+      type: 'LIMIT',
+      price,
+      timeInForce: 'IOC',
+      quantity,
+      reduceOnly: true
+    })]
+  };
+
+  return prepareWalletRequest(accountAddress, 'newOrder', '/trade/orders', body, baseUrl);
+}
+
+export async function prepareWalletLeverageUpdate(
+  accountAddress: string,
+  symbol: string,
+  leverage: number,
+  network: SodexTradingNetwork = 'testnet'
+): Promise<WalletPreparedAction> {
+  const baseUrl = perpsBase(network);
+  const context = await resolveConnectedWalletContext(accountAddress, symbol, baseUrl);
+  const body: UpdateLeverageRequest = {
+    accountID: context.accountID,
+    symbolID: context.symbolID,
+    leverage,
+    marginMode: context.marginMode
+  };
+
+  return prepareWalletRequest(accountAddress, 'updateLeverage', '/trade/leverage', body, baseUrl);
+}
+
+export async function prepareWalletCancelOrders(
+  accountAddress: string,
+  params: CancelOrdersParams,
+  network: SodexTradingNetwork = 'testnet'
+): Promise<WalletPreparedAction> {
+  if (!Array.isArray(params.cancels) || params.cancels.length === 0) {
+    throw new Error('At least one order must be provided to cancel.');
+  }
+  if (params.cancels.length > 100) {
+    throw new Error('SoDEX supports at most 100 cancels per request.');
+  }
+
+  const baseUrl = perpsBase(network);
+  const context = await resolveConnectedWalletContext(accountAddress, params.symbol, baseUrl);
+  const body: CancelOrderRequest = {
+    accountID: context.accountID,
+    cancels: params.cancels.map((item) => buildCancelItem(context.symbolID, item))
+  };
+
+  return prepareWalletRequest(accountAddress, 'cancelOrder', '/trade/orders', body, baseUrl, 'DELETE');
 }
 
 export async function closePosition(symbol: string, sizeHint = '', network: SodexTradingNetwork = 'testnet'): Promise<OrderResult> {
@@ -871,6 +1066,11 @@ export const sodexTrader = {
   getWalletAddress,
   getAccountAddress,
   getKeyStatus,
+  buildOrderPayload,
+  prepareWalletCancelOrders,
+  prepareWalletClosePosition,
+  prepareWalletLeverageUpdate,
+  submitWalletPreparedAction,
   placeOrder,
   cancelOrder,
   cancelOrders,

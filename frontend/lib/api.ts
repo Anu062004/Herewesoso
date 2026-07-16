@@ -24,7 +24,7 @@ import type {
 import type { SodexConnection, SodexNetwork } from '@/lib/sodexConnection';
 
 import { backendBaseUrl } from '@/lib/backendConfig';
-import { buildSodexQuery, getSodexConnection } from '@/lib/sodexConnection';
+import { buildSodexQuery, getSodexConnection, SODEX_NETWORK_CONFIG } from '@/lib/sodexConnection';
 
 export type {
   AnalysisResult,
@@ -314,22 +314,79 @@ export async function queueDashboardAction(payload: {
   cancels?: Array<{ orderId?: string | number; clOrdId?: string }>;
 }) {
   const connection = getSodexConnection();
-
-  if (connection?.network === 'mainnet') {
-    return {
-      queued: false,
-      action: payload.action,
-      symbol: payload.symbol,
-      message: 'Mainnet execution is disabled in this dashboard. Use the official SoDEX mainnet app to submit transactions.'
-    } satisfies DashboardActionResponse;
+  if (!connection) {
+    throw new Error('Connect and verify your SoDEX wallet before approving an action.');
   }
 
-  return requestJson<DashboardActionResponse>('/api/actions/confirm', {
+  const actionPayload = {
+    ...payload,
+    network: connection.network,
+    wallet: connection.address
+  };
+  const prepared = await requestJson<{
+    requiresSignature: boolean;
+    intentToken?: string;
+    typedData?: Record<string, unknown>;
+  }>('/api/actions/prepare', {
+    method: 'POST',
+    body: JSON.stringify(actionPayload)
+  });
+
+  if (!prepared.requiresSignature) {
+    return requestJson<DashboardActionResponse>('/api/actions/confirm', {
+      method: 'POST',
+      body: JSON.stringify(actionPayload)
+    });
+  }
+
+  if (!prepared.intentToken || !prepared.typedData) {
+    throw new Error('The backend did not return a complete SoDEX signing request.');
+  }
+
+  const provider = typeof window !== 'undefined' ? window.ethereum : undefined;
+  if (!provider) {
+    throw new Error('No browser wallet was detected. Reconnect an EVM wallet and try again.');
+  }
+
+  const accounts = await provider.request({ method: 'eth_requestAccounts' }) as string[];
+  const activeAddress = accounts[0];
+  if (!activeAddress || activeAddress.toLowerCase() !== connection.address.toLowerCase()) {
+    throw new Error('The active browser wallet does not match the authenticated SoDEX wallet. Reconnect and try again.');
+  }
+
+  const networkConfig = SODEX_NETWORK_CONFIG[connection.network];
+  try {
+    await provider.request({
+      method: 'wallet_switchEthereumChain',
+      params: [{ chainId: networkConfig.chainIdHex }]
+    });
+  } catch (error) {
+    const walletError = error as { code?: number; message?: string };
+    if (walletError?.code === 4001) {
+      throw new Error(`Switching to ${networkConfig.label} was rejected in the wallet.`);
+    }
+    throw new Error(`Switch to ${networkConfig.label} in your wallet, then try again.`);
+  }
+
+  let signature: string;
+  try {
+    signature = await provider.request({
+      method: 'eth_signTypedData_v4',
+      params: [activeAddress, JSON.stringify(prepared.typedData)]
+    }) as string;
+  } catch (error) {
+    const walletError = error as { code?: number; message?: string };
+    if (walletError?.code === 4001) {
+      throw new Error('The SoDEX action signature was rejected in the wallet.');
+    }
+    throw new Error(walletError?.message || 'The wallet could not sign the SoDEX action.');
+  }
+
+  return requestJson<DashboardActionResponse>('/api/actions/confirm-wallet', {
     method: 'POST',
     body: JSON.stringify({
-      ...payload,
-      network: connection?.network || 'testnet',
-      wallet: connection?.address
+      intentToken: prepared.intentToken,
+      signature
     })
   });
 }

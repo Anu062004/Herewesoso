@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import Link from 'next/link';
 
-import { fetchAlerts, fetchHealth, fetchMacro, fetchNews, fetchPositions, fetchSignals, queueDashboardAction } from '@/lib/api';
+import { fetchAlerts, fetchMacro, fetchNews, fetchPositions, fetchSignals, queueDashboardAction } from '@/lib/api';
 import { formatDateTime, formatPercent, formatPrice } from '@/lib/format';
 import {
   alertSourceLabel,
@@ -69,8 +69,7 @@ export default function DashboardPage() {
   const sodexConnection = useSodexConnection();
   const sodexNetwork = sodexConnection?.network || 'testnet';
   const sodexNetworkLabel = sodexNetwork === 'mainnet' ? 'Mainnet' : 'Testnet';
-  const mainnetReadOnly = sodexNetwork === 'mainnet';
-  const health = usePollingResource({ fetcher: fetchHealth, intervalMs: 60000 });
+  const isMainnet = sodexNetwork === 'mainnet';
   const signals = usePollingResource({ fetcher: fetchSignals, intervalMs: 60000 });
   const positions = usePollingResource({
     fetcher: fetchPositions,
@@ -102,8 +101,6 @@ export default function DashboardPage() {
   const unreadCount = unreadAlertCount(alerts.data || []);
   const macroEvents = sortMacroEvents(macro.data || []).slice(0, 6);
   const articles = news.data?.articles || [];
-  const tradingKeyConfigured = health.data?.sodex?.tradingKeyConfigured;
-
   return (
     <div className="space-y-4">
       {openPositions.fallbackActive && openPositions.positions.length > 0 ? (
@@ -112,18 +109,9 @@ export default function DashboardPage() {
         </div>
       ) : null}
 
-      {mainnetReadOnly ? (
+      {isMainnet ? (
         <div className="flex h-9 items-center rounded-[10px] border border-[rgba(245,158,11,0.24)] bg-[rgba(245,158,11,0.12)] px-4 text-[13px] text-[var(--amber)]">
-          Mainnet connection is read-only here. Trading actions stay on the official SoDEX app.
-        </div>
-      ) : null}
-
-      {tradingKeyConfigured === false ? (
-        <div className="flex flex-col gap-2 rounded-[10px] border border-[rgba(220,38,38,0.24)] bg-[rgba(220,38,38,0.12)] px-4 py-3 text-[13px] text-[var(--red)] sm:flex-row sm:items-center sm:justify-between">
-          <span>SoDEX trading is not enabled on the backend yet. Close and reduce actions are disabled until a deployment-managed signer is configured.</span>
-          <Link href="/dashboard/telegram" className="text-[12px] text-[var(--text-1)] underline underline-offset-4">
-            Check setup
-          </Link>
+          Mainnet actions require an explicit wallet signature and the deployment&apos;s mainnet execution policy.
         </div>
       ) : null}
 
@@ -406,7 +394,7 @@ export default function DashboardPage() {
                       </div>
                       <div className="mt-3 flex flex-wrap gap-2">
                         <Button
-                          disabled={openPositions.fallbackActive || mainnetReadOnly || tradingKeyConfigured === false}
+                          disabled={openPositions.fallbackActive}
                           onClick={() =>
                             setPendingAction({
                               action: 'REDUCE_LEVERAGE',
@@ -420,7 +408,7 @@ export default function DashboardPage() {
                           Reduce Leverage
                         </Button>
                         <Button
-                          disabled={openPositions.fallbackActive || mainnetReadOnly || tradingKeyConfigured === false}
+                          disabled={openPositions.fallbackActive}
                           onClick={() =>
                             setPendingAction({
                               action: 'CLOSE_POSITION',
@@ -496,21 +484,11 @@ export default function DashboardPage() {
             : `This will submit a reduce-only market close for ${pendingAction?.symbol} on SoDEX ${sodexNetworkLabel.toLowerCase()}.`
         }
         confirmLabel={pendingAction?.action === 'REDUCE_LEVERAGE' ? 'Reduce' : 'Close'}
-        disclaimer={
-          mainnetReadOnly
-            ? 'Mainnet execution is blocked in this dashboard'
-            : tradingKeyConfigured === false
-              ? 'The backend SoDEX signer is not configured in the deployment environment'
-              : 'Testnet execution - signs through the configured SoDEX key'
-        }
+        disclaimer={`${isMainnet ? 'Mainnet' : 'Testnet'} action — your connected wallet will ask for approval`}
         onClose={() => setPendingAction(null)}
         onConfirm={async () => {
           if (!pendingAction) {
             return { message: 'No action configured.' };
-          }
-
-          if (tradingKeyConfigured === false) {
-            throw new Error('The backend does not have a deployment-managed SoDEX signing key configured.');
           }
 
           const result = await queueDashboardAction({
@@ -528,12 +506,6 @@ export default function DashboardPage() {
               title: 'Position already closed',
               message: result.message
             };
-          }
-
-          if (!result.queued && /api key|signer/i.test(result.message)) {
-            throw new Error(
-              'SoDEX rejected the configured signer. Verify the account, API key name, and deployment-managed signing secret.'
-            );
           }
 
           if (!result.queued) {

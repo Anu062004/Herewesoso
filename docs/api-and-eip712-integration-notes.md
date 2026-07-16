@@ -1,6 +1,6 @@
 # API and EIP-712 Integration Notes
 
-Last reviewed: 2026-06-07
+Last reviewed: 2026-07-15
 
 This file summarizes the important implementation details from the SoDEX Trading API, SoDEX/SoSoValue Market Data API, SoSoValue GitBook API docs, and the provided Notion Common APIs link.
 
@@ -29,7 +29,7 @@ Normal message signing can show a wallet user a hard-to-read blob. EIP-712 lets 
 
 The signer signs the typed message hash. The server or contract can recover the signer address from the signature and verify that the correct key approved that exact action.
 
-For this project, EIP-712 matters because SoDEX trading writes are not just ordinary REST calls. Actions like creating an order, canceling an order, updating leverage, updating margin, or transferring assets need a typed signature. The backend must build the exact payload, hash it, sign the EIP-712 `ExchangeAction`, and send the signature in headers.
+For this project, EIP-712 matters because SoDEX trading writes are not just ordinary REST calls. Actions like creating an order, canceling an order, updating leverage, updating margin, or transferring assets need a typed signature. For interactive dashboard actions, the backend builds and hashes the exact payload, the connected browser wallet signs the EIP-712 `ExchangeAction`, and the backend verifies and submits it. Optional automation uses a deployment-managed registered API key.
 
 ## SoDEX Trading API
 
@@ -58,10 +58,12 @@ SoDEX has two important signing identities:
 - Master wallet: owns the SoDEX account. Use this for account-level actions like adding or revoking API keys.
 - API key: revocable EVM signing credential registered to the account. Use this for day-to-day trading actions.
 
-Important rule:
+Recommended rule:
 
 - Master wallet signs `addAPIKey` and `revokeAPIKey`.
 - Registered API key signs normal trading actions such as `newOrder`, `cancelOrder`, `updateLeverage`, `updateMargin`, `transferAsset`, and `scheduleCancel`.
+
+The current REST reference and official Go SDK also allow direct master-wallet signing for normal writes by omitting `X-API-Key`. Gold & Grith uses that mode for explicit connected-wallet approvals; registered API keys remain the preferred mode for unattended automation.
 
 The `X-API-Key` header carries the API key name, not the API key public address and never the private key.
 
@@ -156,7 +158,7 @@ Signed write endpoints generally need:
 
 - `Content-Type: application/json`
 - `Accept: application/json`
-- `X-API-Key: <api-key-name>`
+- `X-API-Key: <api-key-name>` when a registered API key signs; omit it for direct master-wallet signing
 - `X-API-Sign: 0x01<r><s><recovery-id-0-or-1>`
 - `X-API-Nonce: <uint64 nonce>`
 
@@ -180,10 +182,11 @@ Recommended UI/backend flow:
 2. User sees exact action preview in dashboard.
 3. Backend builds SoDEX payload.
 4. Backend computes payload hash.
-5. Backend EIP-712 signs with registered API key private key.
-6. Backend submits signed request to SoDEX testnet.
-7. Backend stores request, signature metadata, response, and result status.
-8. Dashboard shows execution timeline.
+5. Connected wallet approves the EIP-712 signature.
+6. Backend verifies that the recovered signer matches the authenticated wallet and the short-lived action intent.
+7. Backend submits the signed request to SoDEX.
+8. Backend stores request, non-sensitive signature metadata, response, and result status.
+9. Dashboard shows execution timeline.
 
 Never expose private keys to the frontend. Signing should happen server-side or through a secure wallet flow.
 
@@ -452,7 +455,7 @@ For each alert, include:
 
 ## Implementation Risks
 
-- Key custody: API key private keys must never be exposed to the frontend.
+- Key custody: interactive wallets sign locally; private keys must never be requested or transmitted. Automation API-key private keys stay in the deployment secret manager.
 - Nonce races: concurrent execution jobs can invalidate each other if they reuse a signing key without serialization.
 - Payload mismatch: JSON field order and decimal string formatting can break SoDEX signature verification.
 - Rate limits: SoSoValue requests must be cached or the dashboard/orchestrator can quickly hit 20 requests per minute.
@@ -463,11 +466,11 @@ For each alert, include:
 
 - [ ] Choose one product name and update UI/repo/submission consistently.
 - [ ] Add `SODEX_API_KEY_NAME`, `SODEX_API_PRIVATE_KEY`, `SODEX_ACCOUNT_ID`, `SODEX_ENV`; for API-key signing, verify the private key derives the registered API key public address; for master signing, leave `SODEX_API_KEY_NAME` unset.
-- [ ] Implement SoDEX EIP-712 signer for perps testnet.
-- [ ] Implement nonce manager.
-- [ ] Add reduce-leverage execution.
-- [ ] Add reduce-only close-position execution.
-- [ ] Store execution attempts and responses.
-- [ ] Show execution history in dashboard.
+- [x] Implement SoDEX EIP-712 preparation and connected-wallet signing for perps.
+- [x] Implement per-signer nonce manager.
+- [x] Add reduce-leverage execution.
+- [x] Add reduce-only close-position execution.
+- [x] Store execution attempts and responses.
+- [x] Show execution history in dashboard.
 - [ ] Document scoring weights.
 - [ ] Publish one public alert or run log.
