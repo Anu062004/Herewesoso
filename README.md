@@ -135,6 +135,7 @@ flowchart TB
   subgraph Frontend["Frontend — Next.js 15"]
     LAND[Landing Page]
     DASH[Trading Dashboard]
+    WALLET[Connected EVM Wallet]
     PROXY[API Proxy]
   end
 
@@ -157,6 +158,7 @@ flowchart TB
   API --> SV
   API --> SIGN
   LAND --> DASH
+  DASH <--> WALLET
   DASH --> PROXY
   PROXY --> API
 ```
@@ -169,7 +171,7 @@ flowchart TB
 | **Narrative Agent** | Fetches SoSoValue data, scores 8 sectors, generates memos and signal alerts |
 | **Shield Agent** | Reads SoDEX positions, computes risk scores, escalates high-risk positions |
 | **AI adapters** | Pluggable memo generation behind a single interface (`AI_SERVICE`) |
-| **SoDEX signer** | Builds EIP-712 `ExchangeAction` payloads, manages per-address nonces |
+| **SoDEX signer** | Builds EIP-712 `ExchangeAction` payloads, manages per-address nonces, and verifies connected-wallet signatures |
 | **Supabase** | Persistent store for scores, risks, alerts, memos, and agent run audit log |
 | **Dashboard** | Terminal UI with polling, heatmaps, risk gauges, and confirmation-gated actions |
 | **API proxy** | Next.js route forwards `/api/*` to the backend in production |
@@ -324,12 +326,14 @@ All AI adapters expose the same interface — switching providers requires only 
 | Variable | Description |
 |----------|-------------|
 | `SODEX_TESTNET_PERPS` | Perps REST base URL |
-| `SODEX_ACCOUNT_ADDRESS` | Master or account wallet address |
-| `SODEX_API_KEY_NAME` | Registered trading API key name, for example `webkey`; omit or set `default` for master-wallet signing |
-| `SODEX_API_PRIVATE_KEY` | Signing secret injected by the deployment secret manager; prefer a revocable registered API key |
+| `SODEX_ACCOUNT_ADDRESS` | Account used by optional backend automation; interactive dashboard actions use the connected wallet |
+| `SODEX_API_KEY_NAME` | Registered trading API key name for optional backend automation |
+| `SODEX_API_PRIVATE_KEY` | Optional automation signing secret injected by the deployment secret manager |
 | `SODEX_CHAIN_ID` | Default: `138565` |
 
-Close position, reduce leverage, and cancel order support registered API-key and master-wallet signing. Production deployments should use a revocable registered API key injected by a secret manager, set `SODEX_API_KEY_NAME` to its SoDEX name, and use `KEY_PROVIDER=managed`. Master-wallet signing omits `SODEX_API_KEY_NAME` and should be reserved for controlled test environments. Do not send `X-API-Key: default`; SoDEX treats the default/master signer as the no-header case.
+Interactive close-position, reduce-leverage, and cancel-order actions are prepared and policy-checked by the backend, then EIP-712 signed by the connected browser wallet. The private key never reaches the app or backend. Short-lived action intents bind the signature to the authenticated wallet, network, nonce, and exact SoDEX payload. `KEY_PROVIDER=disabled` is therefore valid for interactive wallet signing, including guarded `mainnet_canary` deployments.
+
+Backend automation such as Telegram trading still uses a registered SoDEX API key or controlled master-wallet signer. For that mode, inject a revocable key through a secret manager, set `SODEX_API_KEY_NAME`, and use `KEY_PROVIDER=managed` in production. Do not send `X-API-Key: default`; SoDEX treats master-wallet signing as the no-header case.
 
 ### Supabase
 
@@ -364,7 +368,7 @@ The frontend does not connect to Supabase directly; all database access is autho
 | `NEXT_PUBLIC_APP_URL` | `http://localhost:3000` | Frontend URL for Telegram deep links |
 | `NEXT_PUBLIC_API_BASE_URL` | `http://localhost:3001` | Backend URL for frontend |
 | `EXECUTION_MODE` | `dry_run` | `dry_run`, explicit `testnet`, or guarded `mainnet_canary` execution mode |
-| `KEY_PROVIDER` | `disabled` | `env`, `managed`, or `disabled`; `local_file` is rejected in production |
+| `KEY_PROVIDER` | `disabled` | Backend automation key provider; interactive wallet signing keeps this `disabled` |
 | `MAX_NOTIONAL_USD` | `10000` | Hard policy cap for execution previews and confirmations |
 | `ALLOWED_SYMBOLS` | `BTC-USD,ETH-USD,SOL-USD` | Comma-separated execution allowlist |
 | `MAX_LEVERAGE` | `25` | Maximum leverage accepted by the execution policy |
@@ -655,12 +659,12 @@ The long-polling bot runs only when `ENABLE_TELEGRAM_BOT=true`, and should be en
 
 SoDEX trading writes are not ordinary REST calls. Each action requires an EIP-712 `ExchangeAction` signature:
 
-1. Build the action payload (order, leverage update, cancel, etc.).
-2. Hash the payload and construct the typed data domain (`spot` or `futures`, chain ID, verifying contract).
-3. Sign with the registered API key private key.
-4. Attach the signature and nonce headers to the request.
+1. The backend policy-checks and builds the exact action payload (order, leverage update, cancel, etc.).
+2. The backend hashes the payload, constructs the typed-data domain, and issues a short-lived tamper-protected intent.
+3. The connected browser wallet signs the EIP-712 action locally.
+4. The backend verifies the recovered signer against the authenticated session, then attaches the signature and nonce headers to the SoDEX request.
 
-Gold & Grith implements this in `backend/services/sodexSigner.ts` with an atomic nonce manager in `sodexNonceManager.ts`. Full implementation notes are in [docs/api-and-eip712-integration-notes.md](docs/api-and-eip712-integration-notes.md).
+Optional Telegram/backend automation continues to use a deployment-managed registered API key. Gold & Grith implements both paths in `backend/services/sodexSigner.ts` with per-signer nonce tracking in `sodexNonceManager.ts`. Full implementation notes are in [docs/api-and-eip712-integration-notes.md](docs/api-and-eip712-integration-notes.md).
 
 ---
 

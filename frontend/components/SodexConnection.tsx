@@ -50,7 +50,7 @@ const NETWORKS: Array<{
     label: 'Mainnet',
     eyebrow: 'Live environment',
     chainId: SODEX_NETWORK_CONFIG.mainnet.chainId,
-    description: 'Read your live account here. Trading remains on the official SoDEX app.'
+    description: 'Read your live account and approve supported actions directly in your connected wallet.'
   }
 ];
 
@@ -432,7 +432,7 @@ export default function SodexConnection() {
               <div>
                 <div className="text-[13px] font-semibold text-[var(--text-1)]">Security boundary</div>
                 <p className="mt-2 text-[12px] leading-5 text-[var(--text-2)]">
-                  The browser connection is read-only. Mainnet execution is blocked in this dashboard, and private keys must never be entered here.
+                  Trade actions require an explicit EIP-712 approval from the connected wallet. Private keys are never entered here or sent to the backend.
                 </p>
               </div>
             </div>

@@ -2,7 +2,9 @@ import type { Request, Response } from 'express';
 import type { ExecutionActionRow, ExecutionMode, ExecutionStatus } from '../types/domain';
 
 import express from 'express';
+import { ethers } from 'ethers';
 import sodexTrader = require('../services/sodexTrader');
+import sodexSigner = require('../services/sodexSigner');
 import executionLedger = require('../services/executionLedger');
 import executionPolicy = require('../services/executionPolicy');
 import walletAuth = require('../services/walletAuth');
@@ -100,11 +102,6 @@ function requestedBy(req: Request, payload: ParsedActionPayload) {
   return payload.wallet || req.ip || null;
 }
 
-function sessionOwnsExecutionAccount(address: string): boolean {
-  const executionAccount = sodexTrader.getAccountAddress();
-  return Boolean(executionAccount && executionAccount.toLowerCase() === address.toLowerCase());
-}
-
 function policySnapshot(policy: ReturnType<typeof executionPolicy.evaluateExecutionPolicy>, keyStatus: ReturnType<typeof sodexTrader.getKeyStatus>) {
   return {
     executionMode: policy.executionMode,
@@ -119,20 +116,12 @@ function policySnapshot(policy: ReturnType<typeof executionPolicy.evaluateExecut
   };
 }
 
-function keyCheck(payload: ParsedActionPayload, mode: ExecutionMode, keyStatus: ReturnType<typeof sodexTrader.getKeyStatus>) {
+function keyCheck(payload: ParsedActionPayload, mode: ExecutionMode, _keyStatus: ReturnType<typeof sodexTrader.getKeyStatus>) {
   if (payload.action === 'QUEUE_ACTION' || mode === 'dry_run') {
     return { passed: true, message: 'No signing key required for this action mode.' };
   }
 
-  if (!keyStatus.configured) {
-    return { passed: false, message: 'No SoDEX signing key configured.' };
-  }
-
-  if (payload.network === 'mainnet' && !keyStatus.mainnetSafe) {
-    return { passed: false, message: 'Mainnet canary execution requires KEY_PROVIDER=managed.' };
-  }
-
-  return { passed: true, message: 'Signing key policy passed.' };
+  return { passed: true, message: 'The authenticated wallet must approve an EIP-712 signature.' };
 }
 
 async function recordAction(
@@ -218,6 +207,143 @@ function buildSimulation(payload: ParsedActionPayload, requestedByAddress: strin
   return { policy, keyStatus, checks, allowed };
 }
 
+type WalletExecutionIntent = {
+  version: 1;
+  wallet: string;
+  network: Network;
+  idempotencyKey: string;
+  payload: ParsedActionPayload;
+  prepared: sodexTrader.WalletPreparedAction;
+};
+
+function parseWalletExecutionIntent(value: Record<string, unknown> | null): WalletExecutionIntent | null {
+  if (!value || value.version !== 1) return null;
+  if (typeof value.wallet !== 'string' || !['testnet', 'mainnet'].includes(String(value.network))) return null;
+  if (typeof value.idempotencyKey !== 'string' || !value.idempotencyKey) return null;
+  if (!value.payload || typeof value.payload !== 'object' || Array.isArray(value.payload)) return null;
+  if (!value.prepared || typeof value.prepared !== 'object' || Array.isArray(value.prepared)) return null;
+
+  const payload = value.payload as ParsedActionPayload;
+  const prepared = value.prepared as sodexTrader.WalletPreparedAction;
+  if (!isDashboardAction(payload.action) || payload.action === 'QUEUE_ACTION') return null;
+  if (typeof payload.symbol !== 'string' || !payload.raw || typeof payload.raw !== 'object') return null;
+  if (!['newOrder', 'cancelOrder', 'updateLeverage'].includes(prepared.actionType)) return null;
+  if (!['/trade/orders', '/trade/leverage'].includes(prepared.endpoint)) return null;
+  if (!['POST', 'DELETE'].includes(prepared.method)) return null;
+  if (!prepared.body || typeof prepared.body !== 'object') return null;
+  if (!/^\d+$/.test(String(prepared.nonce))) return null;
+  if (!/^0x[0-9a-fA-F]{64}$/.test(String(prepared.payloadHash))) return null;
+
+  return value as unknown as WalletExecutionIntent;
+}
+
+function preparedTransportMatchesAction(intent: WalletExecutionIntent): boolean {
+  const prepared = intent.prepared;
+  if (intent.payload.action === 'CLOSE_POSITION') {
+    return prepared.actionType === 'newOrder' && prepared.endpoint === '/trade/orders' && prepared.method === 'POST';
+  }
+  if (intent.payload.action === 'REDUCE_LEVERAGE') {
+    return prepared.actionType === 'updateLeverage' && prepared.endpoint === '/trade/leverage' && prepared.method === 'POST';
+  }
+  return prepared.actionType === 'cancelOrder' && prepared.endpoint === '/trade/orders' && prepared.method === 'DELETE';
+}
+
+async function prepareWalletTrade(payload: ParsedActionPayload, address: string) {
+  if (payload.action === 'CLOSE_POSITION') {
+    return sodexTrader.prepareWalletClosePosition(address, payload.symbol, payload.network);
+  }
+  if (payload.action === 'REDUCE_LEVERAGE' && payload.targetLeverage !== null) {
+    return sodexTrader.prepareWalletLeverageUpdate(address, payload.symbol, payload.targetLeverage, payload.network);
+  }
+  if (payload.action === 'CANCEL_ORDER') {
+    return sodexTrader.prepareWalletCancelOrders(address, {
+      symbol: payload.symbol,
+      cancels: payload.cancels
+    }, payload.network);
+  }
+  throw new Error('This action does not require a SoDEX wallet signature.');
+}
+
+function browserTypedData(prepared: sodexTrader.WalletPreparedAction) {
+  return {
+    domain: prepared.domain,
+    types: {
+      EIP712Domain: [
+        { name: 'name', type: 'string' },
+        { name: 'version', type: 'string' },
+        { name: 'chainId', type: 'uint256' },
+        { name: 'verifyingContract', type: 'address' }
+      ],
+      ExchangeAction: prepared.typedData.types.ExchangeAction
+    },
+    primaryType: prepared.typedData.primaryType,
+    message: prepared.typedData.message
+  };
+}
+
+router.post('/prepare', asyncHandler(async (req: Request, res: Response) => {
+  const session = walletAuth.getWalletSession(req);
+  if (!session) return res.status(401).json({ error: 'Connect and sign in with your SoDEX wallet.' });
+
+  let payload: ParsedActionPayload;
+  try {
+    payload = parsePayload(req.body);
+  } catch (error) {
+    return res.status(400).json({ error: error instanceof Error ? error.message : 'Invalid action payload.' });
+  }
+
+  payload.wallet = session.address.toLowerCase();
+  payload.network = session.network;
+
+  try {
+    await hydrateExecutionContext(payload, session.address);
+  } catch (error) {
+    return res.status(422).json({ error: error instanceof Error ? error.message : 'Could not verify execution context.' });
+  }
+
+  const simulation = buildSimulation(payload, session.address);
+  const firstFailure = simulation.checks.find((check) => !check.passed);
+  if (!simulation.allowed) {
+    return res.status(403).json({
+      error: firstFailure?.message || 'Policy rejected action.',
+      checks: simulation.checks
+    });
+  }
+
+  if (simulation.policy.executionMode === 'dry_run' || payload.action === 'QUEUE_ACTION') {
+    return res.json({
+      requiresSignature: false,
+      executionMode: simulation.policy.executionMode
+    });
+  }
+
+  let prepared: sodexTrader.WalletPreparedAction;
+  try {
+    prepared = await prepareWalletTrade(payload, session.address);
+  } catch (error) {
+    return res.status(422).json({ error: error instanceof Error ? error.message : 'Could not prepare the SoDEX action.' });
+  }
+
+  const intentToken = walletAuth.createActionIntentToken({
+    version: 1,
+    wallet: session.address.toLowerCase(),
+    network: session.network,
+    idempotencyKey: simulation.policy.idempotencyKey,
+    payload,
+    prepared
+  });
+
+  return res.json({
+    requiresSignature: true,
+    action: payload.action,
+    symbol: payload.symbol,
+    network: payload.network,
+    executionMode: simulation.policy.executionMode,
+    intentToken,
+    typedData: browserTypedData(prepared)
+  });
+}));
+
 router.post('/simulate', asyncHandler(async (req: Request, res: Response) => {
   let payload: ParsedActionPayload;
   try {
@@ -227,9 +353,6 @@ router.post('/simulate', asyncHandler(async (req: Request, res: Response) => {
   }
   const session = walletAuth.getWalletSession(req);
   if (!session) return res.status(401).json({ error: 'Connect and sign in with your SoDEX wallet.' });
-  if (!sessionOwnsExecutionAccount(session.address)) {
-    return res.status(403).json({ error: 'This wallet is not authorized to use the configured execution account.' });
-  }
   payload.wallet = session.address.toLowerCase();
   payload.network = session.network;
   try {
@@ -269,6 +392,213 @@ router.post('/simulate', asyncHandler(async (req: Request, res: Response) => {
   });
 }));
 
+function sodexResponseFailure(response: unknown): string | null {
+  if (!response || typeof response !== 'object') return 'SoDEX returned an invalid response.';
+  const envelope = response as { code?: unknown; error?: unknown; data?: unknown };
+  if (envelope.code !== 0) {
+    return typeof envelope.error === 'string' && envelope.error.trim()
+      ? envelope.error.trim()
+      : 'SoDEX rejected the signed action.';
+  }
+  if (Array.isArray(envelope.data)) {
+    const failed = envelope.data.find((entry) =>
+      entry && typeof entry === 'object' && typeof (entry as { code?: unknown }).code === 'number' && (entry as { code: number }).code !== 0
+    ) as { error?: unknown } | undefined;
+    if (failed) return typeof failed.error === 'string' ? failed.error : 'SoDEX rejected part of the signed action.';
+  }
+  return null;
+}
+
+function walletActionSuccessMessage(payload: ParsedActionPayload): string {
+  if (payload.action === 'REDUCE_LEVERAGE') {
+    return `Leverage reduced to ${payload.targetLeverage}x for ${payload.symbol}.`;
+  }
+  if (payload.action === 'CANCEL_ORDER') {
+    return payload.cancels.length === 1
+      ? `Cancel submitted for 1 ${payload.symbol} order.`
+      : `Cancel submitted for ${payload.cancels.length} ${payload.symbol} orders.`;
+  }
+  return `Reduce-only close submitted for ${payload.symbol}.`;
+}
+
+router.post('/confirm-wallet', asyncHandler(async (req: Request, res: Response) => {
+  const session = walletAuth.getWalletSession(req);
+  if (!session) return res.status(401).json({ error: 'Connect and sign in with your SoDEX wallet.' });
+
+  const body = req.body && typeof req.body === 'object' ? req.body as Record<string, unknown> : {};
+  const signature = typeof body.signature === 'string' ? body.signature.trim() : '';
+  const intent = parseWalletExecutionIntent(
+    walletAuth.verifyActionIntentToken(typeof body.intentToken === 'string' ? body.intentToken : undefined)
+  );
+
+  if (!intent) return res.status(401).json({ error: 'The wallet action expired or was modified. Prepare it again.' });
+  if (!signature) return res.status(400).json({ error: 'A wallet EIP-712 signature is required.' });
+  if (intent.wallet !== session.address.toLowerCase() || intent.network !== session.network) {
+    return res.status(403).json({ error: 'The prepared action belongs to a different wallet or network.' });
+  }
+  if (!preparedTransportMatchesAction(intent)) {
+    return res.status(400).json({ error: 'The prepared SoDEX transport does not match the requested action.' });
+  }
+
+  let expectedSigning: ReturnType<typeof sodexSigner.prepareSodexAction>;
+  try {
+    expectedSigning = sodexSigner.prepareSodexAction({
+      signerAddress: session.address,
+      marketType: 'perps',
+      actionType: intent.prepared.actionType,
+      params: intent.prepared.body,
+      baseUrl: intent.network,
+      nonce: BigInt(intent.prepared.nonce)
+    });
+  } catch {
+    return res.status(400).json({ error: 'The prepared SoDEX signing payload is invalid.' });
+  }
+
+  const signingPayloadMatches =
+    expectedSigning.payloadHash === intent.prepared.payloadHash &&
+    expectedSigning.nonce === intent.prepared.nonce &&
+    expectedSigning.domain.name === intent.prepared.domain?.name &&
+    expectedSigning.domain.chainId === intent.prepared.domain?.chainId &&
+    expectedSigning.domain.verifyingContract.toLowerCase() === intent.prepared.domain?.verifyingContract?.toLowerCase();
+  if (!signingPayloadMatches) {
+    return res.status(400).json({ error: 'The prepared SoDEX signing payload failed verification.' });
+  }
+
+  try {
+    const recovered = ethers.verifyTypedData(
+      expectedSigning.domain,
+      expectedSigning.typedData.types,
+      expectedSigning.typedData.message,
+      signature
+    );
+    if (ethers.getAddress(recovered) !== ethers.getAddress(session.address)) {
+      return res.status(401).json({ error: 'The trade signature does not match the authenticated wallet.' });
+    }
+  } catch {
+    return res.status(401).json({ error: 'Could not verify the wallet trade signature.' });
+  }
+
+  const payload: ParsedActionPayload = {
+    ...intent.payload,
+    wallet: session.address.toLowerCase(),
+    network: session.network
+  };
+  try {
+    await hydrateExecutionContext(payload, session.address);
+  } catch (error) {
+    return res.status(422).json({ error: error instanceof Error ? error.message : 'Could not revalidate execution context.' });
+  }
+
+  const simulation = buildSimulation(payload, session.address);
+  const firstFailure = simulation.checks.find((check) => !check.passed);
+  if (simulation.policy.executionMode === 'dry_run') {
+    return res.status(409).json({ error: 'Execution mode changed. Prepare the action again.' });
+  }
+  if (!simulation.allowed) {
+    return res.status(403).json({ error: firstFailure?.message || 'Policy rejected action.', checks: simulation.checks });
+  }
+
+  const cooldownSince = new Date(Date.now() - simulation.policy.policy.actionCooldownMs).toISOString();
+  try {
+    const staleBefore = new Date(Date.now() - Math.max(5 * 60_000, simulation.policy.policy.actionCooldownMs * 5)).toISOString();
+    await executionLedger.expireStaleExecutionActions(staleBefore);
+    const recent = await executionLedger.findRecentExecution({
+      requestedBy: session.address.toLowerCase(),
+      actionType: payload.action,
+      symbol: payload.symbol,
+      network: payload.network,
+      since: cooldownSince
+    });
+    if (recent) {
+      return res.status(409).json({
+        queued: false,
+        action: payload.action,
+        symbol: payload.symbol,
+        message: 'An equivalent action is already active or inside the configured cooldown.',
+        existingActionId: recent.action_id,
+        existingStatus: recent.status
+      });
+    }
+  } catch {
+    return res.status(503).json({ error: 'Execution safety checks are temporarily unavailable.' });
+  }
+
+  const actionId = executionLedger.createActionId();
+  let claim: Awaited<ReturnType<typeof executionLedger.claimExecutionAction>>;
+  try {
+    claim = await executionLedger.claimExecutionAction({
+      action_id: actionId,
+      action_type: payload.action,
+      symbol: payload.symbol,
+      network: payload.network,
+      execution_mode: simulation.policy.executionMode,
+      status: 'PENDING',
+      requested_by: session.address.toLowerCase(),
+      idempotency_key: intent.idempotencyKey,
+      policy_snapshot: policySnapshot(simulation.policy, simulation.keyStatus),
+      request_payload: payload.raw,
+      signed_payload_hash: intent.prepared.payloadHash,
+      signer_address: session.address,
+      error: null
+    });
+  } catch {
+    return res.status(503).json({ error: 'A durable execution audit record could not be created. No action was submitted.' });
+  }
+
+  if (!claim.claimed) {
+    return res.status(409).json({
+      queued: false,
+      action: payload.action,
+      symbol: payload.symbol,
+      message: 'This signed action was already received.',
+      existingActionId: claim.row.action_id,
+      existingStatus: claim.row.status
+    });
+  }
+
+  try {
+    await executionLedger.updateExecutionAction(actionId, { status: 'SUBMITTED' });
+    const sodexResponse = await sodexTrader.submitWalletPreparedAction(intent.prepared, signature, session.address);
+    const failure = sodexResponseFailure(sodexResponse);
+    const signedMetadata = executionLedger.extractSignedMetadata(sodexResponse);
+    await executionLedger.updateExecutionAction(actionId, {
+      status: failure ? 'FAILED' : 'SUCCEEDED',
+      signed_payload_hash: signedMetadata.payloadHash,
+      signer_address: signedMetadata.signerAddress,
+      sodex_response: sodexResponse,
+      error: failure
+    });
+
+    return res.status(failure ? 502 : 200).json({
+      queued: !failure,
+      action: payload.action,
+      symbol: payload.symbol,
+      message: failure || walletActionSuccessMessage(payload),
+      signedPayloadHash: signedMetadata.payloadHash,
+      executionMode: simulation.policy.executionMode
+    });
+  } catch (error: any) {
+    const message = typeof error?.message === 'string' && error.message.trim()
+      ? error.message.trim().slice(0, 300)
+      : 'SoDEX rejected the signed action.';
+    try {
+      await executionLedger.updateExecutionAction(actionId, {
+        status: 'FAILED',
+        signed_payload_hash: intent.prepared.payloadHash,
+        signer_address: session.address,
+        sodex_response: error?.response?.data,
+        error: message
+      });
+    } catch {}
+    return res.status(502).json({
+      queued: false,
+      action: payload.action,
+      symbol: payload.symbol,
+      message
+    });
+  }
+}));
+
 async function executePayload(req: Request, res: Response) {
   let payload: ParsedActionPayload;
   try {
@@ -278,9 +608,6 @@ async function executePayload(req: Request, res: Response) {
   }
   const session = walletAuth.getWalletSession(req);
   if (!session) return res.status(401).json({ error: 'Connect and sign in with your SoDEX wallet.' });
-  if (!sessionOwnsExecutionAccount(session.address)) {
-    return res.status(403).json({ error: 'This wallet is not authorized to use the configured execution account.' });
-  }
   payload.wallet = session.address.toLowerCase();
   payload.network = session.network;
   try {
@@ -303,6 +630,12 @@ async function executePayload(req: Request, res: Response) {
       symbol: payload.symbol,
       message: firstFailure?.message || 'Policy rejected action.',
       checks: simulation.checks
+    });
+  }
+
+  if (simulation.policy.executionMode !== 'dry_run' && payload.action !== 'QUEUE_ACTION') {
+    return res.status(400).json({
+      error: 'This SoDEX action requires approval from the connected wallet.'
     });
   }
 

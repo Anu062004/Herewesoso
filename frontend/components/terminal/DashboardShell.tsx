@@ -149,7 +149,6 @@ export default function DashboardShell({ children }: DashboardShellProps) {
   const shieldSuccess = summary?.shieldSuccess !== false;
   const runStatus = String(lastRun?.status || 'idle').toLowerCase();
   const telegramTone = !health.data ? 'gray' : health.data.telegram.connected ? 'green' : 'red';
-  const sodexSignerReady = health.data?.sodex?.tradingKeyConfigured;
   const hasActiveSecondaryNav = MORE_NAV_ITEMS.some((item) => isActive(pathname, item.href));
 
   useEffect(() => {
@@ -270,14 +269,8 @@ export default function DashboardShell({ children }: DashboardShellProps) {
               <TapeItem label="Telegram" value={health.data?.telegram.connected ? 'Active' : 'Disconnected'} tone={health.data?.telegram.connected ? 'green' : 'red'} />
               <TapeItem
                 label="SoDEX"
-                value={
-                  sodexSignerReady === undefined
-                    ? 'Signer Check'
-                    : sodexSignerReady
-                      ? 'Signer Ready'
-                      : 'Signer Missing'
-                }
-                tone={sodexSignerReady === false ? 'red' : sodexSignerReady ? 'green' : 'amber'}
+                value={sodexConnection ? 'Wallet Ready' : 'Not Connected'}
+                tone={sodexConnection ? 'green' : 'amber'}
               />
               <TapeItem label="Last run" value={formatRelativeTime(lastRun?.created_at || null)} />
             </div>

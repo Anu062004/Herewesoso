@@ -87,9 +87,11 @@ export function assertProductionEnvironment(): void {
   if (!['env', 'local_file', 'managed', 'disabled'].includes(keyProvider)) errors.push('KEY_PROVIDER must be env, managed, disabled, or local_file.');
   if (keyProvider === 'local_file') errors.push('KEY_PROVIDER=local_file is not permitted in production. Use managed, env, or disabled.');
   if (!['dry_run', 'testnet', 'mainnet_canary'].includes(executionMode)) errors.push('EXECUTION_MODE must be dry_run, testnet, or mainnet_canary.');
-  if (executionMode === 'mainnet_canary' && keyProvider !== 'managed') errors.push('Mainnet canary execution requires KEY_PROVIDER=managed.');
-  if (executionMode === 'mainnet_canary' && !(process.env.SODEX_MANAGED_PRIVATE_KEY || process.env.SODEX_API_PRIVATE_KEY)) {
-    errors.push('Mainnet canary execution requires a deployment-managed signing key.');
+  if (executionMode === 'mainnet_canary' && !['managed', 'disabled'].includes(keyProvider)) {
+    errors.push('Mainnet server signing requires KEY_PROVIDER=managed; use KEY_PROVIDER=disabled for connected-wallet signing only.');
+  }
+  if (executionMode === 'mainnet_canary' && keyProvider === 'managed' && !(process.env.SODEX_MANAGED_PRIVATE_KEY || process.env.SODEX_API_PRIVATE_KEY)) {
+    errors.push('Mainnet managed signing requires a deployment-managed signing key.');
   }
   if (!['testnet', 'mainnet'].includes(String(process.env.SODEX_NETWORK || 'testnet'))) errors.push('SODEX_NETWORK must be testnet or mainnet.');
   if (schedulerEnabled) {

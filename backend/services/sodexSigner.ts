@@ -18,12 +18,9 @@ type SodexActionType =
   | 'scheduleCancel'
   | 'revokeAPIKey';
 
-interface SodexSigningResult {
+interface SodexSigningPreparation {
   nonce: string;
   payloadHash: string;
-  rawSignature: string;
-  compactSignature: string;
-  typedSignature: string;
   domain: {
     name: 'spot' | 'futures';
     version: '1';
@@ -40,6 +37,12 @@ interface SodexSigningResult {
       nonce: string;
     };
   };
+}
+
+interface SodexSigningResult extends SodexSigningPreparation {
+  rawSignature: string;
+  compactSignature: string;
+  typedSignature: string;
 }
 
 function resolveChainId(baseUrl = ''): number {
@@ -98,6 +101,47 @@ function toSodexHeaderSignature(signature: string): string {
   return `0x01${toCompactRecoverySignature(signature).slice(2)}`;
 }
 
+function prepareSodexAction({
+  signerAddress,
+  marketType,
+  actionType,
+  params,
+  baseUrl = '',
+  nonce
+}: {
+  signerAddress: string;
+  marketType: SodexMarketType;
+  actionType: SodexActionType;
+  params: unknown;
+  baseUrl?: string;
+  nonce?: bigint;
+}): SodexSigningPreparation {
+  const nextNonce = nonce ?? nonceManager.nextNonce(signerAddress);
+  const payloadHash = computePayloadHash(actionType, params);
+  const domain = getSodexDomain(marketType, baseUrl);
+  const types = {
+    ExchangeAction: [
+      { name: 'payloadHash' as const, type: 'bytes32' as const },
+      { name: 'nonce' as const, type: 'uint64' as const }
+    ]
+  };
+  const message = {
+    payloadHash,
+    nonce: nextNonce.toString()
+  };
+
+  return {
+    nonce: nextNonce.toString(),
+    payloadHash,
+    domain,
+    typedData: {
+      types,
+      primaryType: 'ExchangeAction',
+      message
+    }
+  };
+}
+
 async function signSodexAction({
   privateKey,
   marketType,
@@ -114,34 +158,26 @@ async function signSodexAction({
   nonce?: bigint;
 }): Promise<SodexSigningResult> {
   const wallet = createWallet(privateKey);
-  const nextNonce = nonce || nonceManager.nextNonce(wallet.address);
-  const payloadHash = computePayloadHash(actionType, params);
-  const domain = getSodexDomain(marketType, baseUrl);
-  const types = {
-    ExchangeAction: [
-      { name: 'payloadHash' as const, type: 'bytes32' as const },
-      { name: 'nonce' as const, type: 'uint64' as const }
-    ]
-  };
-  const message = {
-    payloadHash,
-    nonce: nextNonce.toString()
-  };
-  const rawSignature = await wallet.signTypedData(domain, types, message);
+  const prepared = prepareSodexAction({
+    signerAddress: wallet.address,
+    marketType,
+    actionType,
+    params,
+    baseUrl,
+    nonce
+  });
+  const rawSignature = await wallet.signTypedData(
+    prepared.domain,
+    prepared.typedData.types,
+    prepared.typedData.message
+  );
   const compactSignature = toCompactRecoverySignature(rawSignature);
 
   return {
-    nonce: nextNonce.toString(),
-    payloadHash,
+    ...prepared,
     rawSignature,
     compactSignature,
-    typedSignature: `0x01${compactSignature.slice(2)}`,
-    domain,
-    typedData: {
-      types,
-      primaryType: 'ExchangeAction',
-      message
-    }
+    typedSignature: `0x01${compactSignature.slice(2)}`
   };
 }
 
@@ -159,6 +195,7 @@ export = {
   computePayloadHash,
   createWallet,
   getSodexDomain,
+  prepareSodexAction,
   recoverSodexSigner,
   signSodexAction,
   toCompactRecoverySignature,
