@@ -258,6 +258,9 @@ test('SIWE challenge is domain-bound and produces a recoverable EIP-4361 signatu
   });
   const signature = await wallet.signMessage(challenge.message);
   assert.equal(ethers.verifyMessage(walletAuth.buildLoginMessage(challenge), signature), wallet.address);
+  const durableChallenge = { ...challenge, address: challenge.address.toLowerCase() };
+  assert.equal(walletAuth.buildLoginMessage(durableChallenge), challenge.message);
+  assert.equal(ethers.verifyMessage(walletAuth.buildLoginMessage(durableChallenge), signature), wallet.address);
   assert.match(challenge.message, /^app\.goldandgrith\.example wants you to sign in/);
   assert.match(challenge.message, /Expiration Time:/);
   assert.match(challenge.message, /Request ID:/);
