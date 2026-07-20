@@ -1,0 +1,58 @@
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.cursor {
+  display: inline-block;
+  width: 0.055em;
+  height: 0.78em;
+  margin-left: 0.08em;
+  background: var(--color-accent);
+  vertical-align: -0.04em;
+  animation: blink 720ms steps(1, end) infinite;
+}
+
+.cursorComplete {
+  animation: finish 1.6s steps(1, end) forwards;
+}
+
+@keyframes blink {
+  0%,
+  48% {
+    opacity: 1;
+  }
+
+  49%,
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes finish {
+  0%,
+  18%,
+  36% {
+    opacity: 1;
+  }
+
+  9%,
+  27%,
+  45%,
+  100% {
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cursor {
+    display: none;
+    animation: none;
+  }
+}
