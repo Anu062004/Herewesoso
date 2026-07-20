@@ -1,4 +1,6 @@
 import { ethers } from 'ethers';
+import fs from 'node:fs';
+import path from 'node:path';
 
 import { isProduction } from '../config/env';
 import onchainAutomation from './onchainAutomation';
@@ -52,9 +54,42 @@ function publicUrl(value: string | null): string | null {
   }
 }
 
+function repositoryCommitSha(): string | null {
+  try {
+    const repositoryRoot = path.resolve(__dirname, '../..');
+    const dotGitPath = path.join(repositoryRoot, '.git');
+    const dotGitStat = fs.statSync(dotGitPath);
+    let gitDirectory = dotGitPath;
+    if (dotGitStat.isFile()) {
+      const pointer = fs.readFileSync(dotGitPath, 'utf8').trim().match(/^gitdir:\s+(.+)$/i)?.[1];
+      if (!pointer) return null;
+      gitDirectory = path.resolve(repositoryRoot, pointer);
+    }
+    const head = fs.readFileSync(path.join(gitDirectory, 'HEAD'), 'utf8').trim();
+    if (COMMIT_SHA.test(head)) return head.toLowerCase();
+    const ref = head.match(/^ref:\s+(refs\/[A-Za-z0-9._/-]+)$/)?.[1];
+    if (!ref || ref.includes('..')) return null;
+    const looseRef = path.join(gitDirectory, ref);
+    if (fs.existsSync(looseRef)) {
+      const value = fs.readFileSync(looseRef, 'utf8').trim();
+      return COMMIT_SHA.test(value) ? value.toLowerCase() : null;
+    }
+    const packedRefs = path.join(gitDirectory, 'packed-refs');
+    if (!fs.existsSync(packedRefs)) return null;
+    const packed = fs.readFileSync(packedRefs, 'utf8').split('\n')
+      .find((line) => line.endsWith(` ${ref}`));
+    const value = packed?.split(' ')[0] || '';
+    return COMMIT_SHA.test(value) ? value.toLowerCase() : null;
+  } catch {
+    return null;
+  }
+}
+
 export function releaseEvidence(env: NodeJS.ProcessEnv = process.env) {
   const rawCommit = firstValue(env, ['APP_COMMIT_SHA', 'VERCEL_GIT_COMMIT_SHA', 'RAILWAY_GIT_COMMIT_SHA', 'RENDER_GIT_COMMIT', 'GITHUB_SHA']);
-  const commitSha = rawCommit && COMMIT_SHA.test(rawCommit) ? rawCommit.toLowerCase() : null;
+  const commitSha = rawCommit && COMMIT_SHA.test(rawCommit)
+    ? rawCommit.toLowerCase()
+    : env === process.env ? repositoryCommitSha() : null;
   return {
     repositoryUrl: REPOSITORY_URL,
     commitSha,
