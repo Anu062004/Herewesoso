@@ -7,7 +7,7 @@
  */
 
 .page {
-  min-height: 100vh;
+  min-height: 100svh;
   overflow-x: clip;
   background:
     radial-gradient(var(--color-grid-line) 1px, var(--color-transparent) 1px),
@@ -133,14 +133,16 @@
 
 .intro {
   display: grid;
-  grid-template-columns: minmax(0, 1.45fr) minmax(300px, 0.55fr);
-  gap: clamp(3rem, 8vw, 8rem);
-  align-items: end;
-  padding-block: clamp(3rem, 5vw, 4rem) clamp(3rem, 5vw, 4.5rem);
+  grid-template-columns: minmax(350px, 0.72fr) minmax(0, 1.28fr);
+  gap: clamp(2rem, 4vw, 4rem);
+  align-items: center;
+  padding-block: var(--space-lg-token) var(--space-xl-token);
 }
 
+.introCopy,
 .introHeading,
 .introAside,
+.productFigure,
 .workflowCopy,
 .securityCopy {
   min-width: 0;
@@ -187,17 +189,21 @@
 }
 
 .intro h1 {
-  max-width: 820px;
-  min-height: 1.88em;
+  max-width: 440px;
+  min-height: 2.82em;
   margin: var(--space-lg-token) 0 0;
   font-family: var(--font-display);
-  font-size: clamp(3rem, 6vw, 5.6rem);
+  font-size: clamp(3rem, 5.15vw, 4.3rem);
   font-weight: 620;
   letter-spacing: -0.07em;
   line-height: 0.94;
   min-width: 0;
   overflow-wrap: anywhere;
   text-wrap: balance;
+}
+
+.introAside {
+  margin-top: var(--space-xl-token);
 }
 
 .introAside > p {
@@ -288,7 +294,9 @@
 }
 
 .productFigure {
+  width: min(100%, 760px);
   margin: 0;
+  justify-self: end;
 }
 
 .screenFrame {
@@ -335,7 +343,6 @@
 .annotationRail {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  margin-top: var(--space-2xl-token);
   border-top: var(--rule-thin-token) solid var(--color-rule);
   border-bottom: var(--rule-thin-token) solid var(--color-rule);
 }
@@ -344,7 +351,7 @@
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
   gap: var(--space-lg-token);
-  min-height: 130px;
+  min-height: 112px;
   padding: var(--space-lg-token) var(--space-xl-token) var(--space-lg-token) 0;
 }
 
@@ -597,12 +604,26 @@
 
 @media (max-width: 1040px) {
   .intro {
-    grid-template-columns: 1fr;
-    gap: var(--space-xl-token);
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--space-2xl-token);
+  }
+
+  .introCopy {
+    max-width: 820px;
+  }
+
+  .intro h1 {
+    max-width: 820px;
+    min-height: 1.88em;
   }
 
   .introAside {
     max-width: 680px;
+  }
+
+  .productFigure {
+    width: 100%;
+    justify-self: stretch;
   }
 
   .workflow {
@@ -659,24 +680,28 @@
   }
 
   .intro {
-    padding-block: var(--space-2xl-token);
+    gap: var(--space-xl-token);
+    padding-block: var(--space-lg-token) var(--space-xl-token);
   }
 
   .intro h1 {
+    min-height: 2.82em;
     font-size: clamp(2.85rem, 11vw, 5rem);
   }
 
-  .screenFrame {
-    aspect-ratio: 4 / 3;
+  .introAside {
+    margin-top: var(--space-lg-token);
   }
 
-  .screenFrame img {
-    object-position: 18% top;
+  .introActions {
+    margin-top: var(--space-lg-token);
   }
 
   .screenCaption {
     align-items: flex-start;
     flex-direction: column;
+    gap: var(--space-xs-token);
+    padding-top: var(--space-sm-token);
   }
 
   .screenCaption span:last-child {
@@ -685,7 +710,6 @@
 
   .annotationRail {
     grid-template-columns: 1fr;
-    margin-top: var(--space-xl-token);
   }
 
   .annotationRail > div,
