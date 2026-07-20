@@ -92,10 +92,7 @@ export default function HomePage() {
             </Link>
             <Link
               className={styles.docsCta}
-              href="https://github.com/Anu062004/Herewesoso/tree/main/docs"
-              target="_blank"
-              rel="noreferrer"
-              aria-label="View project documentation (opens in a new tab)"
+              href="/docs"
             >
               View docs <ArrowIcon />
             </Link>
