@@ -6,7 +6,7 @@ export default function SodexConnectPage() {
     <div className="space-y-5">
       <PageHeader
         title="Connect SoDEX"
-        description="A guided wallet login for testnet and mainnet. Select the environment, prove wallet ownership, then finish trading enablement on the official SoDEX app."
+        description="EIP-4361 Sign-In with Ethereum for isolated multi-user testnet and mainnet sessions, followed by optional SoDEX trading enablement."
         right={<Pill tone="green">No private key required</Pill>}
       />
       <SodexConnection />

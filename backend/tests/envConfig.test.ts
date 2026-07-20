@@ -1,5 +1,6 @@
 import test = require('node:test');
 import assert = require('node:assert/strict');
+import { ethers } from 'ethers';
 
 import { allowedOrigins, assertProductionEnvironment } from '../config/env';
 
@@ -36,6 +37,11 @@ const productionEnv = {
   DAILY_SUMMARY_UTC_HOUR: '8',
   ENABLE_BACKGROUND_SCHEDULER: 'false',
   ENABLE_TELEGRAM_BOT: 'false',
+  ENABLE_CROSS_EXCHANGE_SHIELD: 'false',
+  EXCHANGE_CREDENTIALS_KEY: undefined,
+  SHIELD_AUTOMATION_CONTRACT_ADDRESS: undefined,
+  SHIELD_AUTOMATION_TESTNET_CONTRACT_ADDRESS: undefined,
+  SHIELD_AUTOMATION_MAINNET_CONTRACT_ADDRESS: undefined,
   SODEX_MANAGED_PRIVATE_KEY: undefined,
   SODEX_API_PRIVATE_KEY: undefined,
   SODEX_NETWORK: 'testnet',
@@ -70,9 +76,9 @@ test('production environment rejects insecure origins, wallets, and shared secre
   });
 });
 
-test('mainnet canary permits connected-wallet signing without a backend key', () => {
+test('mainnet canary rejects connected-wallet signing without a managed API key', () => {
   withEnv({ ...productionEnv, EXECUTION_MODE: 'mainnet_canary', KEY_PROVIDER: 'disabled' }, () => {
-    assert.doesNotThrow(assertProductionEnvironment);
+    assert.throws(assertProductionEnvironment, /KEY_PROVIDER=managed/);
   });
 });
 
@@ -81,7 +87,67 @@ test('mainnet server signing requires a managed provider and signing key', () =>
     assert.throws(assertProductionEnvironment, /KEY_PROVIDER=managed/);
   });
   withEnv({ ...productionEnv, EXECUTION_MODE: 'mainnet_canary', KEY_PROVIDER: 'managed' }, () => {
-    assert.throws(assertProductionEnvironment, /deployment-managed signing key/);
+    assert.throws(assertProductionEnvironment, /deployment-managed API signing key/);
+  });
+});
+
+test('production accepts a fully configured managed mainnet canary', () => {
+  withEnv({
+    ...productionEnv,
+    EXECUTION_MODE: 'mainnet_canary',
+    KEY_PROVIDER: 'managed',
+    SODEX_NETWORK: 'mainnet',
+    SODEX_CHAIN_ID: '286623',
+    SODEX_ACCOUNT_ADDRESS: '0x3333333333333333333333333333333333333333',
+    SODEX_API_KEY_NAME: 'gold-grith-mainnet',
+    SODEX_MANAGED_PRIVATE_KEY: '0x2222222222222222222222222222222222222222222222222222222222222222'
+  }, () => {
+    assert.doesNotThrow(assertProductionEnvironment);
+  });
+});
+
+test('mainnet canary rejects testnet network and chain settings', () => {
+  withEnv({
+    ...productionEnv,
+    EXECUTION_MODE: 'mainnet_canary',
+    KEY_PROVIDER: 'managed',
+    SODEX_ACCOUNT_ADDRESS: '0x3333333333333333333333333333333333333333',
+    SODEX_API_KEY_NAME: 'gold-grith-mainnet',
+    SODEX_MANAGED_PRIVATE_KEY: '0x2222222222222222222222222222222222222222222222222222222222222222'
+  }, () => {
+    assert.throws(assertProductionEnvironment, /SODEX_NETWORK=mainnet|SODEX_CHAIN_ID=286623/);
+  });
+});
+
+test('live execution requires an operator identity distinct from the master account', () => {
+  withEnv({
+    ...productionEnv,
+    EXECUTION_MODE: 'mainnet_canary',
+    KEY_PROVIDER: 'managed',
+    SODEX_NETWORK: 'mainnet',
+    SODEX_CHAIN_ID: '286623',
+    OPERATOR_WALLET_ADDRESSES: '0x3333333333333333333333333333333333333333',
+    SODEX_ACCOUNT_ADDRESS: '0x3333333333333333333333333333333333333333',
+    SODEX_API_KEY_NAME: 'gold-grith-mainnet',
+    SODEX_MANAGED_PRIVATE_KEY: '0x2222222222222222222222222222222222222222222222222222222222222222'
+  }, () => {
+    assert.throws(assertProductionEnvironment, /operator identity distinct from SODEX_ACCOUNT_ADDRESS/);
+  });
+});
+
+test('live execution rejects the master wallet private key as its managed signer', () => {
+  const masterKey = '0x2222222222222222222222222222222222222222222222222222222222222222';
+  withEnv({
+    ...productionEnv,
+    EXECUTION_MODE: 'mainnet_canary',
+    KEY_PROVIDER: 'managed',
+    SODEX_NETWORK: 'mainnet',
+    SODEX_CHAIN_ID: '286623',
+    SODEX_ACCOUNT_ADDRESS: new ethers.Wallet(masterKey).address,
+    SODEX_API_KEY_NAME: 'gold-grith-mainnet',
+    SODEX_MANAGED_PRIVATE_KEY: masterKey
+  }, () => {
+    assert.throws(assertProductionEnvironment, /not the SoDEX master wallet key/);
   });
 });
 
@@ -89,6 +155,21 @@ test('production environment rejects invalid feature flags', () => {
   withEnv({ ...productionEnv, ENABLE_TELEGRAM_BOT: 'sometimes' }, () => {
     assert.throws(assertProductionEnvironment, /ENABLE_TELEGRAM_BOT must be true or false/);
   });
+});
+
+test('cross-exchange Shield requires an independent production encryption key', () => {
+  withEnv({
+    ...productionEnv,
+    ENABLE_CROSS_EXCHANGE_SHIELD: 'true',
+    EXCHANGE_CREDENTIALS_KEY: productionEnv.SODEX_SESSION_SECRET
+  }, () => {
+    assert.throws(assertProductionEnvironment, /EXCHANGE_CREDENTIALS_KEY must be independent/);
+  });
+  withEnv({
+    ...productionEnv,
+    ENABLE_CROSS_EXCHANGE_SHIELD: 'true',
+    EXCHANGE_CREDENTIALS_KEY: 'independent-cross-exchange-key-that-is-over-32-characters'
+  }, () => assert.doesNotThrow(assertProductionEnvironment));
 });
 
 test('SkillMint production configuration validates its key, network, and skill ids', () => {

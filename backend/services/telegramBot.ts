@@ -7,7 +7,8 @@ import riskCalculator = require('../utils/riskCalculator');
 type InlineButton = { text: string } & ({ callback_data: string } | { url: string });
 type InlineKeyboard = { inline_keyboard: InlineButton[][] };
 
-const WALLET = process.env.USER_WALLET_ADDRESS || '';
+const WALLET = process.env.USER_WALLET_ADDRESS || process.env.SODEX_ACCOUNT_ADDRESS || '';
+const SODEX_NETWORK = sodexTrader.configuredTradingNetwork();
 const ALERT_THRESHOLD = parseInt(process.env.RISK_ALERT_THRESHOLD || '65', 10);
 const HIGH_IMPACT = ['CPI', 'FOMC', 'Federal Reserve', 'GDP', 'NFP', 'Jobs', 'PCE'];
 const PORT = process.env.PORT || '3001';
@@ -220,7 +221,7 @@ async function buildMenuText(): Promise<string> {
   let accountLine = 'Account: not configured';
   if (hasWallet) {
     try {
-      const { accountState } = await sodex.getEnrichedPositions(WALLET);
+      const { accountState } = await sodex.getEnrichedPositions(WALLET, SODEX_NETWORK);
       if (accountState) {
         accountLine = `Account: $${accountState.accountValue.toFixed(2)} | Margin: $${accountState.availableMargin.toFixed(2)}`;
       }
@@ -235,7 +236,7 @@ async function buildMenuText(): Promise<string> {
 async function buildPositionsOverview(): Promise<{ text: string; keyboard: InlineKeyboard }> {
   if (!WALLET) return { text: '❌ Wallet not configured.', keyboard: navBar('cmd_positions') };
   try {
-    const { positions, accountState } = await sodex.getEnrichedPositions(WALLET);
+    const { positions, accountState } = await sodex.getEnrichedPositions(WALLET, SODEX_NETWORK);
     if (!positions.length) return { text: '✅ No open positions.\n\nYou are flat.', keyboard: navBar('cmd_positions') };
 
     const lines = [
@@ -264,7 +265,7 @@ async function buildPositionsOverview(): Promise<{ text: string; keyboard: Inlin
 async function buildPositionDetail(symbol: string): Promise<{ text: string; keyboard: InlineKeyboard }> {
   if (!WALLET) return { text: '❌ Wallet not configured.', keyboard: navBar('cmd_positions') };
   try {
-    const { positions, accountState } = await sodex.getEnrichedPositions(WALLET);
+    const { positions, accountState } = await sodex.getEnrichedPositions(WALLET, SODEX_NETWORK);
     const p = positions.find(x => x.symbol === symbol);
     if (!p) return { text: `❌ Position not found: ${symbol}`, keyboard: navBar('cmd_positions') };
 
@@ -303,7 +304,7 @@ async function buildPositionDetail(symbol: string): Promise<{ text: string; keyb
 async function buildRiskOverview(): Promise<{ text: string; keyboard: InlineKeyboard }> {
   if (!WALLET) return { text: '❌ Wallet not configured.', keyboard: navBar('cmd_risk') };
   try {
-    const { positions } = await sodex.getEnrichedPositions(WALLET);
+    const { positions } = await sodex.getEnrichedPositions(WALLET, SODEX_NETWORK);
     if (!positions.length) return { text: '✅ No open positions — no risk.', keyboard: navBar('cmd_risk') };
 
     const lines = ['⚠️ RISK OVERVIEW', DIV];
@@ -329,7 +330,7 @@ async function buildRiskOverview(): Promise<{ text: string; keyboard: InlineKeyb
 async function buildPanicMode(): Promise<{ text: string; keyboard: InlineKeyboard }> {
   if (!WALLET) return { text: '❌ Wallet not configured.', keyboard: navBar('cmd_panic') };
   try {
-    const { positions, accountState } = await sodex.getEnrichedPositions(WALLET);
+    const { positions, accountState } = await sodex.getEnrichedPositions(WALLET, SODEX_NETWORK);
     if (!positions.length) return { text: '✅ No open positions to close.\n\nYou are flat.', keyboard: navBar('cmd_panic') };
 
     const keySet = sodexTrader.hasKey();
@@ -403,7 +404,9 @@ async function buildKeyInfo(): Promise<{ text: string; keyboard: InlineKeyboard 
 function sodexTradeUrl(symbol?: string): string {
   // Format: BTC-USD → BTC_USDC
   const pair = symbol ? symbol.replace('-USD', '_USDC') : 'BTC_USDC';
-  return `https://testnet.sodex.dev/trade/perps/${pair}`;
+  return SODEX_NETWORK === 'mainnet'
+    ? 'https://sodex.com'
+    : `https://testnet.sodex.dev/trade/perps/${pair}`;
 }
 
 function sodexTradeKeyboard(symbol?: string): InlineKeyboard {
@@ -420,7 +423,7 @@ function sodexTradeKeyboard(symbol?: string): InlineKeyboard {
 async function executeClose(chatId: string | number, symbol: string): Promise<void> {
   await sendMessage(chatId, `⏳ Attempting to close ${symbol}...`);
   try {
-    const { positions } = await sodex.getEnrichedPositions(WALLET);
+    const { positions } = await sodex.getEnrichedPositions(WALLET, SODEX_NETWORK);
     const pos = positions.find(p => p.symbol === symbol);
     const size = pos ? String(pos.positionSize) : '0';
 
@@ -439,7 +442,7 @@ async function executeClose(chatId: string | number, symbol: string): Promise<vo
     const entry = pos ? `$${parseFloat(String(pos.entryPrice || 0)).toFixed(2)}` : '--';
     const sz = pos ? String(pos.positionSize) : '--';
     await sendMessage(chatId,
-      `⚠️ MANUAL CLOSE REQUIRED\n${DIV}\nSoDEX testnet does not expose a public order API.\n\nYour position:\nSymbol: ${symbol}\nSize: ${sz}\nEntry: ${entry}\n\nTap below to close on SoDEX directly 👇`,
+      `⚠️ MANUAL CLOSE REQUIRED\n${DIV}\nAutomated close was not accepted on SoDEX ${SODEX_NETWORK}.\n\nYour position:\nSymbol: ${symbol}\nSize: ${sz}\nEntry: ${entry}\n\nOpen SoDEX and verify the account before acting 👇`,
       sodexTradeKeyboard(symbol)
     );
   } catch (err: any) {
@@ -466,7 +469,7 @@ async function executeOrder(chatId: string | number, symbol: string, side: 'BUY'
 
   // API unavailable — send direct link to SoDEX
   await sendMessage(chatId,
-    `⚠️ MANUAL ORDER REQUIRED\n${DIV}\nSoDEX testnet does not expose a public order API.\n\nYour order:\n${side} ${size} ${symbol} @ ${leverage}x MARKET\n\nTap below to place on SoDEX directly 👇`,
+    `⚠️ MANUAL ORDER REQUIRED\n${DIV}\nAutomated opening orders are disabled.\n\nYour draft:\n${side} ${size} ${symbol} @ ${leverage}x MARKET\n\nOpen SoDEX ${SODEX_NETWORK} and review it manually 👇`,
     sodexTradeKeyboard(symbol)
   );
 }
@@ -789,7 +792,7 @@ async function handleCallbackQuery(queryId: string, chatId: string | number, msg
   if (data.startsWith('trade_reduce_')) {
     const symbol = data.replace('trade_reduce_', '').replace(/_/g, '-');
     try {
-      const { positions } = await sodex.getEnrichedPositions(WALLET);
+      const { positions } = await sodex.getEnrichedPositions(WALLET, SODEX_NETWORK);
       const pos = positions.find(p => p.symbol === symbol);
       const currentLev = parseFloat(String(pos?.leverage || 1));
       setStep(cid, { type: 'reduce_leverage', symbol, currentLeverage: currentLev });
@@ -882,7 +885,7 @@ async function handleCallbackQuery(queryId: string, chatId: string | number, msg
   if (data.startsWith('action_margin_')) {
     const symbol = data.replace('action_margin_', '').replace(/_/g, '-');
     await sendMessage(chatId,
-      `💰 ADD MARGIN — ${symbol}\n${DIV}\nTo add margin on SoDEX testnet:\n1. Go to sodex.dev\n2. Open your ${symbol} position\n3. Click "Add Margin"\n\nMargin is added from your vUSDC balance.`,
+      `💰 ADD MARGIN — ${symbol}\n${DIV}\nTo add margin on SoDEX ${SODEX_NETWORK}:\n1. Open SoDEX\n2. Open your ${symbol} position\n3. Click "Add Margin"\n\nConfirm the asset and amount in SoDEX before submitting.`,
       navBar('cmd_risk')
     );
     return;

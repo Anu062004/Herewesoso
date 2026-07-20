@@ -2,760 +2,435 @@
 
 **Market context in. Risk decisions out.**
 
-Gold & Grith is a crypto trading intelligence terminal that connects [SoSoValue](https://sosovalue.com) market data with [SoDEX](https://sodex.com) perps execution on testnet. Two coordinated agents run on a configurable schedule, score crypto sectors, monitor open positions for liquidation risk, generate AI trade memos, and push operator alerts to Telegram and the dashboard.
+Gold & Grith is a crypto intelligence and risk terminal built around SoSoValue market data and SoDEX account/market APIs. It runs a narrative scanner and liquidation shield, persists evidence to Supabase, produces optional AI memos, and surfaces operator workflows through a Next.js dashboard and Telegram.
 
-**Live demo:** [frontend-eight-gilt-90.vercel.app](https://frontend-eight-gilt-90.vercel.app)
+Documentation status: **maintained**. Last full code and upstream SoDEX review: **2026-07-20**.
 
-**Repository:** [github.com/Anu062004/Herewesoso](https://github.com/Anu062004/Herewesoso)
+Detailed status and ownership: [docs/README.md](docs/README.md)
 
----
+> **SoDEX execution status:** market/account reads, dry-run policy checks, durable execution auditing, and managed registered-API-key signing are implemented. Direct connected-wallet trading is blocked because normal SoDEX trading actions require a registered API key. Mainnet is guarded by `mainnet_canary` and is not live-certified until the production migration, registered-key smoke check, and low-notional operator canary succeed. See [SoDEX compatibility](docs/api-and-eip712-integration-notes.md#implementation-compatibility).
 
-## Table of Contents
+## What it does
 
-- [Product Overview](#product-overview)
-- [The Problem](#the-problem)
-- [How It Works](#how-it-works)
-- [Architecture](#architecture)
-- [Key Features](#key-features)
-- [Tech Stack](#tech-stack)
-- [Project Structure](#project-structure)
-- [Prerequisites](#prerequisites)
-- [Installation](#installation)
-- [Environment Variables](#environment-variables)
-- [Database Setup](#database-setup)
-- [Running Locally](#running-locally)
-- [API Reference](#api-reference)
-- [Dashboard](#dashboard)
-- [Agent Loops](#agent-loops)
-- [AI Providers](#ai-providers)
-- [Telegram Bot](#telegram-bot)
-- [SoDEX Signing](#sodex-signing)
-- [Deployment](#deployment)
-- [Testing](#testing)
-- [Roadmap](#roadmap)
-- [Documentation](#documentation)
-- [Security Notes](#security-notes)
+Gold & Grith follows an Observe → Reason → Act loop:
 
----
+| Phase | Behavior | Sources and outputs |
+|---|---|---|
+| Observe | Fetch news, ETF flow, macro events, SoDEX candles, account state, positions, and order data | SoSoValue and SoDEX APIs |
+| Reason | Score eight narratives, classify lifecycle stage, calculate position risk, resolve historical outcomes, and write optional AI memos | Deterministic engines plus the selected AI adapter |
+| Act | Persist evidence, notify operators, simulate policy-gated actions, and audit execution attempts | Supabase, dashboard, Telegram, controlled SoDEX testnet/mainnet canary when explicitly enabled |
 
-## Product Overview
+The two scheduled agents are:
 
-Gold & Grith is built for crypto operators who need **narrative alpha discovery** and **position protection** in one terminal-style workspace. The product follows an **Observe → Reason → Act** loop:
+- **Narrative Alpha Scanner** — scores DeFi, AI, RWA, L1, L2, GameFi, DePIN, and Meme using attention velocity, acceleration, source breadth/quality, catalysts, sentiment, and market confirmation.
+- **Liquidation Shield** — evaluates liquidation proximity, margin health, volatility, liquidity, funding crowding, macro threat, and flow threat for the monitored SoDEX account.
 
-| Phase | What happens | Sources |
-|-------|--------------|---------|
-| **Observe** | Pull news, ETF flows, macro calendar, and live perp positions | SoSoValue API, SoDEX testnet |
-| **Reason** | Score sectors, calculate liquidation risk, write AI memos | Narrative Scorer, Risk Calculator, LLM adapters |
-| **Act** | Alert operators, surface signals on the dashboard, submit signed trades | Telegram, Supabase, EIP-712 SoDEX writes |
+## Current capabilities
 
-| Agent | Purpose | Primary Data Sources |
-|-------|---------|----------------------|
-| **Narrative Alpha Scanner** | Scores 8 crypto sectors and surfaces entry signals | SoSoValue news, ETF flow, macro calendar |
-| **Liquidation Shield** | Monitors perps positions for liquidation distance and macro-event pressure | SoDEX testnet account/positions, SoSoValue macro data |
-
-Both agents share a common orchestrator, persist results to Supabase, and notify operators via Telegram. The Next.js dashboard provides live polling views, confirmation-gated execution actions, and a trading-terminal UX.
-
----
-
-## The Problem
-
-Crypto traders juggle fragmented tools: one feed for news and narratives, another for macro calendars, another for positions and liquidation risk. By the time you connect "this sector is heating up" with "my BTC long is 5% from liquidation before CPI," the move has often already happened.
-
-Gold & Grith closes that gap by turning market context into risk decisions on a single operating surface — from SoSoValue intelligence to SoDEX action.
-
----
-
-## How It Works
-
-```mermaid
-flowchart LR
-  subgraph Inputs
-    SV[SoSoValue<br/>News · ETF · Macro]
-    SD[SoDEX Testnet<br/>Positions · Account]
-  end
-
-  subgraph Agents
-    ORCH[Orchestrator<br/>every 30 min]
-    NA[Narrative Scanner]
-    SA[Liquidation Shield]
-    AI[AI Memos]
-  end
-
-  subgraph Outputs
-    SB[(Supabase)]
-    TG[Telegram Alerts]
-    UI[Dashboard]
-  end
-
-  ORCH --> NA
-  ORCH --> SA
-  SV --> NA
-  SV --> SA
-  SD --> SA
-  NA --> AI
-  SA --> AI
-  NA --> SB
-  SA --> SB
-  NA --> TG
-  SA --> TG
-  SB --> UI
-```
-
-1. The **orchestrator** runs both agents on a 30-minute cycle (configurable).
-2. The **Narrative Scanner** pulls SoSoValue data, scores sectors, and flags top signals.
-3. The **Shield Agent** reads SoDEX positions, calculates risk, and triggers alerts above the threshold.
-4. **AI** generates trade memos for signals and risk events.
-5. Results are saved to **Supabase** and surfaced on the **dashboard** and **Telegram**.
-
-Default cycle interval: **30 minutes** (`CYCLE_INTERVAL_MS=1800000`).
-
----
+- Narrative lifecycle stages: `EMERGING`, `ACCELERATING`, `ESTABLISHED`, `CROWDED`, `FADING`, and `REVERSING`
+- Legacy-compatible signal labels: `STRONG_BUY`, `BUY`, `WATCH`, `NEUTRAL`, and `AVOID`
+- Position risk levels: `SAFE`, `CAUTION`, `DANGER`, and `CRITICAL`
+- SoDEX markets, order book, candles, deterministic chart analysis, account state, positions, and open orders
+- EIP-4361 Sign-In with Ethereum with one-time nonces, wallet-isolated durable identities, and an HttpOnly session cookie
+- Cross-exchange Shield aggregation for SoDEX, Binance USD-M, Bybit Linear, and OKX using encrypted read-only API credentials
+- Non-custodial on-chain automation rules with checker gates, allowlisted adapters, committed calldata, cooldowns, caps, and owner cancellation
+- Strategy Marketplace drafts, immutable published versions, wallet-scoped installations, reviews, and separately verified performance evidence
+- Dry-run action simulation for close-position, reduce-leverage, cancel-order, and queue-only actions
+- Idempotent execution audit rows, cooldown enforcement, notional/leverage/symbol allowlists, and fail-closed production storage
+- Signal outcome resolution at 1h, 6h, 24h, and 7d horizons with benchmark alpha and adverse-move evidence
+- Operator-scoped performance, alerts, memos, runs, and execution history
+- Optional Telegram alerts, commands, and daily summary
+- Pluggable Groq, xAI Grok, Gemini, Claude, and SkillMint adapters
+- Local-development memory fallback; production persistence failures are explicit
 
 ## Architecture
 
 ```mermaid
 flowchart TB
-  subgraph External["External Services"]
-    SV[SoSoValue API]
-    SD[SoDEX Testnet API]
-    AI[AI Provider<br/>Grok / Groq / Gemini / Claude / SkillMint]
+  subgraph External
+    SV[SoSoValue Market Data]
+    SD[SoDEX REST and WebSocket]
+    LLM[Selected AI Provider]
     TG[Telegram Bot API]
-    SB[(Supabase)]
+    DB[(Supabase PostgreSQL)]
   end
 
-  subgraph Backend["Backend — Express + TypeScript"]
+  subgraph Backend[Express and TypeScript]
+    API[REST Routes]
     ORCH[Orchestrator]
     NA[Narrative Agent]
-    SA[Shield Agent]
-    API[REST API Routes]
-    TB[Telegram Bot Handler]
+    SH[Shield Agent]
+    POLICY[Execution Policy and Ledger]
     SIGN[EIP-712 Signer]
   end
 
-  subgraph Frontend["Frontend — Next.js 15"]
-    LAND[Landing Page]
-    DASH[Trading Dashboard]
+  subgraph Frontend[Next.js 15]
+    UI[Operator Dashboard]
+    PROXY[Same-origin API Proxy]
     WALLET[Connected EVM Wallet]
-    PROXY[API Proxy]
   end
 
   ORCH --> NA
-  ORCH --> SA
+  ORCH --> SH
   NA --> SV
-  NA --> AI
-  SA --> SD
-  SA --> SV
-  SA --> AI
-  NA --> SB
-  SA --> SB
-  NA --> TG
-  SA --> TG
-  ORCH --> SB
-  TB --> SD
-  TB --> SIGN
-  API --> SB
+  NA --> SD
+  SH --> SV
+  SH --> SD
+  NA --> LLM
+  SH --> LLM
+  ORCH --> DB
+  API --> DB
   API --> SD
-  API --> SV
-  API --> SIGN
-  LAND --> DASH
-  DASH <--> WALLET
-  DASH --> PROXY
-  PROXY --> API
+  API --> POLICY
+  POLICY --> SIGN
+  ORCH --> TG
+  UI --> PROXY --> API
+  UI <--> WALLET
 ```
 
-### Component Responsibilities
-
-| Layer | Responsibility |
-|-------|----------------|
-| **Orchestrator** | Schedules agent cycles, prevents overlap, logs runs, sends daily summaries |
-| **Narrative Agent** | Fetches SoSoValue data, scores 8 sectors, generates memos and signal alerts |
-| **Shield Agent** | Reads SoDEX positions, computes risk scores, escalates high-risk positions |
-| **AI adapters** | Pluggable memo generation behind a single interface (`AI_SERVICE`) |
-| **SoDEX signer** | Builds EIP-712 `ExchangeAction` payloads, manages per-address nonces, and verifies connected-wallet signatures |
-| **Supabase** | Persistent store for scores, risks, alerts, memos, and agent run audit log |
-| **Dashboard** | Terminal UI with polling, heatmaps, risk gauges, and confirmation-gated actions |
-| **API proxy** | Next.js route forwards `/api/*` to the backend in production |
-
----
-
-## Key Features
-
-### Narrative Alpha Scanner
-
-- Scores **8 sectors**: DeFi, AI, RWA, L1, L2, GameFi, DePIN, Meme
-- Combines three scoring layers:
-  - **Narrative** — headline relevance and frequency from SoSoValue news
-  - **ETF flow** — 7-day net inflow buckets
-  - **Macro** — proximity to high-impact events (CPI, FOMC, GDP, NFP, etc.)
-- Produces combined scores and signals: `STRONG_BUY`, `BUY`, `WATCH`, `NEUTRAL`, `AVOID`
-- Generates AI reasoning memos for top signals
-
-### Liquidation Shield
-
-- Reads SoDEX testnet positions and account state
-- Calculates liquidation distance, leverage-adjusted risk, and macro-event threat
-- Assigns risk levels: `SAFE`, `CAUTION`, `DANGER`, `CRITICAL`
-- Sends alerts when risk exceeds `RISK_ALERT_THRESHOLD` (default: 65)
-- Falls back to leverage-based distance estimates when testnet returns `liquidationPrice = 0`
-
-### Operator Terminal
-
-- Terminal-style dashboard with heatmaps, risk gauges, and alert feeds
-- SoDEX market data: markets, orderbook, and klines
-- Confirmation modals before any execution action
-- In-memory fallback for local development; production storage failures are explicit and fail closed
-
-### Signed SoDEX Actions
-
-- **EIP-712 signed writes** for close position, reduce leverage, and cancel order
-- Atomic nonce manager prevents duplicate signature races
-- Actions require explicit dashboard confirmation before submission
-
-### Telegram Integration
-
-- Alert delivery for narrative signals and liquidation risk
-- Interactive bot commands for status, positions, signals, and trade flows
-- Server-operator key provisioning through environment or managed secrets
-- Daily summary at 08:00 UTC (when scheduler is active)
-
----
-
-## Tech Stack
-
 | Layer | Technology |
-|-------|------------|
-| Backend runtime | Node.js, TypeScript, `tsx` |
-| API server | Express 4, CORS |
+|---|---|
+| Backend | Node.js, TypeScript, `tsx`, Express 4 |
 | Frontend | Next.js 15.5, React 18, Tailwind CSS |
-| Database | Supabase (PostgreSQL) |
-| AI | Pluggable adapters: xAI Grok, Groq, Gemini, Claude, SkillMint (0G) |
-| Blockchain | ethers.js, EIP-712 signing for SoDEX |
-| External APIs | SoSoValue OpenAPI, SoDEX testnet REST |
+| Persistence | Supabase/PostgreSQL |
+| Signing | ethers.js and SoDEX EIP-712 `ExchangeAction` payloads |
+| AI | Groq, xAI, Gemini, Anthropic, or SkillMint |
 | Notifications | Telegram Bot API |
-| Deployment | Vercel (frontend + serverless backend with cron triggers) |
+| CI | GitHub Actions on Node.js 22 |
 
----
-
-## Project Structure
+## Repository layout
 
 ```text
 .
 ├── backend/
-│   ├── agents/           # Narrative, Shield, and Orchestrator agents
-│   ├── routes/           # Express REST route handlers
-│   ├── services/         # SoSoValue, SoDEX, AI, Telegram, Supabase clients
-│   ├── utils/            # Narrative scorer, risk calculator
-│   ├── tests/            # Unit tests
-│   ├── app.ts            # Express app wiring
-│   ├── server.ts         # HTTP server + scheduler bootstrap
-│   └── vercel.json       # Serverless rewrites and cron jobs
+│   ├── agents/                       # Narrative, Shield, and orchestrator loops
+│   ├── routes/                       # Express route handlers
+│   ├── services/                     # External clients, auth, signing, policy, persistence
+│   ├── skills/technical-graph-analysis/
+│   ├── tests/
+│   ├── app.ts                        # Middleware and route mounts
+│   └── server.ts                     # Long-lived server bootstrap
 ├── frontend/
-│   ├── app/              # Next.js App Router pages and API proxy
-│   ├── components/       # Dashboard UI, modals, terminal shell
-│   └── lib/              # API client, types, polling hooks
-├── docs/
-│   └── api-and-eip712-integration-notes.md
-├── .env                  # Local-only environment file, never committed
-├── package.json          # Root scripts and backend dependencies
-└── README.md
+│   ├── app/                          # App Router pages and same-origin API proxy
+│   ├── components/
+│   └── lib/
+├── docs/                             # Maintained API, protocol, and schema documentation
+├── contracts/                        # Solidity automation executor, interfaces, and test adapters
+├── scripts/check-docs.mjs            # Documentation consistency checks
+├── .env.example                      # Canonical non-secret configuration template
+└── package.json                      # Root commands and backend dependencies
 ```
 
----
+The npm package names still use the legacy internal identifier `sentinel-finance`; user-facing documentation and UI use **Gold & Grith**.
 
 ## Prerequisites
 
-- **Node.js** 18+ (20+ recommended)
-- **npm**
-- API keys for:
-  - [SoSoValue](https://sosovalue.com) (OpenAPI key)
-  - At least one AI provider (Grok, Groq, Gemini, or Claude)
-  - [Supabase](https://supabase.com) project
-  - [Telegram Bot](https://core.telegram.org/bots#botfather) (optional but recommended)
-- SoDEX testnet account and API signing key (for live position reads and signed writes)
+- Node.js **22** (the tested CI baseline)
+- npm
+- A SoSoValue API key for live intelligence data
+- A Supabase project for production
+- An EVM wallet with a SoDEX account for wallet-scoped dashboard data
+- A dedicated registered SoDEX API key only if enabling managed server-side testnet or mainnet-canary writes
+- Credentials for the selected AI provider in production
+- A Telegram bot and chat ID only if Telegram is enabled
 
----
-
-## Installation
+## Install
 
 ```bash
-# Clone the repository
 git clone https://github.com/Anu062004/Herewesoso.git
 cd Herewesoso
-
-# Install backend dependencies
-npm install
-
-# Install frontend dependencies
-npm --prefix frontend install
-
-# Configure environment
-# Create .env manually and add the variables listed below.
-# Do not commit .env or private key material.
+npm ci
+npm --prefix frontend ci
+cp .env.example .env
 ```
 
----
+Edit `.env` locally. Never commit it. For exploratory development, external credentials may be blank, but protected and external-data features will be unavailable or use clearly labeled development fallbacks. Production startup validates mandatory security, persistence, wallet, URL, scheduler, and AI settings.
 
-## Environment Variables
+## Configuration
 
-Create a local `.env` file and configure the following groups. `.env` is intentionally ignored by Git.
+[`.env.example`](.env.example) is the canonical list of supported configuration keys. Important groups are summarized below.
 
-### AI Service (pick one)
+### Runtime and security
 
-| Variable | Description |
-|----------|-------------|
-| `AI_SERVICE` | `grok` (recommended), `groq`, `gemini`, `claude`, or `skillmint` |
-| `XAI_API_KEY` | xAI Grok API key |
-| `XAI_MODEL` | Default: `grok-3` |
-| `GROQ_API_KEY` | Groq API key |
-| `GROQ_MODEL` | Default: `llama-3.3-70b-versatile` |
-| `GEMINI_API_KEY` | Google Gemini API key |
-| `ANTHROPIC_API_KEY` | Anthropic Claude API key |
-| `SKILLMINT_*` | SkillMint / 0G verifiable execution settings |
+| Variable | Default | Purpose |
+|---|---:|---|
+| `NODE_ENV` | `development` | Enables production validation and fail-closed behavior when set to `production`. |
+| `PORT` | `3001` | Backend listen port. |
+| `NEXT_PUBLIC_APP_URL` | `http://localhost:3000` | Frontend origin and Telegram deep-link base. |
+| `API_BASE_URL` | `http://localhost:3001` | Server-side frontend proxy target. |
+| `NEXT_PUBLIC_API_BASE_URL` | `http://localhost:3001` | Public fallback proxy target. Prefer `API_BASE_URL` for deployments. |
+| `ALLOWED_ORIGINS` | local frontend in development | Comma-separated CORS origins; HTTPS is required in production. |
+| `SODEX_SESSION_SECRET` | none | Stable secret of at least 32 characters for wallet sessions and action intents. |
+| `SODEX_SESSION_TTL_MS` | `86400000` | Session lifetime; allowed range is 5 minutes to 7 days. |
+| `CRON_SECRET` | none | Independent 32+ character bearer secret for scheduled routes. |
+| `OPERATOR_WALLET_ADDRESSES` | none | Comma-separated wallets allowed to access operational routes. |
 
-All AI adapters expose the same interface — switching providers requires only changing `AI_SERVICE`. Production startup requires the selected provider credential, and provider failures fail the cycle instead of being presented as AI output; deterministic memo fallbacks are development-only.
+### Persistence
 
-### SoSoValue
+| Variable | Purpose |
+|---|---|
+| `SUPABASE_URL` | Supabase project URL; must use HTTPS in production. |
+| `SUPABASE_SERVICE_ROLE_KEY` | Backend-only service-role credential. Never expose it to the browser. |
 
-| Variable | Description |
-|----------|-------------|
-| `SOSOVALUE_API_KEY` | API key sent as `x-soso-api-key` |
-| `SOSOVALUE_BASE_URL` | Default: `https://openapi.sosovalue.com/openapi/v1` |
+### Market intelligence and AI
 
-### SoDEX Testnet
+| Variable | Default | Purpose |
+|---|---:|---|
+| `SOSOVALUE_API_KEY` | none | Sent as `x-soso-api-key`. |
+| `SOSOVALUE_BASE_URL` | `https://openapi.sosovalue.com/openapi/v1` | Market-data API base. |
+| `AI_SERVICE` | `groq` | `groq`, `grok`/`xai`, `gemini`, `claude`, or `skillmint`. |
+| `GROQ_MODEL` | `llama-3.3-70b-versatile` | Groq model name. |
+| `XAI_MODEL` | `grok-3` | xAI model name. |
+| `GEMINI_MODEL` | `gemini-1.5-flash` | Gemini model name. |
+| `ANTHROPIC_MODEL` | `claude-sonnet-4-6` | Anthropic model name. |
 
-| Variable | Description |
-|----------|-------------|
-| `SODEX_TESTNET_PERPS` | Perps REST base URL |
-| `SODEX_ACCOUNT_ADDRESS` | Account used by optional backend automation; interactive dashboard actions use the connected wallet |
-| `SODEX_API_KEY_NAME` | Registered trading API key name for optional backend automation |
-| `SODEX_API_PRIVATE_KEY` | Optional automation signing secret injected by the deployment secret manager |
-| `SODEX_CHAIN_ID` | Default: `138565` |
+Provide the matching credential: `GROQ_API_KEY`, `XAI_API_KEY`, `GEMINI_API_KEY`, `ANTHROPIC_API_KEY`, or `SKILLMINT_AGENT_KEY`. Production requires the selected adapter to be configured. See [SkillMint integration](backend/services/SKILLMINT_INTEGRATION.md) for its additional settings.
 
-Interactive close-position, reduce-leverage, and cancel-order actions are prepared and policy-checked by the backend, then EIP-712 signed by the connected browser wallet. The private key never reaches the app or backend. Short-lived action intents bind the signature to the authenticated wallet, network, nonce, and exact SoDEX payload. `KEY_PROVIDER=disabled` is therefore valid for interactive wallet signing, including guarded `mainnet_canary` deployments.
+### SoDEX and execution
 
-Backend automation such as Telegram trading still uses a registered SoDEX API key or controlled master-wallet signer. For that mode, inject a revocable key through a secret manager, set `SODEX_API_KEY_NAME`, and use `KEY_PROVIDER=managed` in production. Do not send `X-API-Key: default`; SoDEX treats master-wallet signing as the no-header case.
+| Variable | Default | Purpose |
+|---|---:|---|
+| `SODEX_NETWORK` | `testnet` | Default monitored network: `testnet` or `mainnet`. |
+| `SODEX_ACCOUNT_ADDRESS` | none | Master account monitored and traded through its registered API key; not an operator-login fallback. |
+| `SODEX_ACCOUNT_ID` | discovered | Optional numeric account-ID override for signed automation. |
+| `SODEX_API_KEY_NAME` | none | Registered key name sent in `X-API-Key`; it is not an address or secret. |
+| `SODEX_API_PRIVATE_KEY` | none | Registered API-key private key for controlled server automation. |
+| `SODEX_MANAGED_PRIVATE_KEY` | none | Deployment-managed signing-key override. |
+| `SODEX_CHAIN_ID` | `138565` | Must be `138565` for testnet or `286623` for mainnet; mismatches are rejected. |
+| `KEY_PROVIDER` | `disabled` | `disabled`, `managed`, `env`, or local-only `local_file`. |
+| `EXECUTION_MODE` | `dry_run` | `dry_run`, `testnet`, or guarded `mainnet_canary`. |
+| `ALLOWED_SYMBOLS` | `BTC-USD,ETH-USD,SOL-USD` | Execution allowlist. |
+| `MAX_LEVERAGE` | `25` | Policy ceiling. |
+| `MAX_NOTIONAL_USD` | `10000` | Policy notional ceiling. |
+| `ACTION_COOLDOWN_MS` | `60000` | Equivalent-action cooldown. |
+| `ENABLE_CROSS_EXCHANGE_SHIELD` | `false` | Enables storage of verified read-only CEX connections. |
+| `EXCHANGE_CREDENTIALS_KEY` | none | Independent 32+ character root secret for AES-256-GCM credential encryption. |
+| `SHIELD_AUTOMATION_TESTNET_CONTRACT_ADDRESS` | none | Deployed and audited testnet executor address. |
+| `SHIELD_AUTOMATION_MAINNET_CONTRACT_ADDRESS` | none | Deployed and audited mainnet executor address. |
 
-### Supabase
+The four REST base URLs and the testnet chain ID are in `.env.example`. Mainnet trading uses chain ID `286623`; testnet uses `138565`. Live modes require `KEY_PROVIDER=managed`, Supabase with the production-hardening migration applied, a non-default registered key name, a signer distinct from the master account, and an explicit operator identity that is also distinct from the master account. Keep production at `dry_run` unless the selected signing path has passed the registered-key testnet smoke test.
 
-| Variable | Description |
-|----------|-------------|
-| `SUPABASE_URL` | Project URL |
-| `SUPABASE_SERVICE_ROLE_KEY` | Service role key (backend writes) |
+### Scheduling and validation
 
-The frontend does not connect to Supabase directly; all database access is authorized by the backend.
+| Variable | Default | Purpose |
+|---|---:|---|
+| `ENABLE_BACKGROUND_SCHEDULER` | `true` outside Vercel | Starts the in-process orchestrator on a long-lived backend. |
+| `ENABLE_TELEGRAM_BOT` | `false` | Starts Telegram long polling; enable on exactly one long-lived replica. |
+| `CYCLE_INTERVAL_MS` | `1800000` | Agent interval; production minimum is 60 seconds. |
+| `DAILY_SUMMARY_UTC_HOUR` | `8` | UTC hour from 0–23. |
+| `RISK_ALERT_THRESHOLD` | `65` | Shield alert threshold. |
+| `RISK_ALERT_COOLDOWN_MS` | `1800000` | Repeated risk-alert cooldown. |
+| `USER_WALLET_ADDRESS` | none | Wallet monitored by the scheduled Shield Agent. |
+| `NARRATIVE_MODEL_VERSION` | `narrative-v2.0.0` | Version attached to performance snapshots. |
+| `SIGNAL_OUTCOME_NETWORK` | `testnet` | Network used to resolve signal outcomes. |
 
-### Telegram
+The remaining outcome-window and optional endpoint-discovery settings are documented inline in `.env.example`.
 
-| Variable | Description |
-|----------|-------------|
-| `TELEGRAM_BOT_TOKEN` | Bot token from BotFather |
-| `TELEGRAM_CHAT_ID` | Target chat ID for alerts |
+## Database setup
 
-### App Configuration
+Apply the migrations from the Supabase SQL editor or your controlled migration runner in this order:
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `PORT` | `3001` | Backend port |
-| `ALLOWED_ORIGINS` | — | Comma-separated frontend origins accepted by CORS; required in production |
-| `SODEX_SESSION_SECRET` | — | Stable 32+ character wallet-session signing secret; required in production |
-| `SODEX_SESSION_TTL_MS` | `86400000` | Wallet session lifetime (5 minutes to 7 days; defaults to 24 hours) |
-| `CRON_SECRET` | — | Independent 32+ character bearer secret used by scheduled routes |
-| `OPERATOR_WALLET_ADDRESSES` | — | Comma-separated wallets allowed to run operational actions |
-| `CYCLE_INTERVAL_MS` | `1800000` | Agent cycle interval (30 min) |
-| `ENABLE_TELEGRAM_BOT` | `false` | Opt in to Telegram long polling on exactly one long-lived backend replica |
-| `RISK_ALERT_THRESHOLD` | `65` | Shield alert trigger score |
-| `USER_WALLET_ADDRESS` | — | Wallet monitored by Shield Agent |
-| `NEXT_PUBLIC_APP_URL` | `http://localhost:3000` | Frontend URL for Telegram deep links |
-| `NEXT_PUBLIC_API_BASE_URL` | `http://localhost:3001` | Backend URL for frontend |
-| `EXECUTION_MODE` | `dry_run` | `dry_run`, explicit `testnet`, or guarded `mainnet_canary` execution mode |
-| `KEY_PROVIDER` | `disabled` | Backend automation key provider; interactive wallet signing keeps this `disabled` |
-| `MAX_NOTIONAL_USD` | `10000` | Hard policy cap for execution previews and confirmations |
-| `ALLOWED_SYMBOLS` | `BTC-USD,ETH-USD,SOL-USD` | Comma-separated execution allowlist |
-| `MAX_LEVERAGE` | `25` | Maximum leverage accepted by the execution policy |
-| `NARRATIVE_MODEL_VERSION` | `narrative-v2.0.0` | Version tag written into signal outcome rows |
-| `SIGNAL_BENCHMARK_SYMBOL` | `BTC-USD` | Benchmark used to calculate signal alpha |
-| `SIGNAL_OUTCOME_NETWORK` | `testnet` | SoDEX network used by historical signal validation |
-| `SECTOR_PROXY_SYMBOLS` | built-in mapping | Optional sector proxy override, as JSON or `AI=RENDER-USD,L1=SOL-USD` |
+1. [`docs/base-schema.sql`](docs/base-schema.sql)
+2. [`docs/narrative-v2-schema.sql`](docs/narrative-v2-schema.sql)
+3. [`docs/wave3-schema.sql`](docs/wave3-schema.sql)
+4. [`docs/production-hardening-schema.sql`](docs/production-hardening-schema.sql)
 
----
+The final migration adds durable login challenges, distributed leases/rate limits, execution uniqueness and cooldown indexes, data constraints, RLS, and browser-role revocations. Review and back up an existing database before applying it. The frontend never connects to Supabase directly.
 
-## Database Setup
+## Run locally
 
-Create the following tables in your Supabase project.
-
-```sql
--- Narrative sector scores from each scanner cycle
-CREATE TABLE narrative_scores (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  created_at TIMESTAMPTZ DEFAULT now(),
-  sector TEXT NOT NULL,
-  score_narrative INTEGER NOT NULL,
-  score_etf_flow INTEGER NOT NULL,
-  score_macro INTEGER NOT NULL,
-  combined_score INTEGER NOT NULL,
-  signal TEXT NOT NULL,
-  top_headlines JSONB DEFAULT '[]',
-  reasoning TEXT
-);
-
--- Position risk snapshots from each shield cycle
-CREATE TABLE position_risks (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  created_at TIMESTAMPTZ DEFAULT now(),
-  wallet_address TEXT NOT NULL,
-  symbol TEXT NOT NULL,
-  entry_price NUMERIC NOT NULL,
-  mark_price NUMERIC NOT NULL,
-  liquidation_price NUMERIC NOT NULL,
-  leverage NUMERIC NOT NULL,
-  position_size NUMERIC NOT NULL,
-  distance_to_liquidation_pct NUMERIC NOT NULL,
-  risk_score INTEGER NOT NULL,
-  risk_level TEXT NOT NULL,
-  macro_threats JSONB
-);
-
--- Operator alerts (narrative signals, liquidation risk, macro events)
-CREATE TABLE alerts (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  created_at TIMESTAMPTZ DEFAULT now(),
-  wallet_address TEXT,
-  alert_type TEXT NOT NULL,
-  severity TEXT NOT NULL,
-  title TEXT NOT NULL,
-  message TEXT NOT NULL,
-  telegram_sent BOOLEAN DEFAULT false,
-  data JSONB
-);
-
--- AI-generated trade memos
-CREATE TABLE trade_memos (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  created_at TIMESTAMPTZ DEFAULT now(),
-  wallet_address TEXT,
-  memo_type TEXT NOT NULL,
-  content TEXT NOT NULL,
-  related_symbol TEXT,
-  data JSONB
-);
-
--- Agent run audit log
-CREATE TABLE agent_runs (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  created_at TIMESTAMPTZ DEFAULT now(),
-  updated_at TIMESTAMPTZ DEFAULT now(),
-  agent TEXT NOT NULL,
-  status TEXT NOT NULL DEFAULT 'running',
-  duration_ms INTEGER,
-  error TEXT,
-  summary JSONB
-);
-
-CREATE INDEX idx_narrative_scores_created ON narrative_scores (created_at DESC);
-CREATE INDEX idx_position_risks_created ON position_risks (created_at DESC);
-CREATE INDEX idx_alerts_created ON alerts (created_at DESC);
-CREATE INDEX idx_trade_memos_created ON trade_memos (created_at DESC);
-CREATE INDEX idx_agent_runs_created ON agent_runs (created_at DESC);
-```
-
-Supabase writes use in-memory fallbacks only during local development. Production requires the service-role connection and fails closed if durable storage is unavailable.
-
----
-
-### Wave 3 Evidence Tables
-
-Additional Supabase tables for signal outcomes, execution audit logs, performance snapshots, portfolio snapshots, and model versions are in [docs/wave3-schema.sql](docs/wave3-schema.sql). Run that SQL after the base tables above before enabling the Wave 3 proof dashboard.
-
-For production, then apply [docs/narrative-v2-schema.sql](docs/narrative-v2-schema.sql) and [docs/production-hardening-schema.sql](docs/production-hardening-schema.sql). The hardening migration adds durable login challenges, distributed locks and rate limits, execution idempotency, database constraints, and RLS with browser roles revoked.
-
-## Running Locally
+Use separate terminals:
 
 ```bash
-# Terminal 1 — Backend (with scheduler + Telegram bot)
 npm run dev
+```
 
-# Terminal 2 — Frontend
+```bash
 npm run frontend:dev
 ```
 
 | Service | URL |
-|---------|-----|
-| Frontend | http://localhost:3000 |
-| Backend API | http://localhost:3001 |
-| Health check | http://localhost:3001/health |
+|---|---|
+| Frontend | `http://localhost:3000` |
+| Backend liveness | `http://localhost:3001/health` |
+| Backend API | `http://localhost:3001/api/*` |
 
-### Additional Scripts
-
-```bash
-npm run typecheck       # TypeScript check (backend)
-npm test                # Run backend unit tests
-npm run frontend:build  # Production frontend build
-npm run frontend:start  # Start production frontend
-```
-
-### Manual Cycle Trigger
+The scheduler starts immediately by default on the long-lived backend. Set `ENABLE_BACKGROUND_SCHEDULER=false` when you only want the API. To trigger a cycle manually, use the authenticated operator dashboard or a cron-authorized request:
 
 ```bash
-curl -X POST http://localhost:3001/api/trigger
+curl -X POST \
+  -H "Authorization: Bearer $CRON_SECRET" \
+  http://localhost:3001/api/trigger
 ```
 
----
+## API and authentication
 
-## API Reference
+The complete route inventory, authentication matrix, query limits, and action flow are in [docs/api-reference.md](docs/api-reference.md).
 
-### Health and Agents
+Authentication has four levels:
 
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| `GET` | `/health`, `/api/health` | Service health and Telegram status |
-| `GET` | `/api/agent-runs` | Latest orchestrator run metadata |
-| `POST` | `/api/trigger` | Manually run a full agent cycle |
-| `POST` | `/api/daily-summary` | Force-send daily Telegram summary |
-| `POST` | `/api/performance/resolve` | Resolve pending signal outcomes with SoDEX kline data |
+- **Public** — market/news reads and minimal `/health` liveness.
+- **Wallet** — any valid signed wallet session.
+- **Operator** — wallet session whose address is allowlisted.
+- **Operator or cron** — operator session or bearer `CRON_SECRET`.
 
-### Intelligence Data
+The domain-bound EIP-4361 signature proves wallet identity and creates an isolated session. It does not sign a trade. Live actions are signed only by the deployment-managed registered SoDEX API key after operator authorization and policy checks.
 
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| `GET` | `/api/signals` | Latest narrative sector scores |
-| `GET` | `/api/positions` | Live SoDEX positions + risk history |
-| `GET` | `/api/alerts` | Alert feed |
-| `GET` | `/api/memos` | AI trade memos |
-| `GET` | `/api/macro` | Upcoming macro events |
-| `GET` | `/api/risks` | Position risk snapshots |
-| `GET` | `/api/news` | SoSoValue news feed |
-| `POST` | `/api/analyze` | On-demand narrative analysis |
+## Wave 3 implementation evidence
 
-### SoDEX Market Data
+| Capability | Delivered implementation | Operational boundary |
+|---|---|---|
+| SIWE multi-user | EIP-4361 domain/URI/chain/nonce/expiry messages in `walletAuth`, one-time durable challenges, wallet user/session tables, and owner-scoped APIs | Requires the Wave 3 and production-hardening migrations for durable production sessions |
+| Cross-exchange Shield | Signed read-only connectors for Binance USD-M, Bybit Linear, and OKX; SoDEX aggregation; AES-256-GCM credential storage; unified risk scans and dashboard | Users must supply read-only keys; live venue access is verified when a connection is created |
+| On-chain auto execution | `ShieldAutomationExecutor.sol`, checker/adapter interfaces, calldata commitments, permissionless keeper execution, build script, backend transaction preparation, receipt verification, and dashboard rule creation | No contract address is claimed as deployed; deploy and audit adapters/checkers before configuring an address |
+| Strategy Marketplace | Owner-authenticated create/publish/install/review APIs, immutable content-hashed versions, performance-claim verification states, Supabase schema, and dashboard catalog | Performance claims remain hidden from public evidence until independently marked `VERIFIED` |
 
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| `GET` | `/api/sodex/account` | Account state and balances |
-| `GET` | `/api/sodex/markets` | Perps market list |
-| `GET` | `/api/sodex/orderbook/:symbol` | Order book for a symbol |
-| `GET` | `/api/sodex/klines/:symbol` | Candlestick data |
-| `GET` | `/api/sodex/open-orders` | Open orders for the account |
+`npm run contracts:compile` produces executor bytecode locally. `npm test` covers SIWE recovery, encrypted credential tamper detection, marketplace immutability/ownership, and automation calldata commitments. These checks prove repository delivery, not a production deployment or exchange profitability.
 
-### Actions and Notifications
+## Narrative scoring
 
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| `POST` | `/api/actions` | Close position, reduce leverage, cancel order |
-| `POST` | `/api/test-telegram` | Send a test Telegram message |
+Narrative v2 is the active opportunity score. Default positive weights are:
 
-**Action payload examples:**
+| Component | Weight |
+|---|---:|
+| Attention velocity | 20% |
+| Attention acceleration | 15% |
+| Source breadth | 15% |
+| Source quality | 10% |
+| Catalyst strength | 10% |
+| Sentiment | 10% |
+| Market confirmation | 20% |
 
-```json
-{ "action": "CLOSE_POSITION", "symbol": "BTC-USD" }
-```
+Crowding and contradiction are penalties, and the BTC-derived market regime can adjust the result. Calibrated weights may replace defaults after enough resolved observations exist. Confidence is evidence coverage/agreement, not a probability of future return. The stored legacy ETF and macro columns remain useful context but are not direct weighted components of the v2 opportunity score.
 
-```json
-{ "action": "REDUCE_LEVERAGE", "symbol": "BTC-USD", "currentLeverage": 20, "targetLeverage": 10 }
-```
+Lifecycle stage affects the legacy label: reversing narratives become `AVOID`, fading narratives become `NEUTRAL`, and crowded narratives cannot become `BUY`/`STRONG_BUY`. The exact model is implemented in `backend/services/narrativeEngine.ts` and versioned as `narrative-v2.0.0`.
 
-```json
-{ "action": "CANCEL_ORDER", "orderId": "12345" }
-```
+## Shield risk model
 
-Supported actions: `CLOSE_POSITION`, `REDUCE_LEVERAGE`, `CANCEL_ORDER`, `QUEUE_ACTION`.
+Shield v2 combines:
 
----
+| Component | Weight |
+|---|---:|
+| Liquidation proximity | 35% |
+| Margin health | 20% |
+| Volatility | 15% |
+| Liquidity | 10% |
+| Funding crowding | 10% |
+| Macro threat | 7% |
+| Flow threat | 3% |
 
-## Dashboard
+If SoDEX does not provide a liquidation price, the service estimates one from leverage and labels confidence accordingly. Rescue actions and stress scenarios are estimates only; operators must confirm maintenance margin, fees, liquidity, and price on SoDEX.
 
-The trading terminal is available at `/dashboard` with the following views:
+## Agent and scheduler behavior
 
-| Route | Description |
-|-------|-------------|
-| `/` | Landing page with system map and product overview |
-| `/dashboard` | Overview with health, agent runs, and quick actions |
-| `/dashboard/scanner` | Narrative Alpha Scanner heatmap |
-| `/dashboard/shield` | Liquidation Shield risk monitor |
-| `/dashboard/positions` | Live positions and risk history |
-| `/dashboard/signals` | Sector signal feed |
-| `/dashboard/alerts` | Alert stream with severity filters |
-| `/dashboard/memos` | AI-generated trade memos |
-| `/dashboard/macro` | Macro event calendar |
-| `/dashboard/news` | SoSoValue news feed |
-| `/dashboard/sodex/markets` | SoDEX market overview |
-| `/dashboard/sodex/orderbook` | Live order book |
-| `/dashboard/sodex/klines` | Price charts |
-| `/dashboard/ai` | On-demand AI analysis |
-| `/dashboard/telegram` | Bot setup and test panel |
+One full cycle:
 
-### Polling Intervals
+1. Acquires a durable `orchestrator-cycle` lease.
+2. Runs Narrative and Shield concurrently.
+3. Fails the cycle if either agent fails.
+4. Resolves pending signal outcomes.
+5. Records a performance snapshot and final run summary.
+6. Releases the lease.
 
-| Resource | Interval |
-|----------|----------|
-| Positions | 30 seconds |
-| Signals | 60 seconds |
-| Alerts | 30 seconds |
-| Health / agent runs | 30 seconds |
+The narrative agent fetches up to 100 headlines, ETF history, macro events, and sector proxy candles. It reasons over up to three qualifying signals per cycle. The shield reads live account state and market evidence for each position, persists snapshots, and alerts only above the configured threshold/cooldown.
 
-Execution buttons open a confirmation modal before submitting signed SoDEX actions.
+The daily summary checker runs every five minutes and sends once during the configured UTC-hour window. Vercel disables in-process scheduling; `backend/vercel.json` instead defines `/api/trigger` every 30 minutes and `/api/daily-summary` at 08:00 UTC.
 
----
+## SoDEX signing and execution safety
 
-## Agent Loops
+Trading writes use the EIP-712 `ExchangeAction(bytes32 payloadHash,uint64 nonce)` structure. Gold & Grith:
 
-### Narrative Alpha Scanner
+- builds ordered, compact SoDEX payloads with decimal strings;
+- hashes `{ type, params }` with Keccak-256;
+- uses the `futures` domain for perps;
+- allocates live per-signer nonces atomically through Supabase (dry-run development may use process memory);
+- prepends the SoDEX typed-signature marker;
+- enforces execution mode, network, symbol, leverage, notional, cooldown, and idempotency policy;
+- creates a durable audit claim before submission.
 
-1. Fetch news (50 headlines), 7-day ETF summary, and macro events from SoSoValue.
-2. For each of 8 sectors, compute narrative, ETF, and macro layer scores.
-3. Combine layers into a weighted signal with `generateSignal()`.
-4. Generate AI reasoning for strong signals.
-5. Persist scores to `narrative_scores`, memos to `trade_memos`, and alerts to `alerts`.
-6. Send Telegram notification for the top signal.
+For managed automation, the signing private key must derive the public address registered under the non-default `SODEX_API_KEY_NAME`, and it must be distinct from `SODEX_ACCOUNT_ADDRESS`. Every trading write includes that key name in `X-API-Key`; the private key is never sent or logged.
 
-### Liquidation Shield
+`/api/actions/confirm-wallet` is retained only as an explicit compatibility tombstone and returns `409 CONNECTED_WALLET_EXECUTION_UNSUPPORTED`. The dashboard authorizes through `/api/actions/confirm`; the managed registered key performs the SoDEX EIP-712 signature. Full protocol details and the support matrix are in [docs/api-and-eip712-integration-notes.md](docs/api-and-eip712-integration-notes.md).
 
-1. Fetch SoDEX testnet positions and account state; if unavailable, fail the monitoring cycle and expose only clearly labelled stored snapshots.
-2. Pull macro events and ETF flow context from SoSoValue.
-3. For each position, calculate liquidation distance, position risk, and macro threat.
-4. Combine into a risk score and level (`SAFE` → `CRITICAL`).
-5. Persist snapshots to `position_risks`.
-6. Send Telegram alert when risk score exceeds threshold.
+## Dashboard routes
 
-### Orchestrator
+| Route | View |
+|---|---|
+| `/` | Product landing page |
+| `/dashboard/sodex/connect` | Wallet challenge login and network selection |
+| `/dashboard` | Operator overview |
+| `/dashboard/scanner` | Narrative lifecycle and evidence |
+| `/dashboard/shield` | Position risk and rescue estimates |
+| `/dashboard/shield/exchanges` | Cross-exchange connections and unified liquidation risk |
+| `/dashboard/strategies` | Strategy Marketplace catalog and publishing |
+| `/dashboard/automation` | On-chain automation deployment status and rule creation |
+| `/dashboard/positions` | Live account and stored risk history |
+| `/dashboard/signals` | Signal feed |
+| `/dashboard/performance` | Outcome and model performance |
+| `/dashboard/executions` | Execution audit ledger |
+| `/dashboard/alerts` | Operator alert feed |
+| `/dashboard/memos` | AI memo feed |
+| `/dashboard/macro` | Macro calendar |
+| `/dashboard/news` | News feed |
+| `/dashboard/sodex/markets` | Perps marks and SoSoValue indices |
+| `/dashboard/sodex/orderbook` | Order book/depth |
+| `/dashboard/sodex/klines` | Candles and technical graph analysis |
+| `/dashboard/ai` | On-demand operator analysis |
+| `/dashboard/telegram` | Telegram status and test action |
 
-- Runs the independent agents concurrently on `CYCLE_INTERVAL_MS`.
-- Prevents cross-instance overlap with a durable database lease.
-- Logs each run to `agent_runs`.
-- Resolves pending signal outcomes into 1h, 6h, 24h, and 7d forward returns.
-- Sends a daily AI summary to Telegram at 08:00 UTC.
-
----
-
-## AI Providers
-
-Set `AI_SERVICE` to switch providers without code changes:
-
-| Provider | `AI_SERVICE` value | Best for |
-|----------|-------------------|----------|
-| xAI Grok | `grok` or `xai` | Hosted reasoning |
-| Groq | `groq` | Low-latency hosted inference |
-| Google Gemini | `gemini` | Alternative cloud LLM |
-| Anthropic Claude | `claude` | Alternative hosted model |
-| SkillMint (0G) | `skillmint` | Verifiable, TEE-attested memos with on-chain receipts |
-
-See `backend/services/SKILLMINT_INTEGRATION.md` for SkillMint setup details.
-
----
-
-## Telegram Bot
-
-When the backend scheduler is active, the Telegram bot provides:
-
-- **Alerts** — narrative signals and liquidation warnings with dashboard deep links
-- **Commands** — status, positions, signals, news, macro, and trade flows
-- **Key status** — signing credentials are provisioned only by the server operator through a secret manager
-- **Daily summary** — AI-generated recap of the previous 24 hours
-
-The long-polling bot runs only when `ENABLE_TELEGRAM_BOT=true`, and should be enabled on exactly one long-lived replica. On Vercel, cron jobs trigger cycles via `/api/trigger`; keep long polling disabled there.
-
----
-
-## SoDEX Signing
-
-SoDEX trading writes are not ordinary REST calls. Each action requires an EIP-712 `ExchangeAction` signature:
-
-1. The backend policy-checks and builds the exact action payload (order, leverage update, cancel, etc.).
-2. The backend hashes the payload, constructs the typed-data domain, and issues a short-lived tamper-protected intent.
-3. The connected browser wallet signs the EIP-712 action locally.
-4. The backend verifies the recovered signer against the authenticated session, then attaches the signature and nonce headers to the SoDEX request.
-
-Optional Telegram/backend automation continues to use a deployment-managed registered API key. Gold & Grith implements both paths in `backend/services/sodexSigner.ts` with per-signer nonce tracking in `sodexNonceManager.ts`. Full implementation notes are in [docs/api-and-eip712-integration-notes.md](docs/api-and-eip712-integration-notes.md).
-
----
+Representative polling intervals are 5 seconds for order book, 10 seconds for Shield positions, 30 seconds for account/alerts/markets/executions/health, 60 seconds for signals/memos/news/performance, and 5 minutes for macro. Polling pauses when the page is hidden and backs off after failures.
 
 ## Deployment
 
-### Frontend (Vercel)
+The frontend is Vercel-compatible and the backend supports either a long-lived Node process or the serverless handler in `backend/api/index.ts`.
 
-The frontend deploys to Vercel as a Next.js app. Set `NEXT_PUBLIC_API_BASE_URL` to your backend URL. The API proxy at `frontend/app/api/proxy/[...path]/route.ts` forwards dashboard requests to the backend.
+- Set `API_BASE_URL` to an HTTPS backend URL for the frontend proxy.
+- Configure the same frontend origin in `ALLOWED_ORIGINS`/`NEXT_PUBLIC_APP_URL`.
+- Keep `ENABLE_TELEGRAM_BOT=false` on serverless deployments.
+- Run exactly one scheduler and, if enabled, one Telegram long-polling worker across long-lived replicas.
+- Do not infer deployment health from a URL stored in the repository. Verify `/health` and an authenticated `/api/health` response during every release.
 
-The current production backend is available at `https://35-175-76-98.sslip.io`. Valid HTTPS deployment environment variables override this repository default, so it can be replaced with a custom API domain without another code change. Legacy HTTP values are ignored in production.
+The code contains `https://35-175-76-98.sslip.io` as a production fallback backend URL for legacy frontend deployments. This documentation audit could not independently verify that deployment, so it is not described as active.
 
-### Backend (EC2 Production)
-
-The active backend runs on the `sentinel-finance-backend` EC2 instance under PM2, behind Nginx at `https://35-175-76-98.sslip.io`. The instance uses a stable Elastic IP, Let's Encrypt renewal through `certbot.timer`, and exposes only HTTP redirect, HTTPS, and operator-restricted SSH at the security-group boundary. Port 3001 is available only through the local Nginx reverse proxy.
-
-The EC2 process runs the in-process scheduler and one opted-in Telegram long-polling worker. Production execution remains explicitly set to `dry_run` until a controlled testnet or mainnet-canary rollout is approved.
-
-### Backend (Vercel-Compatible Alternative)
-
-The backend includes `backend/vercel.json` with:
-
-- Rewrite all routes to the serverless handler
-- Cron: `/api/trigger` every 30 minutes
-- Cron: `/api/daily-summary` at 08:00 UTC
-
-On a Vercel backend deployment, the in-process scheduler is disabled (`VERCEL=1`). Agent cycles are driven by cron instead.
-
-Set the variables from `.env.example` in your deployment environment. Vercel sends `Authorization: Bearer $CRON_SECRET` to cron routes. Production startup fails when session, cron, origin, operator, or Supabase service-role settings are missing. Do not upload `.env` or private keys to GitHub.
-
----
-
-## Testing
+## Validation
 
 ```bash
+npm run docs:check
+npm run contracts:compile
+npm run typecheck
+npm run lint
 npm test
+npm --prefix frontend run typecheck
+npm run frontend:build
 ```
 
-Unit and route tests cover:
+Run the project aggregate check with:
 
-- `narrativeScorer` — sector scoring and signal generation
-- `riskCalculator` — liquidation distance and risk level mapping
-- `sodexSigner` — EIP-712 payload signing
-- `executionPolicy` — network, symbol, leverage, notional, and idempotency rules
-- `outcomeResolver` — candle normalization, directional outcomes, 24h partial state, 7d completion, and adverse move
-- operational-route authentication and public liveness boundaries
+```bash
+npm run check
+```
 
----
-
-## Roadmap
-
-### Implemented
-
-- Dual-agent orchestration with configurable cycle interval
-- SoSoValue integration (news, ETF, macro)
-- SoDEX testnet reads and EIP-712 signed writes (close, reduce leverage, cancel order)
-- Pluggable AI memo generation
-- Optional SkillMint TEE-attested memos with validated on-chain receipt hashes
-- Supabase persistence with local-development fallback and fail-closed production reads
-- Telegram alerts and interactive bot
-- Full trading terminal dashboard
-- Confirmation-gated execution flow
-
-### Planned
-
-- Broader mainnet SoDEX rollout beyond the guarded canary execution mode
-- Durable real-time market-stream distribution across multiple backend instances
-- Richer narrative scoring (on-chain flows, social velocity, sector correlation)
-- Portfolio-wide shield across multiple wallets
-
----
+Backend tests cover environment validation, security boundaries, narrative scoring, risk calculation, outcome resolution, execution policy, SoDEX signing, and technical graph analysis. CI additionally audits production dependencies at high severity.
 
 ## Documentation
 
-- [API and EIP-712 Integration Notes](docs/api-and-eip712-integration-notes.md) — SoDEX signing, nonce rules, and endpoint reference
-- [SkillMint Integration](backend/services/SKILLMINT_INTEGRATION.md) — Verifiable AI execution on 0G
-- [SoSoValue API Docs](https://sosovalue-1.gitbook.io/sosovalue-api-doc)
-- [SoDEX Trading API](https://sodex.com/documentation/trading-api/trading-api)
+- [Documentation ownership and migration order](docs/README.md)
+- [Gold & Grith API reference](docs/api-reference.md)
+- [SoDEX and EIP-712 integration notes](docs/api-and-eip712-integration-notes.md)
+- [SkillMint integration](backend/services/SKILLMINT_INTEGRATION.md)
+- [Technical graph analysis skill](backend/skills/technical-graph-analysis/SKILL.md)
+- [Official SoDEX Trading API](https://sodex.com/documentation/trading-api/trading-api)
+- [Official SoDEX Market Data API](https://sodex.com/documentation/market-data-api/market-data-api)
 
----
+## Security boundaries
 
-## Security Notes
-
-- Never commit `.env` or private keys. The repository `.gitignore` excludes them.
-- Use Supabase Row Level Security in production.
-- SoDEX API keys are revocable signing credentials. Treat `SODEX_API_PRIVATE_KEY` as a secret. If using the master wallet signer, keep `SODEX_API_KEY_NAME` unset so `X-API-Key` is omitted.
-- Dashboard actions require explicit confirmation before signed writes.
-- Never send a signing key through Telegram. Runtime Telegram key entry is disabled.
-- Production execution is fail-closed: a durable audit claim, idempotency check, cooldown check, and policy pass are required before signing.
-
----
+- Never commit `.env`, private keys, service-role keys, session secrets, or Telegram tokens.
+- Prefer a revocable registered API key over a master-wallet key for server automation.
+- Never send signing keys through Telegram or the browser API.
+- Keep mainnet execution disabled until an explicit canary review approves the signer, caps, allowlist, monitoring, and rollback plan.
+- Treat WebSocket user streams as observable data, not authorization; the current SoDEX docs say they do not require subscription authentication.
+- Production writes fail closed when durable auth, storage, rate limiting, policy, or audit claims are unavailable.
 
 ## License
 
-This project is private. All rights reserved unless otherwise specified by the repository owner.
+This project is private. All rights are reserved unless the repository owner states otherwise.

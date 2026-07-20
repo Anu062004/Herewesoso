@@ -8,10 +8,12 @@
     "test": "tsx backend/tests/run.ts",
     "typecheck": "tsc -p backend/tsconfig.json --noEmit",
     "lint": "npm --prefix frontend run lint",
+    "docs:check": "node scripts/check-docs.mjs",
+    "contracts:compile": "node scripts/compile-contracts.mjs",
     "frontend:dev": "npm --prefix frontend run dev",
     "frontend:build": "npm --prefix frontend run build",
     "frontend:start": "npm --prefix frontend run start",
-    "check": "npm run typecheck && npm run lint && npm test && npm run frontend:build"
+    "check": "npm run docs:check && npm run contracts:compile && npm run typecheck && npm run lint && npm test && npm run frontend:build"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.24.3",
@@ -30,10 +32,12 @@
     "@types/cors": "^2.8.19",
     "@types/express": "^4.17.21",
     "nodemon": "^3.0.0",
+    "solc": "^0.8.36",
     "tsx": "^4.21.0",
     "typescript": "^6.0.3"
   },
   "overrides": {
+    "adm-zip": "0.6.0",
     "tsx": {
       "esbuild": "0.28.1"
     }

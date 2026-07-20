@@ -1,234 +1,173 @@
-# API and EIP-712 Integration Notes
+# SoDEX API and EIP-712 integration notes
 
-Last reviewed: 2026-07-15
+Last reviewed against the repository and current upstream pages: **2026-07-20**
 
-This file summarizes the important implementation details from the SoDEX Trading API, SoDEX/SoSoValue Market Data API, SoSoValue GitBook API docs, and the provided Notion Common APIs link.
+This document separates three things that were previously mixed together:
 
-## Sources
+1. the current official SoDEX protocol contract;
+2. the behavior implemented in Gold & Grith;
+3. compatibility gaps that must remain visible to operators.
 
-- SoDEX Trading API overview: https://sodex.com/documentation/trading-api/trading-api
-- SoDEX Go SDK signing guide: https://sodex.com/documentation/trading-api/go-sdk-signing-guide
-- SoDEX Trading API rate limits: https://sodex.com/documentation/trading-api/api-rate-limits
-- SoDEX REST API v1: https://sodex.com/documentation/trading-api/rest-v1
-- SoDEX WebSocket API v1: https://sodex.com/documentation/trading-api/websocket-v1
-- SoSoValue / SoDEX Market Data API introduction: https://sodex.com/documentation/market-data-api/market-data-api
-- SoSoValue API docs: https://sosovalue-1.gitbook.io/sosovalue-api-doc
-- Common APIs Notion link: https://www.notion.so/Common-APIs-167b57bd102a4c03b8f2421108fc66eb?source=copy_link
+The upstream documentation is authoritative for SoDEX. The code is authoritative for what this repository currently does.
 
-Note: the Notion link returned the Notion app shell but did not expose readable page content without page permissions. It appears to require access or public sharing. Re-check once the page is shared publicly or exported.
+## Official sources reviewed
 
-## EIP-712 In Plain English
+- [SoDEX Trading API overview](https://sodex.com/documentation/trading-api/trading-api)
+- [SoDEX Go SDK signing guide](https://sodex.com/documentation/trading-api/go-sdk-signing-guide)
+- [SoDEX Trading API rate limits](https://sodex.com/documentation/trading-api/api-rate-limits)
+- [SoDEX REST API v1](https://sodex.com/documentation/trading-api/rest-v1)
+- [SoDEX WebSocket API v1](https://sodex.com/documentation/trading-api/websocket-v1)
+- [SoDEX Market Data API](https://sodex.com/documentation/market-data-api/market-data-api)
+- [SoDEX Market Data authentication](https://sodex.com/documentation/market-data-api/authentication)
+- [SoDEX Market Data query modes](https://sodex.com/documentation/market-data-api/query-modes)
+- [SoDEX Market Data rate limit](https://sodex.com/documentation/market-data-api/rate-limit)
+- [SoDEX Market Data error responses](https://sodex.com/documentation/market-data-api/error-responses)
 
-EIP-712 is an Ethereum standard for signing structured data instead of signing an opaque string or raw bytes.
+An older Notion “Common APIs” URL previously referenced by this repository still did not expose reviewable content without access. It is not used as a source of truth.
 
-Normal message signing can show a wallet user a hard-to-read blob. EIP-712 lets an app define:
+## Trading endpoints
 
-- a `domain`, such as protocol name, version, chain ID, and verifying contract
-- typed structs, such as `ExchangeAction(bytes32 payloadHash,uint64 nonce)`
-- a message object, such as `{ payloadHash, nonce }`
+| Network | Spot REST | Perps REST | Spot WebSocket | Perps WebSocket |
+|---|---|---|---|---|
+| Testnet | `https://testnet-gw.sodex.dev/api/v1/spot` | `https://testnet-gw.sodex.dev/api/v1/perps` | `wss://testnet-gw.sodex.dev/ws/spot` | `wss://testnet-gw.sodex.dev/ws/perps` |
+| Mainnet | `https://mainnet-gw.sodex.dev/api/v1/spot` | `https://mainnet-gw.sodex.dev/api/v1/perps` | `wss://mainnet-gw.sodex.dev/ws/spot` | `wss://mainnet-gw.sodex.dev/ws/perps` |
 
-The signer signs the typed message hash. The server or contract can recover the signer address from the signature and verify that the correct key approved that exact action.
+Gold & Grith uses perps endpoints for account risk and actions. Spot reads are used only by the smoke test and market helpers.
 
-For this project, EIP-712 matters because SoDEX trading writes are not just ordinary REST calls. Actions like creating an order, canceling an order, updating leverage, updating margin, or transferring assets need a typed signature. For interactive dashboard actions, the backend builds and hashes the exact payload, the connected browser wallet signs the EIP-712 `ExchangeAction`, and the backend verifies and submits it. Optional automation uses a deployment-managed registered API key.
+## Key and account model
 
-## SoDEX Trading API
+The current SoDEX guide distinguishes:
 
-### Base Endpoints
+- **Master wallet** — owns the account and signs account-level actions such as `addAPIKey`, `addPermissionedAPIKey`, `approveBuilderFee`, and `revokeAPIKey`.
+- **Registered API key** — a named, revocable EVM signing credential for normal trading actions.
+- **API key name** — a 1–36 character identifier sent in `X-API-Key`. It is not a public address and never a private key; `default` is not a valid registered name.
+- **Account ID** — the numeric `aid` used for account queries and signed payloads. An API-key address is not an account lookup identifier.
 
-Use perps endpoints for this project because Liquidation Shield is position/risk focused.
+The official overview explicitly assigns all normal trading actions to a registered API key. Its current common-pitfalls section says signing those actions with the master wallet is wrong. Gold & Grith therefore separates operator authentication from trade signing and blocks its former connected-wallet submission path.
 
-Mainnet:
+Recommended custody model:
 
-- Spot REST: `https://mainnet-gw.sodex.dev/api/v1/spot`
-- Perps REST: `https://mainnet-gw.sodex.dev/api/v1/perps`
-- Spot WebSocket: `wss://mainnet-gw.sodex.dev/ws/spot`
-- Perps WebSocket: `wss://mainnet-gw.sodex.dev/ws/perps`
+1. Keep the master wallet offline except for registering/revoking API keys and other account-level actions.
+2. Create a separate API key per trading process or subaccount.
+3. Store the registered key in a deployment secret manager.
+4. Configure `SODEX_API_KEY_NAME` with its registered name and ensure the configured private key derives the registered public address.
 
-Testnet:
+## Nonces
 
-- Spot REST: `https://testnet-gw.sodex.dev/api/v1/spot`
-- Perps REST: `https://testnet-gw.sodex.dev/api/v1/perps`
-- Spot WebSocket: `wss://testnet-gw.sodex.dev/ws/spot`
-- Perps WebSocket: `wss://testnet-gw.sodex.dev/ws/perps`
+SoDEX tracks the 100 highest nonces per signing address. A new nonce must not have been used and must be larger than the smallest retained nonce. It must also fall inside the documented chain-time window `(T - 2 days, T + 1 day)`.
 
-### Key Model
+For `EXECUTION_MODE=testnet` or `mainnet_canary`, Gold & Grith calls the atomic Supabase function `allocate_sodex_nonce`, keyed by lowercase signer address. The database returns `max(request time, previous + 1)` across replicas and restarts. Live signing fails closed when Supabase or the function is unavailable. Process-memory allocation remains only for dry-run development and tests.
 
-SoDEX has two important signing identities:
+## EIP-712 trading signature
 
-- Master wallet: owns the SoDEX account. Use this for account-level actions like adding or revoking API keys.
-- API key: revocable EVM signing credential registered to the account. Use this for day-to-day trading actions.
-
-Recommended rule:
-
-- Master wallet signs `addAPIKey` and `revokeAPIKey`.
-- Registered API key signs normal trading actions such as `newOrder`, `cancelOrder`, `updateLeverage`, `updateMargin`, `transferAsset`, and `scheduleCancel`.
-
-The current REST reference and official Go SDK also allow direct master-wallet signing for normal writes by omitting `X-API-Key`. Gold & Grith uses that mode for explicit connected-wallet approvals; registered API keys remain the preferred mode for unattended automation.
-
-The `X-API-Key` header carries the API key name, not the API key public address and never the private key.
-
-Gold & Grith deployment note: close-position, reduce-leverage, and cancel-order actions support two signing modes. Registered API-key signing sends `X-API-Key` with the key name, such as `webkey`, and signs with that key's private key. Master-wallet signing omits `X-API-Key` entirely and signs with the master wallet private key. Do not send `X-API-Key: default`; SoDEX treats the default/master signer as the no-header case. If SoDEX returns `API key error: API key not found`, first check that the deployed backend is not sending an old key name like `api-key-01` or `default`.
-
-### Nonce Rules
-
-SoDEX nonces are tracked per signing address:
-
-- trading actions: API key public address
-- API key management: master wallet address
-
-Implementation requirements:
-
-- use a unique nonce per signed action
-- nonce should be a Unix millisecond timestamp
-- nonce must be within the accepted time window around current chain/server time
-- store nonces atomically per signing address to avoid duplicate nonce races
-- avoid sharing one API key across concurrent bots unless you have a nonce queue
-
-Practical backend recommendation:
-
-- add a `NonceManager` service
-- key it by `{environment, marketType, signerAddress}`
-- persist last nonce in Supabase or Redis
-- return `max(Date.now(), lastNonce + 1)`
-- serialize signed writes per signing key
-
-### EIP-712 Domain
-
-For SoDEX trading actions:
-
-- domain name: `spot` for spot actions
-- domain name: `futures` for perps actions
-- domain version: `1`
-- mainnet chain ID: `286623`
-- testnet chain ID: `138565`
-- verifying contract: `0x0000000000000000000000000000000000000000`
-
-SoDEX typed message:
+For normal spot/perps trading actions, SoDEX signs:
 
 ```ts
-types: {
-  EIP712Domain: [
-    { name: 'name', type: 'string' },
-    { name: 'version', type: 'string' },
-    { name: 'chainId', type: 'uint256' },
-    { name: 'verifyingContract', type: 'address' }
-  ],
+const domain = {
+  name: 'spot' /* spot */ || 'futures' /* perps */,
+  version: '1',
+  chainId: 138565 /* testnet */ || 286623 /* mainnet */,
+  verifyingContract: '0x0000000000000000000000000000000000000000'
+};
+
+const types = {
   ExchangeAction: [
     { name: 'payloadHash', type: 'bytes32' },
     { name: 'nonce', type: 'uint64' }
   ]
-}
-primaryType: 'ExchangeAction'
-message: {
-  payloadHash,
-  nonce
-}
+};
+
+const message = { payloadHash, nonce };
 ```
 
-After generating the normal 65-byte ECDSA signature, normalize the final recovery byte to `0` or `1`, then prepend byte `0x01`. The final value goes into `X-API-Sign`.
+The 65-byte ECDSA signature is normalized to `r || s || yParity`, where `yParity` is `00` or `01`. SoDEX's trading-action type byte `01` is prepended, yielding the `X-API-Sign` value. `backend/services/sodexSigner.ts` performs this transformation.
 
-### Payload Hash Rules
+`SODEX_CHAIN_ID` must match the selected endpoint: `138565` for testnet and `286623` for mainnet. The signer rejects a configured value that conflicts with an endpoint it can identify, and production startup rejects execution-mode/network/chain mismatches.
 
-SoDEX computes:
+Account-level API-key registration uses different universal typed structures and a different type prefix. Gold & Grith does not implement key registration; provision API keys outside this application using the current official guide or SDK.
+
+## Payload hashing
+
+The trading hash is:
 
 ```text
-payloadHash = keccak256(compact_json({ type, params }))
+keccak256(JSON.stringify({ type, params }))
 ```
 
-Important pitfalls:
+Correctness requirements from the official guide:
 
-- use compact JSON with no extra whitespace
-- preserve the field order expected by the SoDEX Go structs
-- decimal fields such as `price`, `quantity`, `funds`, and `stopPrice` must be strings, not numbers
-- omit unset `omitempty` fields
-- include non-optional fields even if they are zero values
-- hash the wrapper `{ type, params }`
-- send only the endpoint request body shape expected by the specific HTTP endpoint
+- compact JSON with no formatting whitespace;
+- field order matching the official Go request structs;
+- decimal fields such as price, quantity, funds, and stop price encoded as strings;
+- unset `omitempty` fields omitted;
+- required zero/false fields retained;
+- only the endpoint-specific `params` object sent as the HTTP request body, even though the signed hash covers `{ type, params }`.
 
-Recommended implementation approach:
+Gold & Grith builds action bodies as ordered object literals in `backend/services/sodexTrader.ts` and hashes the wrapper in `backend/services/sodexSigner.ts`. Signing tests cover domain separation, payload hashes, recovery-byte normalization, and signer recovery.
 
-- define TypeScript builders for each action instead of hand-building arbitrary objects
-- keep field order deterministic by constructing object literals in exact order
-- add tests that snapshot the compact JSON string before hashing
-- compare generated signatures against known SDK examples when available
+## Signed headers
 
-### Signed REST Headers
+Managed registered-API-key trading requests use:
 
-Signed write endpoints generally need:
+```text
+Content-Type: application/json
+Accept: application/json
+X-API-Key: <registered key name>
+X-API-Sign: 0x01<r><s><00-or-01>
+X-API-Nonce: <Unix-millisecond nonce>
+X-API-Chain: <chain ID used by this client>
+```
 
-- `Content-Type: application/json`
-- `Accept: application/json`
-- `X-API-Key: <api-key-name>` when a registered API key signs; omit it for direct master-wallet signing
-- `X-API-Sign: 0x01<r><s><recovery-id-0-or-1>`
-- `X-API-Nonce: <uint64 nonce>`
+Never put an address or private key in `X-API-Key`. Never log the signing secret. Public reads normally need only `Accept: application/json`.
 
-Public read endpoints usually only need:
+## Gold & Grith action mapping
 
-- `Accept: application/json`
+| Product action | SoDEX action | Endpoint/body strategy |
+|---|---|---|
+| `CLOSE_POSITION` | `newOrder` | Reduce-only IOC limit order at a bounded executable price |
+| `REDUCE_LEVERAGE` | `updateLeverage` | Perps leverage update for the resolved account/symbol ID |
+| `CANCEL_ORDER` | `cancelOrder` | One or more order IDs/client-order IDs, maximum 100 |
+| `QUEUE_ACTION` | none | Internal audit/queue state only |
 
-### Important Trading Actions For This Project
+Before a submission, the API hydrates account context, enforces policy, checks the action cooldown, claims a unique execution row, and records final SoDEX response metadata. Production submission fails closed if it cannot create the audit claim.
 
-Liquidation Shield Wave 2 should prioritize:
+## Implementation compatibility
 
-- `updateLeverage`: reduce leverage when fragility rises
-- `newOrder` with `reduceOnly: true`: close or partially close a position
-- `cancelOrder`: cancel stale protective orders
-- `updateMargin`: add or reduce isolated margin where supported
-- `scheduleCancel`: safety cleanup for stale orders
+| Path | Implemented | Current upstream compatibility | Allowed use |
+|---|---:|---|---|
+| Public market reads | Yes | Matches current REST model | Normal operation |
+| Account/position reads by account address | Yes | Matches current account lookup model | Authenticated dashboard and agents |
+| Dry-run simulations and policy checks | Yes | No write is sent | Default and recommended |
+| Managed registered-API-key signing | Yes | Matches the documented signer/header model; key lookup and signer matching fail closed | Controlled testnet, then approved mainnet canary |
+| Direct connected-master-wallet trading | No; endpoint blocked | Correctly excluded because normal actions require a registered key | `/api/actions/confirm-wallet` returns `409` |
+| Mainnet canary | Yes, guarded | Configuration, policy, signer, audit, and durable-nonce guards are implemented and tested locally | Not live-certified until deployed smoke/canary proof |
 
-Recommended UI/backend flow:
+An authenticated operator initiates an action through `/api/actions/confirm`. The backend rehydrates the configured execution account, re-evaluates policy, creates a durable idempotent audit claim, verifies the registered key against SoDEX account metadata, allocates a durable nonce, and signs server-side. The master wallet key must not be present in the application environment.
 
-1. Backend calculates risk and proposes an action.
-2. User sees exact action preview in dashboard.
-3. Backend builds SoDEX payload.
-4. Backend computes payload hash.
-5. Connected wallet approves the EIP-712 signature.
-6. Backend verifies that the recovered signer matches the authenticated wallet and the short-lived action intent.
-7. Backend submits the signed request to SoDEX.
-8. Backend stores request, non-sensitive signature metadata, response, and result status.
-9. Dashboard shows execution timeline.
+## Trading rate limits
 
-Never expose private keys to the frontend. Signing should happen server-side or through a secure wallet flow.
+The current official rate-limit page documents:
 
-### Rate Limits
+- 1,200 request weight per minute per IP;
+- default weight 20 for unlisted endpoints;
+- order-book weight 5/10/20 depending on depth;
+- kline base weight 20 with possible cache-miss extra weight;
+- registered API keys: 600 orders/minute and 20 orders/second per account;
+- web/no-key clients: 60 orders/minute per account;
+- additional address-based action limits and a 10,000-request initial buffer;
+- WebSocket caps for connections, subscriptions, users, messages, and inflight requests.
 
-REST trading API:
+These are upstream limits, not promises made by Gold & Grith. Re-check the official page before capacity planning. Keep actions small and auditable, account for kline weight, and back off on rate-limit responses.
 
-- total request weight budget: `1200` per minute per IP
-- endpoints not listed in the docs default to weight `20`
-- public market endpoints are usually low weight
-- orderbook depth has variable weight
-- batch order/cancel/replace weight scales with batch size
-- API-key order placement limit: `600` orders per minute and `20` orders per second per account
-- WebSocket limits include connection and subscription caps
+## WebSocket behavior
 
-Implementation requirement:
+SoDEX can close a connection if no subscription is established or no data arrives for more than 60 seconds. Send `{"op":"ping"}` before the idle cutoff, expect `{"op":"pong"}`, and reconnect if it does not arrive.
 
-- add request weight accounting for SoDEX clients
-- back off on rate-limit responses
-- batch where useful, but keep risk actions small and auditable
+The official WebSocket page says user-specific streams do not require subscription authorization. Treat those streams as observable market/account telemetry, never as proof of identity or authorization.
 
-### WebSocket Notes
+`backend/services/sodexMarketStream.ts` is a best-effort in-process mark/funding enhancement. REST remains the source for account/action hydration, and the code falls back when the stream is unavailable. A multi-replica deployment still needs durable or shared stream distribution.
 
-WebSocket endpoints exist for both spot and perps.
-
-Important operational behavior:
-
-- connection may close if no subscription/data activity for more than 60 seconds
-- send `{"op":"ping"}` before the idle cutoff
-- expect `{"op":"pong"}`
-- reconnect if no pong arrives
-- user-specific streams do not require subscription authorization according to the docs, so do not treat WebSocket visibility as private access control
-
-For this project:
-
-- use REST first for Wave 2 execution reliability
-- use WebSocket later for lower-latency position/order updates
-- keep the polling fallback because WebSocket availability can vary
-
-## SoSoValue / Market Data API
-
-### Base URL And Authentication
+## SoSoValue market-data contract
 
 Base URL:
 
@@ -236,241 +175,52 @@ Base URL:
 https://openapi.sosovalue.com/openapi/v1
 ```
 
-Every request requires:
+Every request includes:
 
 ```text
-x-soso-api-key: <YOUR_API_KEY>
+x-soso-api-key: <SOSOVALUE_API_KEY>
 ```
 
-API key setup flow:
+The current documentation confirms:
 
-1. create/log in to a SoSoValue account
-2. apply for an API key in the developer dashboard
-3. wait for approval
-4. use the key in request headers
+- success envelope `{ code: 0, message: "success", data: ... }`;
+- paginated lists under `data.list` with 1-based `page` and `page_size` up to 100;
+- UTC millisecond timestamps and snake_case fields;
+- time-window pagination via the last timestamp plus one;
+- 100,000 requests/month and 20 requests/minute per API key;
+- `429` responses with reset/retry metadata;
+- endpoint-specific history windows, including current restrictions listed on the query-modes page.
 
-### Response Format
+Gold & Grith centralizes these calls in `backend/services/sosovalue.ts`. The news routes add one- or five-minute in-process caches and can return a stale cached response after an upstream failure. The scheduled narrative cycle spaces its three primary upstream fetches by 500 ms. This reduces request bursts but is not a distributed cache; multi-instance deployments must budget the upstream key across replicas.
 
-Successful responses use:
+## Operational verification checklist
 
-```json
-{
-  "code": 0,
-  "message": "success",
-  "data": {}
-}
-```
+Before enabling `EXECUTION_MODE=testnet`:
 
-Paginated responses put `list`, `page`, `page_size`, and `total` inside `data`.
+- [ ] Apply `docs/production-hardening-schema.sql`, including `sodex_signing_nonces` and `allocate_sodex_nonce`.
+- [ ] Register a dedicated SoDEX API key using the current official workflow.
+- [ ] Confirm the configured private key derives the registered public address.
+- [ ] Configure a separate `OPERATOR_WALLET_ADDRESSES` identity; do not use the master account as the dashboard login.
+- [ ] Set the exact registered `SODEX_API_KEY_NAME`; do not use `default`.
+- [ ] Verify `SODEX_ACCOUNT_ADDRESS` and `SODEX_ACCOUNT_ID` refer to the intended account.
+- [ ] Verify endpoint, `SODEX_NETWORK`, and `SODEX_CHAIN_ID` all select testnet.
+- [ ] Run the operator-only `/api/sodex/smoke` read test and confirm `trading.registeredApiKey` is `ok`, not `skipped`.
+- [ ] Run signing and policy unit tests.
+- [ ] Start with a low-notional allowlisted symbol and inspect the durable execution row.
+- [ ] Confirm the live SoDEX account before retrying any request with an unknown/ambiguous outcome.
+- [ ] Keep the master wallet key out of the application environment.
 
-Time-series endpoints usually return `data` as an array.
+Before any mainnet canary, repeat the review against the newest official pages, provision a separate managed mainnet key, set `SODEX_NETWORK=mainnet` and `SODEX_CHAIN_ID=286623`, reduce policy caps, confirm the mainnet registered-key smoke check, verify monitoring, and obtain explicit operator approval. The repository tests wiring and rejection behavior but cannot certify a real account/key without deployment credentials.
 
-Empty successful responses may use `data: null`.
+## Maintenance triggers
 
-### Query Modes
+Re-review this file whenever any of the following changes:
 
-Mode 1: pagination
+- SoDEX overview, signing guide, REST reference, or rate-limit pages;
+- `sodexSigner.ts`, `sodexTrader.ts`, `sodexNonceManager.ts`, or action routes;
+- signer/key environment variables;
+- supported action types or payload ordering;
+- network/chain IDs or gateway URLs;
+- SoSoValue authentication, limits, or query modes.
 
-- used for entity lists like trading pairs, institution lists, and news feeds
-- `page` defaults to `1`
-- `page_size` defaults to `20`
-- `page_size` max is `100`
-
-Mode 2: time window
-
-- used for klines, ETF historical data, and other time-series data
-- `start_time` and `end_time` are Unix millisecond timestamps
-- `limit` controls the max records returned
-- time-series data is returned in ascending chronological order
-- paginate by using `last_timestamp + 1` as the next `start_time`
-
-General conventions:
-
-- timestamps are UTC Unix milliseconds
-- monetary fields default to USD
-- fields are snake_case
-
-### Rate Limits
-
-SoSoValue Market Data API limits:
-
-- monthly quota: `100,000` requests per API key
-- frequency: `20` requests per minute
-
-Rate-limit headers:
-
-- `X-RateLimit-Limit`
-- `X-RateLimit-Remaining`
-- `X-RateLimit-Reset`
-
-If rate limited, expect HTTP `429` with a retry hint in the body.
-
-Implementation requirement:
-
-- cache SoSoValue responses aggressively
-- do not poll every panel independently
-- use shared backend fetchers and Supabase persistence
-- schedule high-value data like ETF flows, macro events, and news feeds in one orchestrator cycle
-
-### Error Format
-
-Errors use a common format:
-
-```json
-{
-  "code": 400001,
-  "message": "Invalid parameter",
-  "details": {}
-}
-```
-
-Important error classes:
-
-- `400001`: invalid parameter format
-- `400002`: missing required parameter
-- `400003`: invalid parameter value
-- `400101`: invalid API key
-- `400102`: API key expired
-- `400301`: insufficient permissions
-- `400401`: resource not found
-- `400402`: endpoint not found
-- `402901`: too many requests
-- `500001`: internal server error
-- `500301`: service temporarily unavailable
-
-Backend behavior:
-
-- map these into typed internal errors
-- show user-readable failure states in dashboard
-- retry only transient `429`, `500`, and `503` classes
-- do not retry invalid parameter or auth errors blindly
-
-### Important Market Data Modules
-
-Useful modules for this project:
-
-- Currency and pairs: listed assets, market snapshots, klines, supply, pairs, sector spotlight
-- ETF: summary history, ETF list, market snapshots, historical data
-- SoSoValue Index: index list, constituents, market snapshots, klines
-- Crypto Stocks: stock lists, market snapshots, market cap, klines, sector data
-- BTC Treasuries: company list and purchase history
-- Feeds: news, hot news, featured news, search
-- Fundraising: project list and project details
-- Macro: macroeconomic events and historical event data
-- Analysis: chart list and chart data
-
-Most relevant to existing Sentinel/Gold & Grit modules:
-
-- Narrative Alpha Scanner:
-  - `/news`
-  - `/news/hot`
-  - `/news/featured`
-  - `/news/search`
-  - `/currencies/sector-spotlight`
-  - `/etfs/summary-history`
-  - `/crypto-stocks/sector`
-  - `/indices`
-
-- Liquidation Shield / Fragility Index:
-  - `/etfs/summary-history`
-  - `/macro/events`
-  - `/macro/events/{event}/history`
-  - currency market snapshots
-  - SoDEX perps positions and mark prices
-
-- Public proof / demo:
-  - persist every orchestrator run
-  - publish selected alerts from SoSoValue data + SoDEX position state
-  - include source timestamps and API module names in alert explanations
-
-## Recommended Wave 2 Technical Improvements
-
-### 1. Add SoDEX EIP-712 Execution
-
-Build:
-
-- `sodexSigner.ts`
-- `sodexNonceManager.ts`
-- `sodexPayloadBuilders.ts`
-- `sodexExecutionService.ts`
-- execution table in Supabase
-- execution audit timeline in frontend
-
-Support first:
-
-- reduce leverage
-- close position with reduce-only order
-- cancel stale orders
-
-### 2. Add Deterministic Signing Tests
-
-Tests should cover:
-
-- compact JSON generation
-- field order
-- decimal string handling
-- omitted optional fields
-- nonce monotonicity
-- EIP-712 domain for testnet vs mainnet
-- signature prefix `0x01` and compact recovery ID `0/1`
-
-### 3. Add Explainable Risk Actions
-
-For every automated recommendation, store:
-
-- liquidation distance contribution
-- macro timing contribution
-- ETF flow contribution
-- final fragility score
-- threshold crossed
-- recommended SoDEX action
-- signed payload hash if execution was attempted
-
-### 4. Add Rate-Limit Safe Data Pipeline
-
-Because SoSoValue has a tight per-minute API limit, centralize data fetching:
-
-- one backend fetch per module per cycle
-- cache results
-- persist snapshots
-- frontend reads from backend/Supabase, not directly from SoSoValue
-- expose stale-data warnings when cache age is high
-
-### 5. Add Public Proof Of Automation
-
-Judges specifically asked for public proof. Add one of:
-
-- public alert archive page
-- public Telegram channel
-- read-only run log page
-- signed execution/demo transcript
-
-For each alert, include:
-
-- timestamp
-- risk score
-- source modules used
-- recommendation
-- whether action was simulated or executed
-
-## Implementation Risks
-
-- Key custody: interactive wallets sign locally; private keys must never be requested or transmitted. Automation API-key private keys stay in the deployment secret manager.
-- Nonce races: concurrent execution jobs can invalidate each other if they reuse a signing key without serialization.
-- Payload mismatch: JSON field order and decimal string formatting can break SoDEX signature verification.
-- Rate limits: SoSoValue requests must be cached or the dashboard/orchestrator can quickly hit 20 requests per minute.
-- Replay protection: EIP-712 itself does not provide replay protection; SoDEX relies on domain separation and nonces. The backend must manage nonces correctly.
-- Execution safety: start with testnet and dry-run mode before enabling real signing.
-
-## Practical Next Step Checklist
-
-- [ ] Choose one product name and update UI/repo/submission consistently.
-- [ ] Add `SODEX_API_KEY_NAME`, `SODEX_API_PRIVATE_KEY`, `SODEX_ACCOUNT_ID`, `SODEX_ENV`; for API-key signing, verify the private key derives the registered API key public address; for master signing, leave `SODEX_API_KEY_NAME` unset.
-- [x] Implement SoDEX EIP-712 preparation and connected-wallet signing for perps.
-- [x] Implement per-signer nonce manager.
-- [x] Add reduce-leverage execution.
-- [x] Add reduce-only close-position execution.
-- [x] Store execution attempts and responses.
-- [x] Show execution history in dashboard.
-- [ ] Document scoring weights.
-- [ ] Publish one public alert or run log.
+Run `npm run docs:check` after edits. That check verifies the local route inventory, environment template, Markdown links, and documentation index; it does not replace upstream protocol review or live-network integration testing.

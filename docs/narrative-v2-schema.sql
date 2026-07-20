@@ -1,5 +1,5 @@
 -- Narrative Scanner v2 evidence columns.
--- Apply after the base narrative_scores table from README.md.
+-- Apply after docs/base-schema.sql.
 
 ALTER TABLE narrative_scores ADD COLUMN IF NOT EXISTS lifecycle_stage TEXT;
 ALTER TABLE narrative_scores ADD COLUMN IF NOT EXISTS sub_narrative TEXT;

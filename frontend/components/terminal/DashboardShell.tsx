@@ -52,6 +52,9 @@ const PRIMARY_NAV_ITEMS: NavItem[] = [
 ];
 
 const MORE_NAV_ITEMS: NavItem[] = [
+  { label: 'Cross-exchange Shield', href: '/dashboard/shield/exchanges', icon: <ShieldIcon className="h-4 w-4" />, aliases: ['cross-exchange', 'binance', 'bybit', 'okx', 'portfolio risk'] },
+  { label: 'Strategy Marketplace', href: '/dashboard/strategies', icon: <BriefcaseIcon className="h-4 w-4" />, aliases: ['strategy', 'marketplace', 'install'] },
+  { label: 'Onchain Automation', href: '/dashboard/automation', icon: <ShieldIcon className="h-4 w-4" />, aliases: ['automation', 'contract', 'keeper', 'rule'] },
   { label: 'Performance', href: '/dashboard/performance', icon: <RadarIcon className="h-4 w-4" />, aliases: ['performance', 'evidence', 'proof', 'accuracy'] },
   { label: 'Execution Audit', href: '/dashboard/executions', icon: <NotesIcon className="h-4 w-4" />, aliases: ['execution', 'audit', 'ledger', 'signed'] },
   { label: 'Alerts', href: '/dashboard/alerts', icon: <BellIcon className="h-4 w-4" />, aliases: ['alert', 'warning'] },

@@ -15,6 +15,7 @@ import type {
   PerformanceResponse,
   PositionsResponse,
   SignalRow,
+  ShieldPositionAnalysis,
   SoDexKlinesResponse,
   SoDexMarketsResponse,
   SoDexOrderbook,
@@ -24,7 +25,7 @@ import type {
 import type { SodexConnection, SodexNetwork } from '@/lib/sodexConnection';
 
 import { backendBaseUrl } from '@/lib/backendConfig';
-import { buildSodexQuery, getSodexConnection, SODEX_NETWORK_CONFIG } from '@/lib/sodexConnection';
+import { buildSodexQuery, getSodexConnection } from '@/lib/sodexConnection';
 
 export type {
   AnalysisResult,
@@ -325,69 +326,19 @@ export async function queueDashboardAction(payload: {
   };
   const prepared = await requestJson<{
     requiresSignature: boolean;
-    intentToken?: string;
-    typedData?: Record<string, unknown>;
+    executionAuthorization?: 'managed_registered_api_key' | 'none';
   }>('/api/actions/prepare', {
     method: 'POST',
     body: JSON.stringify(actionPayload)
   });
 
-  if (!prepared.requiresSignature) {
-    return requestJson<DashboardActionResponse>('/api/actions/confirm', {
-      method: 'POST',
-      body: JSON.stringify(actionPayload)
-    });
+  if (prepared.requiresSignature) {
+    throw new Error('Connected-wallet trade signing is unsupported. The backend must use a registered managed SoDEX API key.');
   }
 
-  if (!prepared.intentToken || !prepared.typedData) {
-    throw new Error('The backend did not return a complete SoDEX signing request.');
-  }
-
-  const provider = typeof window !== 'undefined' ? window.ethereum : undefined;
-  if (!provider) {
-    throw new Error('No browser wallet was detected. Reconnect an EVM wallet and try again.');
-  }
-
-  const accounts = await provider.request({ method: 'eth_requestAccounts' }) as string[];
-  const activeAddress = accounts[0];
-  if (!activeAddress || activeAddress.toLowerCase() !== connection.address.toLowerCase()) {
-    throw new Error('The active browser wallet does not match the authenticated SoDEX wallet. Reconnect and try again.');
-  }
-
-  const networkConfig = SODEX_NETWORK_CONFIG[connection.network];
-  try {
-    await provider.request({
-      method: 'wallet_switchEthereumChain',
-      params: [{ chainId: networkConfig.chainIdHex }]
-    });
-  } catch (error) {
-    const walletError = error as { code?: number; message?: string };
-    if (walletError?.code === 4001) {
-      throw new Error(`Switching to ${networkConfig.label} was rejected in the wallet.`);
-    }
-    throw new Error(`Switch to ${networkConfig.label} in your wallet, then try again.`);
-  }
-
-  let signature: string;
-  try {
-    signature = await provider.request({
-      method: 'eth_signTypedData_v4',
-      params: [activeAddress, JSON.stringify(prepared.typedData)]
-    }) as string;
-  } catch (error) {
-    const walletError = error as { code?: number; message?: string };
-    if (walletError?.code === 4001) {
-      throw new Error('The SoDEX action signature was rejected in the wallet.');
-    }
-    throw new Error(walletError?.message || 'The wallet could not sign the SoDEX action.');
-  }
-
-  return requestJson<DashboardActionResponse>('/api/actions/confirm-wallet', {
+  return requestJson<DashboardActionResponse>('/api/actions/confirm', {
     method: 'POST',
-    body: JSON.stringify({
-      intentToken: prepared.intentToken,
-      signature
-    })
+    body: JSON.stringify(actionPayload)
   });
 }
 
@@ -443,9 +394,13 @@ export async function connectSodex(payload: {
 
 export interface SodexLoginChallenge {
   challengeId: string;
+  standard: 'EIP-4361';
   network: SodexNetwork;
   chainId: number;
   address: string;
+  domain: string;
+  uri: string;
+  nonce: string;
   issuedAt: number;
   expiresAt: number;
   message: string;
@@ -525,6 +480,167 @@ export async function saveRecommendationStatus(id: string, status: 'ACCEPTED' | 
 
 export async function disconnectSodex() {
   return requestJson<{ disconnected: true }>('/api/sodex/disconnect', { method: 'POST' });
+}
+
+export type ShieldExchange = 'sodex' | 'binance' | 'bybit' | 'okx';
+
+export interface ShieldExchangeConnection {
+  id: string;
+  exchange: ShieldExchange;
+  label: string;
+  status: 'ACTIVE' | 'ERROR' | 'DISABLED';
+  credentialFingerprint: string | null;
+  lastCheckedAt: string | null;
+  lastError: string | null;
+  createdAt: string;
+}
+
+export interface CrossExchangeScan {
+  walletAddress: string;
+  network: SodexNetwork;
+  summary: {
+    exchangeCount: number;
+    positionCount: number;
+    grossNotional: number;
+    netExposure: number;
+    maxRiskScore: number;
+    riskLevel: 'SAFE' | 'CAUTION' | 'DANGER' | 'CRITICAL';
+  };
+  positions: Array<{
+    connectionId: string;
+    exchange: ShieldExchange;
+    symbol: string;
+    side: 'LONG' | 'SHORT';
+    size: number;
+    entryPrice: number;
+    markPrice: number;
+    liquidationPrice: number;
+    leverage: number;
+    marginMode: string;
+    unrealizedPnl: number;
+    analysis: ShieldPositionAnalysis;
+  }>;
+  errors: Array<{ connectionId: string; exchange: string; error: string }>;
+  scannedAt: string;
+}
+
+export async function fetchShieldConnections() {
+  return requestJson<ShieldExchangeConnection[]>('/api/shield/connections');
+}
+
+export async function createShieldConnection(payload: {
+  exchange: Exclude<ShieldExchange, 'sodex'>;
+  label: string;
+  credentials: { apiKey: string; secret: string; passphrase?: string };
+}) {
+  return requestJson<ShieldExchangeConnection>('/api/shield/connections', {
+    method: 'POST',
+    body: JSON.stringify(payload)
+  });
+}
+
+export async function deleteShieldConnection(id: string) {
+  return requestJson<{ deleted: true }>(`/api/shield/connections/${encodeURIComponent(id)}`, { method: 'DELETE' });
+}
+
+export async function fetchCrossExchangeScan() {
+  return requestJson<CrossExchangeScan>('/api/shield/scan');
+}
+
+export interface MarketplaceStrategy {
+  id: string;
+  owner_address: string;
+  slug: string;
+  name: string;
+  summary: string;
+  description: string;
+  category: string;
+  risk_level: 'LOW' | 'MEDIUM' | 'HIGH';
+  supported_exchanges: string[];
+  configuration_schema: Record<string, unknown>;
+  execution_template: Record<string, unknown>;
+  status: 'DRAFT' | 'PUBLISHED' | 'ARCHIVED';
+  current_version: number;
+  install_count: number;
+  rating: number | null;
+  reviewCount: number;
+  installed: boolean;
+  published_at: string | null;
+  verifiedPerformance: Array<Record<string, unknown>>;
+}
+
+export async function fetchStrategies(params: { search?: string; category?: string; mine?: boolean } = {}) {
+  const query = new URLSearchParams();
+  if (params.search) query.set('search', params.search);
+  if (params.category) query.set('category', params.category);
+  if (params.mine) query.set('mine', 'true');
+  const suffix = query.toString() ? `?${query.toString()}` : '';
+  return requestJson<MarketplaceStrategy[]>(`/api/strategies${suffix}`);
+}
+
+export async function createStrategy(payload: {
+  slug: string;
+  name: string;
+  summary: string;
+  description: string;
+  category: string;
+  riskLevel: 'LOW' | 'MEDIUM' | 'HIGH';
+  supportedExchanges: string[];
+  configurationSchema: Record<string, unknown>;
+  executionTemplate: Record<string, unknown>;
+}) {
+  return requestJson<MarketplaceStrategy>('/api/strategies', { method: 'POST', body: JSON.stringify(payload) });
+}
+
+export async function publishStrategy(id: string) {
+  return requestJson<{ strategy: MarketplaceStrategy; version: Record<string, unknown> }>(`/api/strategies/${encodeURIComponent(id)}/publish`, { method: 'POST' });
+}
+
+export async function installStrategy(id: string, configuration: Record<string, unknown> = {}) {
+  return requestJson<Record<string, unknown>>(`/api/strategies/${encodeURIComponent(id)}/install`, {
+    method: 'POST', body: JSON.stringify({ configuration })
+  });
+}
+
+export async function uninstallStrategy(id: string) {
+  return requestJson<{ deleted: true }>(`/api/strategies/${encodeURIComponent(id)}/install`, { method: 'DELETE' });
+}
+
+export interface AutomationConfig {
+  network: SodexNetwork;
+  chainId: number;
+  contractAddress: string | null;
+  configured: boolean;
+  model: string;
+  safeguards: string[];
+}
+
+export interface PreparedAutomationTransaction {
+  chainId: number;
+  contractAddress?: string;
+  transaction: { from: string; to: string; value: string; data: string };
+  commitment?: { executionDataHash: string; checkDataHash: string };
+  rule?: Record<string, unknown>;
+}
+
+export async function fetchAutomationConfig() {
+  return requestJson<AutomationConfig>('/api/automation/config');
+}
+
+export async function fetchAutomationRules() {
+  return requestJson<Array<Record<string, unknown>>>('/api/automation/rules');
+}
+
+export async function prepareAutomationRule(payload: Record<string, unknown>) {
+  return requestJson<PreparedAutomationTransaction>('/api/automation/rules/prepare', {
+    method: 'POST', body: JSON.stringify(payload)
+  });
+}
+
+export async function registerAutomationRule(payload: { transactionHash: string; metadata?: Record<string, unknown> }) {
+  return requestJson<Record<string, unknown>>('/api/automation/rules/register', {
+    method: 'POST', body: JSON.stringify(payload)
+  });
 }
 
 export async function sendTelegramTest() {

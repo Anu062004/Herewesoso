@@ -2,6 +2,7 @@ node_modules/
 
 # Local environment/config files
 .env*
+!.env.example
 .sodex_key
 
 # Local AI/tool state

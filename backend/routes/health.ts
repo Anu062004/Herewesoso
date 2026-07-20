@@ -20,7 +20,11 @@ router.get('/', (req: Request, res: Response, next) => {
 }, asyncHandler(async (_req: Request, res: Response) => {
   const persistenceProbe = isSupabaseConfigured ? await safeCount('agent_runs') : null;
   const persistenceReachable = persistenceProbe !== null;
-  const healthy = !isProduction() || persistenceReachable;
+  const executionNetwork = sodexTrader.configuredTradingNetwork();
+  const executionReadiness = sodexTrader.getExecutionReadiness(executionNetwork);
+  const executionMode = String(process.env.EXECUTION_MODE || 'dry_run').toLowerCase();
+  const liveExecution = executionMode === 'testnet' || executionMode === 'mainnet_canary';
+  const healthy = !isProduction() || (persistenceReachable && (!liveExecution || executionReadiness.ready));
   return res.status(healthy ? 200 : 503).json({
     status: healthy ? 'ok' : 'degraded',
     time: new Date().toISOString(),
@@ -31,7 +35,8 @@ router.get('/', (req: Request, res: Response, next) => {
       tradingKeyConfigured: sodexTrader.hasKey(),
       walletAddress: sodexTrader.getWalletAddress(),
       accountAddress: sodexTrader.getAccountAddress(),
-      keyStatus: sodexTrader.getKeyStatus()
+      keyStatus: sodexTrader.getKeyStatus(),
+      executionReadiness
     }
   });
 }));

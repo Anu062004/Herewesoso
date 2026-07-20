@@ -21,8 +21,11 @@ import narrativePreferencesRoute = require('./routes/narrativePreferences');
 import narrativeFeedbackRoute = require('./routes/narrativeFeedback');
 import narrativeAskRoute = require('./routes/narrativeAsk');
 import indicesRoute = require('./routes/indices');
+import shieldRoute = require('./routes/shield');
+import strategiesRoute = require('./routes/strategies');
+import automationRoute = require('./routes/automation');
 import { allowedOrigins } from './config/env';
-import { rateLimit, requestContext, securityHeaders } from './middleware/security';
+import { rateLimit, requestContext, requireWallet, securityHeaders } from './middleware/security';
 
 const app = express();
 
@@ -47,15 +50,15 @@ app.use('/api/health', healthRoute);
 app.use('/api/agent-runs', agentRunsRoute);
 app.use('/api/performance', performanceRoute);
 app.use('/api/executions', executionsRoute);
-app.use('/api/narrative/preferences', narrativePreferencesRoute);
-app.use('/api/narrative/feedback', narrativeFeedbackRoute);
-app.use('/api/narrative/ask', narrativeAskRoute);
-app.use('/api/signals', signalsRoute);
-app.use('/api/positions', positionsRoute);
+app.use('/api/narrative/preferences', requireWallet, narrativePreferencesRoute);
+app.use('/api/narrative/feedback', requireWallet, narrativeFeedbackRoute);
+app.use('/api/narrative/ask', requireWallet, narrativeAskRoute);
+app.use('/api/signals', requireWallet, signalsRoute);
+app.use('/api/positions', requireWallet, positionsRoute);
 app.use('/api/alerts', alertsRoute);
 app.use('/api/memos', memosRoute);
 app.use('/api/macro', macroRoute);
-app.use('/api/risks', risksRoute);
+app.use('/api/risks', requireWallet, risksRoute);
 app.use('/api/trigger', triggerRoute);
 app.use('/api/daily-summary', dailySummaryRoute);
 app.use('/api/test-telegram', testTelegramRoute);
@@ -64,6 +67,9 @@ app.use('/api/analyze', analyzeRoute);
 app.use('/api/sodex', sodexRoute);
 app.use('/api/news', newsRoute);
 app.use('/api/indices', indicesRoute);
+app.use('/api/shield', shieldRoute);
+app.use('/api/strategies', strategiesRoute);
+app.use('/api/automation', automationRoute);
 
 app.use((_req, res) => {
   res.status(404).json({ error: 'Route not found.', code: 'NOT_FOUND' });

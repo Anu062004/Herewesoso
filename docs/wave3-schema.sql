@@ -1,5 +1,5 @@
 -- Gold & Grith Wave 3 evidence and execution schema
--- Run this after the base README database setup.
+-- Apply after docs/narrative-v2-schema.sql.
 
 CREATE TABLE IF NOT EXISTS signal_outcomes (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -93,3 +93,140 @@ CREATE INDEX IF NOT EXISTS idx_performance_snapshots_created ON performance_snap
 CREATE INDEX IF NOT EXISTS idx_portfolio_snapshots_created ON portfolio_snapshots (created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_execution_actions_created ON execution_actions (created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_execution_actions_idempotency ON execution_actions (idempotency_key);
+
+-- EIP-4361 identities and independently revocable multi-user sessions.
+CREATE TABLE IF NOT EXISTS wallet_users (
+  wallet_address TEXT PRIMARY KEY CHECK (wallet_address ~ '^0x[0-9a-f]{40}$'),
+  display_name TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  last_sign_in_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS wallet_sessions (
+  id UUID PRIMARY KEY,
+  wallet_address TEXT NOT NULL REFERENCES wallet_users(wallet_address) ON DELETE CASCADE,
+  network TEXT NOT NULL CHECK (network IN ('testnet', 'mainnet')),
+  issued_at TIMESTAMPTZ NOT NULL,
+  expires_at TIMESTAMPTZ NOT NULL,
+  revoked_at TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS idx_wallet_sessions_owner ON wallet_sessions (wallet_address, expires_at DESC);
+
+-- Credentials are AES-256-GCM ciphertext produced by the backend. They are never returned by the API.
+CREATE TABLE IF NOT EXISTS exchange_connections (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  wallet_address TEXT NOT NULL,
+  exchange TEXT NOT NULL CHECK (exchange IN ('binance', 'bybit', 'okx')),
+  label TEXT NOT NULL,
+  encrypted_credentials TEXT NOT NULL,
+  credential_fingerprint TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'ACTIVE' CHECK (status IN ('ACTIVE', 'ERROR', 'DISABLED')),
+  last_checked_at TIMESTAMPTZ,
+  last_error TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (wallet_address, exchange, label)
+);
+CREATE INDEX IF NOT EXISTS idx_exchange_connections_owner ON exchange_connections (wallet_address, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS cross_exchange_scans (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  wallet_address TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  exchange_count INTEGER NOT NULL CHECK (exchange_count >= 0),
+  position_count INTEGER NOT NULL CHECK (position_count >= 0),
+  gross_notional NUMERIC NOT NULL CHECK (gross_notional >= 0),
+  net_exposure NUMERIC NOT NULL,
+  max_risk_score INTEGER NOT NULL CHECK (max_risk_score BETWEEN 0 AND 100),
+  risk_level TEXT NOT NULL CHECK (risk_level IN ('SAFE', 'CAUTION', 'DANGER', 'CRITICAL')),
+  data JSONB NOT NULL DEFAULT '{}'
+);
+CREATE INDEX IF NOT EXISTS idx_cross_exchange_scans_owner ON cross_exchange_scans (wallet_address, created_at DESC);
+
+-- Marketplace content is immutable after publication; edits create a new version.
+CREATE TABLE IF NOT EXISTS strategies (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  owner_address TEXT NOT NULL CHECK (owner_address ~ '^0x[0-9a-f]{40}$'),
+  slug TEXT NOT NULL UNIQUE CHECK (slug ~ '^[a-z0-9]+(?:-[a-z0-9]+)*$'),
+  name TEXT NOT NULL,
+  summary TEXT NOT NULL,
+  description TEXT NOT NULL,
+  category TEXT NOT NULL,
+  risk_level TEXT NOT NULL CHECK (risk_level IN ('LOW', 'MEDIUM', 'HIGH')),
+  supported_exchanges JSONB NOT NULL DEFAULT '[]',
+  configuration_schema JSONB NOT NULL DEFAULT '{}',
+  execution_template JSONB NOT NULL DEFAULT '{}',
+  status TEXT NOT NULL DEFAULT 'DRAFT' CHECK (status IN ('DRAFT', 'PUBLISHED', 'ARCHIVED')),
+  current_version INTEGER NOT NULL DEFAULT 0 CHECK (current_version >= 0),
+  install_count INTEGER NOT NULL DEFAULT 0 CHECK (install_count >= 0),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  published_at TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS idx_strategies_catalog ON strategies (status, category, published_at DESC);
+CREATE INDEX IF NOT EXISTS idx_strategies_owner ON strategies (owner_address, updated_at DESC);
+
+CREATE TABLE IF NOT EXISTS strategy_versions (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  strategy_id UUID NOT NULL REFERENCES strategies(id) ON DELETE CASCADE,
+  version INTEGER NOT NULL CHECK (version > 0),
+  content_hash TEXT NOT NULL,
+  manifest JSONB NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (strategy_id, version)
+);
+
+CREATE TABLE IF NOT EXISTS strategy_installations (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  strategy_id UUID NOT NULL REFERENCES strategies(id) ON DELETE CASCADE,
+  wallet_address TEXT NOT NULL CHECK (wallet_address ~ '^0x[0-9a-f]{40}$'),
+  version INTEGER NOT NULL CHECK (version > 0),
+  configuration JSONB NOT NULL DEFAULT '{}',
+  enabled BOOLEAN NOT NULL DEFAULT true,
+  installed_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (strategy_id, wallet_address)
+);
+CREATE INDEX IF NOT EXISTS idx_strategy_installations_owner ON strategy_installations (wallet_address, installed_at DESC);
+
+CREATE TABLE IF NOT EXISTS strategy_reviews (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  strategy_id UUID NOT NULL REFERENCES strategies(id) ON DELETE CASCADE,
+  wallet_address TEXT NOT NULL,
+  rating INTEGER NOT NULL CHECK (rating BETWEEN 1 AND 5),
+  review TEXT NOT NULL DEFAULT '',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (strategy_id, wallet_address)
+);
+
+CREATE TABLE IF NOT EXISTS strategy_performance_claims (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  strategy_id UUID NOT NULL REFERENCES strategies(id) ON DELETE CASCADE,
+  owner_address TEXT NOT NULL,
+  period_start TIMESTAMPTZ NOT NULL,
+  period_end TIMESTAMPTZ NOT NULL,
+  sample_size INTEGER NOT NULL CHECK (sample_size > 0),
+  metrics JSONB NOT NULL,
+  evidence_hash TEXT NOT NULL,
+  verification_status TEXT NOT NULL DEFAULT 'PENDING' CHECK (verification_status IN ('PENDING', 'VERIFIED', 'REJECTED')),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- Off-chain index of rules created in the ShieldAutomationExecutor contract.
+CREATE TABLE IF NOT EXISTS automation_rules (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  wallet_address TEXT NOT NULL CHECK (wallet_address ~ '^0x[0-9a-f]{40}$'),
+  chain_id BIGINT NOT NULL,
+  contract_address TEXT NOT NULL,
+  onchain_rule_id TEXT NOT NULL,
+  creation_tx_hash TEXT NOT NULL,
+  adapter_address TEXT NOT NULL,
+  checker_address TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'PENDING' CHECK (status IN ('PENDING', 'ACTIVE', 'CANCELLED', 'EXHAUSTED')),
+  metadata JSONB NOT NULL DEFAULT '{}',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (chain_id, contract_address, onchain_rule_id)
+);
+CREATE INDEX IF NOT EXISTS idx_automation_rules_owner ON automation_rules (wallet_address, created_at DESC);

@@ -9,7 +9,7 @@ import errorUtils = require('../utils/error');
 import walletAuth = require('../services/walletAuth');
 import riskCalculator = require('../utils/riskCalculator');
 import sodexMarketStream = require('../services/sodexMarketStream');
-import { isProduction } from '../config/env';
+import { isProduction, operatorWallets } from '../config/env';
 
 const { safeSelect } = supabaseService;
 const { getErrorMessage } = errorUtils;
@@ -131,8 +131,29 @@ function portfolioSummary(positions: Array<{ markPrice: number; size: number; ma
 router.get('/', async (req: Request, res: Response) => {
   const session = walletAuth.getWalletSession(req);
   if (!session) return res.status(401).json({ error: 'Connect and sign in with your SoDEX wallet.' });
-  const wallet = session.address;
-  const network = parseNetwork(session.network);
+  let wallet = session.address;
+  let network = parseNetwork(session.network);
+  const executionMode = String(process.env.EXECUTION_MODE || 'dry_run').toLowerCase();
+  const liveExecution = executionMode === 'testnet' || executionMode === 'mainnet_canary';
+  if (liveExecution) {
+    const operators = operatorWallets();
+    if (!operators.includes(session.address.toLowerCase())) {
+      return res.status(403).json({ error: 'This wallet is not an authorized operator.', code: 'OPERATOR_REQUIRED' });
+    }
+    const executionNetwork: SodexNetwork = executionMode === 'mainnet_canary' ? 'mainnet' : 'testnet';
+    if (session.network !== executionNetwork) {
+      return res.status(409).json({
+        error: `Reconnect the operator session to SoDEX ${executionNetwork} for the configured execution mode.`,
+        code: 'SODEX_NETWORK_MISMATCH'
+      });
+    }
+    const executionAccount = String(process.env.SODEX_ACCOUNT_ADDRESS || '').trim();
+    if (!/^0x[0-9a-fA-F]{40}$/.test(executionAccount)) {
+      return res.status(503).json({ error: 'The configured SoDEX execution account is unavailable.' });
+    }
+    wallet = executionAccount;
+    network = executionNetwork;
+  }
 
   try {
     // live === null  → SoDEX API unreachable (frontend falls back to Supabase history)

@@ -1,4 +1,5 @@
 import crypto from 'crypto';
+import { ethers } from 'ethers';
 
 function csv(name: string): string[] {
   return String(process.env[name] || '')
@@ -25,11 +26,7 @@ export function allowedOrigins(): string[] {
 }
 
 export function operatorWallets(): string[] {
-  const configured = csv('OPERATOR_WALLET_ADDRESSES');
-  const executionAccount = String(
-    process.env.SODEX_ACCOUNT_ADDRESS || process.env.SODEX_WALLET_ADDRESS || ''
-  ).trim();
-  return [...new Set([...configured, ...(executionAccount ? [executionAccount] : [])].map((value) => value.toLowerCase()))];
+  return [...new Set(csv('OPERATOR_WALLET_ADDRESSES').map((value) => value.toLowerCase()))];
 }
 
 export function isProduction(): boolean {
@@ -57,13 +54,19 @@ export function assertProductionEnvironment(): void {
   const cronSecret = process.env.CRON_SECRET || '';
   const keyProvider = String(process.env.KEY_PROVIDER || process.env.SODEX_KEY_PROVIDER || 'disabled').toLowerCase();
   const executionMode = String(process.env.EXECUTION_MODE || 'dry_run').toLowerCase();
+  const sodexNetwork = String(process.env.SODEX_NETWORK || 'testnet').toLowerCase();
+  const sodexChainId = Number(process.env.SODEX_CHAIN_ID);
+  const sodexAccountAddress = String(process.env.SODEX_ACCOUNT_ADDRESS || '').trim();
+  const sodexApiKeyName = String(process.env.SODEX_API_KEY_NAME || '').trim();
+  const sodexManagedKey = String(process.env.SODEX_MANAGED_PRIVATE_KEY || process.env.SODEX_API_PRIVATE_KEY || '').trim();
   const origins = allowedOrigins();
   const operators = operatorWallets();
   const schedulerEnabled = process.env.ENABLE_BACKGROUND_SCHEDULER !== 'false';
   const telegramBotEnabled = process.env.ENABLE_TELEGRAM_BOT === 'true';
+  const crossExchangeEnabled = process.env.ENABLE_CROSS_EXCHANGE_SHIELD === 'true';
   const ai = aiConfiguration();
 
-  for (const name of ['ENABLE_BACKGROUND_SCHEDULER', 'ENABLE_TELEGRAM_BOT']) {
+  for (const name of ['ENABLE_BACKGROUND_SCHEDULER', 'ENABLE_TELEGRAM_BOT', 'ENABLE_CROSS_EXCHANGE_SHIELD']) {
     const value = process.env[name];
     if (value !== undefined && !['true', 'false'].includes(value)) errors.push(`${name} must be true or false.`);
   }
@@ -73,7 +76,7 @@ export function assertProductionEnvironment(): void {
   if (sessionSecret && cronSecret && sessionSecret === cronSecret) errors.push('CRON_SECRET must be independent from SODEX_SESSION_SECRET.');
   if (origins.length === 0) errors.push('ALLOWED_ORIGINS or NEXT_PUBLIC_APP_URL must contain a valid origin.');
   if (origins.some((origin) => !origin.startsWith('https://'))) errors.push('Production origins must use HTTPS.');
-  if (operators.length === 0) errors.push('OPERATOR_WALLET_ADDRESSES or SODEX_ACCOUNT_ADDRESS must be configured.');
+  if (operators.length === 0) errors.push('OPERATOR_WALLET_ADDRESSES must contain at least one operator identity.');
   if (operators.some((wallet) => !/^0x[0-9a-f]{40}$/.test(wallet) || /^0x0{40}$/.test(wallet))) {
     errors.push('Every operator wallet must be a valid non-zero EVM address.');
   }
@@ -87,13 +90,37 @@ export function assertProductionEnvironment(): void {
   if (!['env', 'local_file', 'managed', 'disabled'].includes(keyProvider)) errors.push('KEY_PROVIDER must be env, managed, disabled, or local_file.');
   if (keyProvider === 'local_file') errors.push('KEY_PROVIDER=local_file is not permitted in production. Use managed, env, or disabled.');
   if (!['dry_run', 'testnet', 'mainnet_canary'].includes(executionMode)) errors.push('EXECUTION_MODE must be dry_run, testnet, or mainnet_canary.');
-  if (executionMode === 'mainnet_canary' && !['managed', 'disabled'].includes(keyProvider)) {
-    errors.push('Mainnet server signing requires KEY_PROVIDER=managed; use KEY_PROVIDER=disabled for connected-wallet signing only.');
+  if (!['testnet', 'mainnet'].includes(sodexNetwork)) errors.push('SODEX_NETWORK must be testnet or mainnet.');
+
+  const liveExecution = executionMode === 'testnet' || executionMode === 'mainnet_canary';
+  if (liveExecution) {
+    const expectedNetwork = executionMode === 'mainnet_canary' ? 'mainnet' : 'testnet';
+    const expectedChainId = expectedNetwork === 'mainnet' ? 286623 : 138565;
+    if (keyProvider !== 'managed') errors.push('Live SoDEX execution requires KEY_PROVIDER=managed.');
+    if (!/^0x[0-9a-fA-F]{64}$/.test(sodexManagedKey) || /^0x0{64}$/.test(sodexManagedKey)) {
+      errors.push('Live SoDEX execution requires a valid non-zero deployment-managed API signing key.');
+    } else if (/^0x[0-9a-fA-F]{40}$/.test(sodexAccountAddress)) {
+      const signerAddress = new ethers.Wallet(sodexManagedKey).address.toLowerCase();
+      if (signerAddress === sodexAccountAddress.toLowerCase()) {
+        errors.push('The deployment-managed signing key must be a registered API key, not the SoDEX master wallet key.');
+      }
+    }
+    if (!/^0x[0-9a-fA-F]{40}$/.test(sodexAccountAddress) || /^0x0{40}$/.test(sodexAccountAddress)) {
+      errors.push('Live SoDEX execution requires a valid non-zero SODEX_ACCOUNT_ADDRESS.');
+    }
+    if (operators.includes(sodexAccountAddress.toLowerCase())) {
+      errors.push('Use an operator identity distinct from SODEX_ACCOUNT_ADDRESS so the master wallet can remain offline.');
+    }
+    if (!sodexApiKeyName || sodexApiKeyName.length > 36 || sodexApiKeyName.toLowerCase() === 'default') {
+      errors.push('Live SoDEX execution requires a non-default SODEX_API_KEY_NAME of at most 36 characters.');
+    }
+    if (sodexNetwork !== expectedNetwork) {
+      errors.push(`EXECUTION_MODE=${executionMode} requires SODEX_NETWORK=${expectedNetwork}.`);
+    }
+    if (sodexChainId !== expectedChainId) {
+      errors.push(`SODEX_NETWORK=${expectedNetwork} requires SODEX_CHAIN_ID=${expectedChainId}.`);
+    }
   }
-  if (executionMode === 'mainnet_canary' && keyProvider === 'managed' && !(process.env.SODEX_MANAGED_PRIVATE_KEY || process.env.SODEX_API_PRIVATE_KEY)) {
-    errors.push('Mainnet managed signing requires a deployment-managed signing key.');
-  }
-  if (!['testnet', 'mainnet'].includes(String(process.env.SODEX_NETWORK || 'testnet'))) errors.push('SODEX_NETWORK must be testnet or mainnet.');
   if (schedulerEnabled) {
     const monitoredWallet = String(process.env.USER_WALLET_ADDRESS || process.env.SODEX_ACCOUNT_ADDRESS || '').toLowerCase();
     if (!/^0x[0-9a-f]{40}$/.test(monitoredWallet) || /^0x0{40}$/.test(monitoredWallet)) {
@@ -102,6 +129,18 @@ export function assertProductionEnvironment(): void {
   }
   if (telegramBotEnabled && !(process.env.TELEGRAM_BOT_TOKEN && process.env.TELEGRAM_CHAT_ID)) {
     errors.push('ENABLE_TELEGRAM_BOT=true requires TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID.');
+  }
+  if (crossExchangeEnabled) {
+    const credentialKey = String(process.env.EXCHANGE_CREDENTIALS_KEY || '');
+    if (credentialKey.length < 32) errors.push('ENABLE_CROSS_EXCHANGE_SHIELD=true requires EXCHANGE_CREDENTIALS_KEY with at least 32 characters.');
+    if (credentialKey && credentialKey === sessionSecret) errors.push('EXCHANGE_CREDENTIALS_KEY must be independent from SODEX_SESSION_SECRET.');
+  }
+
+  for (const name of ['SHIELD_AUTOMATION_TESTNET_CONTRACT_ADDRESS', 'SHIELD_AUTOMATION_MAINNET_CONTRACT_ADDRESS', 'SHIELD_AUTOMATION_CONTRACT_ADDRESS']) {
+    const value = String(process.env[name] || '').trim();
+    if (value && (!ethers.isAddress(value) || ethers.getAddress(value) === ethers.ZeroAddress)) {
+      errors.push(`${name} must be a valid non-zero EVM contract address.`);
+    }
   }
   if (!['groq', 'grok', 'xai', 'gemini', 'claude', 'skillmint'].includes(ai.provider)) {
     errors.push('AI_SERVICE must be groq, grok, xai, gemini, claude, or skillmint.');
@@ -123,7 +162,7 @@ export function assertProductionEnvironment(): void {
     }
   }
 
-  for (const name of ['SOSOVALUE_BASE_URL', 'SODEX_TESTNET_PERPS', 'SODEX_MAINNET_PERPS', 'SODEX_TESTNET_SPOT', 'SODEX_MAINNET_SPOT', 'SKILLMINT_X402_URL']) {
+  for (const name of ['SOSOVALUE_BASE_URL', 'SODEX_TESTNET_PERPS', 'SODEX_MAINNET_PERPS', 'SODEX_TESTNET_SPOT', 'SODEX_MAINNET_SPOT', 'SODEX_TESTNET_RPC_URL', 'SODEX_MAINNET_RPC_URL', 'SKILLMINT_X402_URL']) {
     const value = process.env[name];
     if (value) {
       try {

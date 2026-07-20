@@ -1,227 +1,165 @@
-# SkillMint Integration — Sentinel Finance
+# SkillMint integration
 
-> **What this is:** A drop-in 4th AI provider for Sentinel Finance that routes every
-> agent memo through TEE-attested skill execution on 0G mainnet. Every memo comes
-> back with an on-chain receipt rootHash that anyone can verify forever.
->
-> **Status:** Free integration courtesy of the SkillMint team. No paid contract,
-> no support obligation. Bugs and questions: open a GitHub issue on
-> [ayushsaklani-min/SkillMint](https://github.com/ayushsaklani-min/SkillMint).
+Last reviewed against `backend/services/skillmint.ts`, installed `@skillmint/sdk` **0.4.1**, and the upstream [SkillMint repository](https://github.com/ayushsaklani-min/SkillMint): **2026-07-19**
 
----
+SkillMint is Gold & Grith's optional fifth AI adapter, alongside Groq, xAI Grok, Gemini, and Claude. It calls a SkillMint AI skill through `executeX402`, returns the text through the common AI interface, and exposes receipt metadata to the narrative and shield agents.
 
-## What changed in your repo
+This integration is optional. The default `AI_SERVICE` is `groq`.
 
-The adapter is wired into the shared AI interface without breaking the other
-providers. Receipt metadata is persisted in the existing memo JSON payload.
+## Current support status
 
-| File | Change |
+| Capability | Status |
 |---|---|
-| `backend/services/skillmint.ts` | **NEW** — 4th adapter implementing the same `{ generateNarrativeMemo, generateRiskMemo, generateDailySummary }` API as groq/gemini/claude. Calls `client.executeX402(...)` per memo, caches the receipt rootHash in a per-key Map, returns the memo string. |
-| `backend/services/ai.ts` | One-line patch — adds `service === 'skillmint' ? skillmint : claude` to the dispatch chain. Default stays `groq`. |
-| `.env.example` | Added the `SKILLMINT_*` config block with comments explaining each variable. |
-| `backend/agents/narrativeAgent.ts` | Reads `ai.getLastReceipt?.('narrative:<sector>')` after each `generateNarrativeMemo` call. Stores receipt in `trade_memos.data.skillmint_receipt`. **Zero behavior change when AI_SERVICE is anything other than `skillmint`** — the optional chaining returns undefined and the new field is just `null`. |
-| `backend/agents/shieldAgent.ts` | Same pattern for `generateRiskMemo` — captures `risk:<symbol>` receipt, stores in the same `trade_memos.data.skillmint_receipt` field. |
-| `backend/services/SKILLMINT_INTEGRATION.md` | This document. |
+| Narrative memo generation | Implemented |
+| Risk memo generation | Implemented |
+| Daily summary generation | Implemented |
+| Receipt root validation | Implemented; a missing/malformed root fails the call |
+| Narrative/risk receipt persistence | Implemented in `trade_memos.data.skillmint_receipt` |
+| Daily-summary receipt persistence | Not implemented; the adapter caches it in memory only |
+| W0G payment amount in persisted metadata | Not implemented; only `paidUSDC` is currently copied from the SDK response |
+| Production fallback to unattested text | Disabled; production throws and fails the cycle |
+| Development fallback | Deterministic local memo, clearly outside the attested path |
 
-The required SDK is already declared in `package.json`:
+The current public SkillMint x402 endpoint is documented upstream as advertising W0G by default, although SDK 0.4.1 can accept W0G or USDC.E payment challenges. The old version of this guide incorrectly told operators to fund only USDC.E and assumed a fixed USDC price. Do not rely on that assumption: discover the selected skill and endpoint's current payment requirement before funding a wallet.
 
-```bash
-npm install @skillmint/sdk ethers
-```
+## Files and data flow
 
-(`ethers` is already a top-level dependency in your repo; the SDK uses the same
-version range so no conflict.)
+| File | Responsibility |
+|---|---|
+| `backend/services/skillmint.ts` | Builds prompts, lazily creates `SkillMintClient`, calls `executeX402`, validates `receiptRootHash`, and caches receipt metadata by key. |
+| `backend/services/ai.ts` | Selects the adapter when `AI_SERVICE=skillmint`. |
+| `backend/agents/narrativeAgent.ts` | Reads `narrative:<sector>` receipts and stores them beside narrative memos. |
+| `backend/agents/shieldAgent.ts` | Reads `risk:<symbol>` receipts and stores them beside risk memos. |
+| `backend/agents/orchestrator.ts` | Generates the daily summary but does not currently persist `summary:daily` receipt metadata. |
+| `.env.example` | Canonical SkillMint configuration template. |
 
----
+Receipt keys are:
 
-## How to turn it on
+- `narrative:<sector>`
+- `risk:<symbol>`
+- `summary:daily`
 
-1. **Install the SDK** (one-time):
+The adapter returns `Promise<string>` like every other provider. `getLastReceipt(key)` is a SkillMint-only side channel so agents can capture provenance without changing the shared text-returning interface.
 
-   ```bash
-   npm install @skillmint/sdk
-   ```
+## Configuration
 
-2. **Generate a server wallet** for paying memo calls. Any ethers-compatible
-   key works. Use a NEW wallet — don't reuse `USER_WALLET_ADDRESS`. The new
-   wallet only needs USDC.E on 0G mainnet (and a tiny amount of 0G for gas,
-   but x402 payments are gasless so even that's optional).
-
-3. **Bridge ~$1-5 USDC to 0G mainnet** via [XSwap](https://app.xswap.link).
-   Source chain: Ethereum mainnet. Destination: 0G. It arrives as USDC.E at
-   `0x1f3aa82227281ca364bfb3d253b0f1af1da6473e`. Send to your new server wallet.
-
-4. **Add to `.env`:**
-
-   ```env
-   AI_SERVICE=skillmint
-   SKILLMINT_AGENT_KEY=0x<your-new-server-wallet-private-key>
-   SKILLMINT_NETWORK=mainnet
-   SKILLMINT_NARRATIVE_SKILL_ID=2
-   SKILLMINT_RISK_SKILL_ID=2
-   SKILLMINT_SUMMARY_SKILL_ID=2
-   ```
-
-5. **Restart the backend.** You should see:
-
-   ```
-   [AI] Using Skillmint
-   [Skillmint] Client ready on mainnet. NARRATIVE_SKILL=2 RISK_SKILL=2 SUMMARY_SKILL=2
-   ```
-
-6. **Run one cycle** (`POST /api/trigger` or wait 30 min). Check `trade_memos`
-   in Supabase — the most recent `ENTRY_SIGNAL` row should have a populated
-   `data.skillmint_receipt` field with `receiptRootHash`, `settlementTx`,
-   `skillId`, `paidUSDC`, and `capturedAt`.
-
-7. **Verify the receipt manually** to confirm the chain-of-trust works:
-
-   ```bash
-   curl "https://indexer-storage-turbo.0g.ai/file?root=<receiptRootHash>"
-   ```
-
-   That returns the full TEE-signed receipt body. It will look something like:
-
-   ```json
-   {
-     "skillId": 2,
-     "input": "You are Sentinel Finance's AI analyst. ...",
-     "inputHash": "0x...",
-     "output": "AI sector is showing STRONG_BUY because ...",
-     "outputHash": "0x...",
-     "teeVerified": true,
-     "providerAddress": "0x...",
-     "model": "deepseek-chat-v3-0324",
-     "paidUSDC": "0.01",
-     "timestamp": 1747257600000
-   }
-   ```
-
-   That's the audit primary key — the receipt is now permanent, anyone can fetch
-   it, and the cryptographic chain (input → TEE → output) is verifiable.
-
----
-
-## Operational notes
-
-### Failure handling
-
-Local development supports graceful degradation. If the SDK, key, balance, or
-upstream service is unavailable, development can use a deterministic local
-memo. Production fails closed: the cycle fails and no unattested output is
-stored or delivered as if it had a valid receipt.
-
-You'll see warnings in the logs:
-
-```
-[Skillmint] Skill 2 call failed (narrative:DeFi): <reason>.
-```
-
-In production this is a fatal cycle error and should page the operator. This
-boundary prevents an unverifiable memo from being mistaken for attested output.
-
-### Cost monitoring
-
-Each memo costs ~$0.01 USDC.E. Default cycle frequency (30 min) with 3 narrative
-memos per cycle = ~144 calls/day = ~$1.44/day. ShieldAgent calls are
-threshold-gated (`combinedRisk >= ALERT_THRESHOLD`) and typically much rarer.
-
-Watch your server wallet balance with:
+The SDK is already declared in the root package and lockfile. A normal repository install is sufficient:
 
 ```bash
-cast balance <wallet> --rpc-url https://evmrpc.0g.ai
+npm ci
 ```
 
-Or check the ERC-20 USDC.E balance via Chainscan.
+Set:
 
-### Latency
+```env
+AI_SERVICE=skillmint
+SKILLMINT_AGENT_KEY=0x<dedicated-32-byte-private-key>
+SKILLMINT_NETWORK=mainnet
+SKILLMINT_NARRATIVE_SKILL_ID=2
+SKILLMINT_RISK_SKILL_ID=2
+SKILLMINT_SUMMARY_SKILL_ID=2
+SKILLMINT_X402_URL=
+```
 
-SkillMint adds ~5-10 seconds per memo (vs Groq's ~2-3s). Negligible for the
-30-minute orchestrator cycle. **Do not** put a SkillMint call in a sub-second
-hot path.
+Rules:
 
-### Quality
+- Use a dedicated server wallet; do not reuse the monitored SoDEX wallet or a master trading wallet.
+- `SKILLMINT_AGENT_KEY` must be a non-zero 32-byte EVM private key in production.
+- `SKILLMINT_NETWORK` must be `testnet` or `mainnet`.
+- Skill IDs must be positive integers. The repository defaults to `2`, but availability, model, prompt, and pricing are upstream state; validate them before deployment.
+- Leave `SKILLMINT_X402_URL` empty to use the SDK network default. If overridden in production, use an approved HTTPS endpoint.
+- Fund only the asset requested by the selected x402 endpoint. SDK 0.4.1 supports W0G and USDC.E challenges; consult the current upstream SDK documentation for wrapping/bridging steps.
 
-SkillMint skill #2 is a general-purpose analyst skill. For domain-specific
-reasoning quality, publish a SkillMint skill with a tuned Sentinel system prompt
-(encrypted on 0G Storage — buyers run it but never see the prompt) and put its
-skillId in `SKILLMINT_NARRATIVE_SKILL_ID`.
+Restart the backend after configuration. Initialization is lazy, so the client-ready log appears on the first SkillMint generation call rather than necessarily at process startup:
 
-We're happy to help publish that custom skill for you — DM
-[@ayushsaklani976](https://x.com/ayushsaklani976) on X.
+```text
+[AI] Using Skillmint
+[Skillmint] Client ready on <network>. NARRATIVE_SKILL=<id> RISK_SKILL=<id> SUMMARY_SKILL=<id>
+```
 
-### Supabase schema
+## Run and inspect
 
-The integration stores receipts in the existing `trade_memos.data` JSON column
-under key `skillmint_receipt`. No migration required. To query receipts:
+Trigger a cycle through an authenticated operator action or the cron-authorized endpoint described in the root README. Narrative and risk memos persist a receipt shaped like:
+
+```json
+{
+  "receiptRootHash": "0x...",
+  "settlementTx": "0x...",
+  "skillId": 2,
+  "paidUSDC": "0",
+  "capturedAt": 1784428200000
+}
+```
+
+`paidUSDC: "0"` does not mean execution was free; the current endpoint may have charged W0G, which this adapter does not yet persist. Use the settlement transaction and current SDK receipt/payment APIs for authoritative payment evidence.
+
+Query stored receipts:
 
 ```sql
 SELECT
   id,
   memo_type,
   related_symbol,
-  content,
-  data->'skillmint_receipt'->>'receiptRootHash'  AS receipt_root,
-  data->'skillmint_receipt'->>'settlementTx'    AS settlement_tx,
-  data->'skillmint_receipt'->>'paidUSDC'        AS paid_usdc,
+  data->'skillmint_receipt'->>'receiptRootHash' AS receipt_root,
+  data->'skillmint_receipt'->>'settlementTx' AS settlement_tx,
+  data->'skillmint_receipt'->>'skillId' AS skill_id,
+  data->'skillmint_receipt'->>'paidUSDC' AS recorded_paid_usdc,
   created_at
 FROM trade_memos
-WHERE data ? 'skillmint_receipt'
-  AND data->'skillmint_receipt' IS NOT NULL
+WHERE data->'skillmint_receipt' IS NOT NULL
 ORDER BY created_at DESC
 LIMIT 20;
 ```
 
-If you'd rather have a dedicated column, run:
+No schema migration is required because receipt metadata lives in the existing `data` JSONB field.
 
-```sql
-ALTER TABLE trade_memos
-  ADD COLUMN skillmint_receipt_root TEXT;
+## Verify a receipt
+
+Use the installed SDK instead of depending on an undocumented storage URL shape:
+
+```js
+import { SkillMintClient } from '@skillmint/sdk';
+
+const client = new SkillMintClient({
+  privateKey: process.env.SKILLMINT_AGENT_KEY,
+  network: process.env.SKILLMINT_NETWORK || 'mainnet'
+});
+
+const receipt = await client.fetchReceipt(process.env.RECEIPT_ROOT_HASH);
+console.log(client.verifyReceipt(receipt));
 ```
 
-Then update the adapter/agent to write to that column directly — but the JSON
-approach above works fine with no migration.
+Run verification in a controlled local script without printing the private key. A valid result checks the receipt's input/output hashes and TEE-verification flag according to the installed SDK. Verification proves what the receipt contains; it does not independently prove trading quality, model suitability, or future performance.
 
----
+## Failure behavior
 
-## How to think about this integration (for your future self or AI assistant)
+In production:
 
-**Mental model:** Think of SkillMint as a **provider** that returns LLM text AND
-a cryptographic receipt. The agents don't know or care which provider is
-active — they just get a string. The receipt is captured as side-channel
-metadata, picked up by the agent right after the await, and stored next to the
-memo it explains.
+- missing key, SDK initialization failure, upstream failure, invalid receipt root, or empty output throws;
+- the agent/orchestrator cycle fails;
+- no deterministic fallback is stored or delivered as if it were attested.
 
-**Why this design?** The alternative was changing the agent signatures to return
-`{ output, receipt }` everywhere — but that would force a breaking change on
-groq/gemini/claude adapters that don't have receipts. The side-channel pattern
-keeps all four adapters interchangeable and lets the agents stay
-provider-agnostic.
+In development, the same failures log a warning and return a deterministic local memo. That memo has no SkillMint receipt and must not be represented as verified output.
 
-**When to remove SkillMint:** If you ever want to fall back permanently to
-groq/claude, just set `AI_SERVICE=groq` and the SkillMint adapter is bypassed.
-The `skillmint_receipt` field in existing `trade_memos` rows is left alone —
-old receipts remain auditable forever via 0G Storage even if the adapter is no
-longer running.
+## Operational guidance
 
-**Extending to other memo types:** If you add a new generate* method, add it to:
-1. The shared input contracts at the top of `services/skillmint.ts`
-2. A new `buildXPrompt` function in `services/skillmint.ts`
-3. A new method on the `skillmint` object
-4. Make sure groq/gemini/claude adapters get the matching method too
-5. Update the agent call site to use `ai.getLastReceipt?.(<key>)`
+- Discover current skill metadata and payment requirements before choosing a skill ID.
+- Monitor the dedicated payer wallet and settlement transactions; do not hard-code a cost estimate in operational budgets.
+- Measure latency in your deployment rather than relying on historical numbers.
+- Alert on repeated `[Skillmint]` failures and on missing receipts when `AI_SERVICE=skillmint`.
+- Treat receipt retention as part of the audit trail. Narrative/risk rows retain receipt roots even after switching providers.
+- If daily summaries require the same audit guarantee, persist `getLastReceipt('summary:daily')` before calling the integration complete for that memo type.
+- If W0G cost reporting matters, extend `SkillMintReceiptMeta` and `runSkill` to store `paidW0G` from the SDK response.
 
-The receipt key convention is `<memoType>:<entityId>` — e.g. `narrative:DeFi`,
-`risk:BTC-USD`, `summary:daily`. Stick to this so the lookups stay predictable.
+## Maintenance triggers
 
----
+Re-review this guide when any of these change:
 
-## Questions?
+- `@skillmint/sdk` version or `executeX402` response types;
+- default x402 URL or advertised payment asset;
+- selected skill IDs or network;
+- `skillmint.ts`, AI dispatch, or memo persistence call sites;
+- receipt verification semantics;
+- production fallback behavior.
 
-Open an issue: [github.com/ayushsaklani-min/SkillMint/issues](https://github.com/ayushsaklani-min/SkillMint/issues)
-Or DM: [@ayushsaklani976 on X](https://x.com/ayushsaklani976)
-
-Public co-marketing welcomed but not required. If you do want to mention this
-publicly, the team appreciates being tagged — it helps validate that
-production teams ship on SkillMint.
+Upstream support and issues: [ayushsaklani-min/SkillMint](https://github.com/ayushsaklani-min/SkillMint).
