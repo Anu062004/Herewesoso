@@ -1,5 +1,6 @@
 import Image from 'next/image';
 import Link from 'next/link';
+import TypewriterHeadline from '@/components/landing/TypewriterHeadline';
 import styles from './page.workbench.module.css';
 
 const workflow = [
@@ -79,7 +80,7 @@ export default function HomePage() {
           <p className={styles.kicker}>
             <span aria-hidden="true" /> SoDEX trading intelligence
           </p>
-          <h1>Trade with the whole market in view.</h1>
+          <TypewriterHeadline />
         </div>
 
         <div className={styles.introAside}>
@@ -112,6 +113,7 @@ export default function HomePage() {
               width={2326}
               height={1338}
               sizes="(max-width: 760px) calc(100vw - 32px), (max-width: 1280px) calc(100vw - 48px), 1220px"
+              quality={92}
               priority
             />
           </div>

@@ -188,6 +188,7 @@
 
 .intro h1 {
   max-width: 820px;
+  min-height: 1.88em;
   margin: var(--space-lg-token) 0 0;
   font-family: var(--font-display);
   font-size: clamp(3rem, 6vw, 5.6rem);
@@ -293,6 +294,7 @@
 .screenFrame {
   position: relative;
   overflow: hidden;
+  aspect-ratio: 2326 / 1338;
   border: var(--rule-thin-token) solid var(--color-rule-strong);
   border-radius: var(--radius-lg-token);
   background: var(--color-surface);
@@ -312,7 +314,9 @@
 .screenFrame img {
   display: block;
   width: 100%;
-  height: auto;
+  height: 100%;
+  object-fit: cover;
+  object-position: center top;
 }
 
 .screenCaption {
@@ -663,12 +667,11 @@
   }
 
   .screenFrame {
-    overflow-x: auto;
+    aspect-ratio: 4 / 3;
   }
 
   .screenFrame img {
-    width: 900px;
-    max-width: none;
+    object-position: 18% top;
   }
 
   .screenCaption {
@@ -751,6 +754,7 @@
 
   .intro h1 {
     font-size: clamp(2.65rem, 13vw, 3.65rem);
+    min-height: 2.82em;
   }
 
   .introActions {
