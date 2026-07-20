@@ -457,12 +457,19 @@ export interface ExecutionSimulationResponse {
 export interface TriggerCycleResponse {
   success?: boolean;
   skipped?: boolean;
+  partial?: boolean;
+  degraded?: boolean;
   error?: string;
+  requestId?: string;
   narrativeResult?: {
     success?: boolean;
+    degraded?: boolean;
+    warnings?: string[];
+    error?: string;
   };
   shieldResult?: {
     success?: boolean;
+    error?: string;
     positionsMonitored?: number;
   };
   message?: string;

@@ -20,9 +20,18 @@ const { getErrorMessage } = errorUtils;
 
 interface NarrativeAgentResult {
   success: boolean;
+  degraded?: boolean;
+  warnings?: string[];
   scores?: NarrativeScoreRow[];
   strongSignals?: NarrativeScoreRow[];
   error?: string;
+}
+
+interface NarrativeInputs {
+  news: Awaited<ReturnType<typeof sosovalue.getNews>>;
+  etfHistory: Awaited<ReturnType<typeof sosovalue.getETFSummaryHistory>>;
+  macroEvents: Awaited<ReturnType<typeof sosovalue.getMacroEvents>>;
+  unavailableSources: string[];
 }
 
 const SECTORS = ['DeFi', 'AI', 'RWA', 'L1', 'L2', 'GameFi', 'DePIN', 'Meme'] as const;
@@ -31,14 +40,37 @@ function getNumericValue(value: unknown): number {
   return typeof value === 'number' ? value : Number(value || 0);
 }
 
-async function fetchNarrativeInputs() {
-  const news = await sosovalue.getNews(100);
-  await delay(500);
-  const etfHistory = await sosovalue.getETFSummaryHistory(7);
-  await delay(500);
-  const macroEvents = await sosovalue.getMacroEvents();
+async function fetchNarrativeInputs(): Promise<NarrativeInputs> {
+  const unavailableSources: string[] = [];
+  const load = async <T>(name: string, request: () => Promise<T>, fallback: T): Promise<T> => {
+    try {
+      return await request();
+    } catch (error) {
+      unavailableSources.push(name);
+      console.error(`[NarrativeAgent] ${name} unavailable: ${getErrorMessage(error)}`);
+      return fallback;
+    }
+  };
 
-  return { news, etfHistory, macroEvents };
+  const news = await load(
+    'SoSoValue news',
+    () => sosovalue.getNews(100),
+    { code: -1, message: 'News unavailable.', data: [] }
+  );
+  await delay(500);
+  const etfHistory = await load(
+    'SoSoValue ETF flows',
+    () => sosovalue.getETFSummaryHistory(7),
+    { code: -1, message: 'ETF flows unavailable.', data: { netFlow7Day: 0, netFlow: 0, unavailable: true } }
+  );
+  await delay(500);
+  const macroEvents = await load(
+    'SoSoValue macro events',
+    () => sosovalue.getMacroEvents(),
+    { code: -1, message: 'Macro events unavailable.', data: [] }
+  );
+
+  return { news, etfHistory, macroEvents, unavailableSources };
 }
 
 function marketPoints(input: unknown): Array<{ close: number; volume: number }> {
@@ -158,14 +190,20 @@ async function alertAllowed(score: NarrativeScoreRow): Promise<boolean> {
     (score.crowding_score || 0) <= Number(preference.max_crowding ?? 65);
 }
 
-async function runNarrativeAgent(): Promise<NarrativeAgentResult> {
+async function runNarrativeAgent(walletOverride?: string): Promise<NarrativeAgentResult> {
   console.log('[NarrativeAgent] Starting cycle...');
   const startTime = Date.now();
-  const runRecord = await createAgentRun('narrative');
-  const walletAddress = String(process.env.USER_WALLET_ADDRESS || process.env.SODEX_ACCOUNT_ADDRESS || '').toLowerCase() || null;
+  let runRecord: Awaited<ReturnType<typeof createAgentRun>> = null;
+  const walletAddress = String(walletOverride || process.env.USER_WALLET_ADDRESS || process.env.SODEX_ACCOUNT_ADDRESS || '').toLowerCase() || null;
 
   try {
-    const { news, etfHistory, macroEvents } = await fetchNarrativeInputs();
+    try {
+      runRecord = await createAgentRun('narrative');
+    } catch (error) {
+      console.error('[NarrativeAgent] Run tracking unavailable:', getErrorMessage(error));
+    }
+
+    const { news, etfHistory, macroEvents, unavailableSources } = await fetchNarrativeInputs();
 
     const headlines = (Array.isArray(news?.data) ? news.data : []) as Headline[];
     const etfSummary = etfHistory?.data || {};
@@ -206,7 +244,18 @@ async function runNarrativeAgent(): Promise<NarrativeAgentResult> {
         market_confirmation_score: analysis.marketConfirmationScore,
         crowding_score: analysis.crowdingScore,
         contradiction_score: analysis.contradictionScore,
-        global_context: { etfFlow7Day: etfNetFlow, etfScore, macroScore, upcomingEventCount: upcoming.length, marketRegime: regime, calibrationSamples: calibration.samples, calibratedWeights: calibration.calibrated },
+        global_context: {
+          etfFlow7Day: etfNetFlow,
+          etfScore,
+          macroScore,
+          upcomingEventCount: upcoming.length,
+          marketRegime: regime,
+          calibrationSamples: calibration.samples,
+          calibratedWeights: calibration.calibrated,
+          dataAvailability: unavailableSources.length
+            ? { status: 'degraded', unavailableSources }
+            : { status: 'ready', unavailableSources: [] }
+        },
         evidence: analysis.evidence as unknown as Record<string, unknown>,
         model_version: NARRATIVE_MODEL_VERSION
       };
@@ -345,23 +394,39 @@ async function runNarrativeAgent(): Promise<NarrativeAgentResult> {
     await performanceService.recordSignalOutcomes(scoresToStore);
 
     const duration = Date.now() - startTime;
-    await completeAgentRun(runRecord?.id, {
-      duration_ms: duration,
-      summary: {
-        topSignal: topSignal?.sector || null,
-        strongSignalCount: strongSignals.length
-      }
-    });
+    try {
+      await completeAgentRun(runRecord?.id, {
+        duration_ms: duration,
+        summary: {
+          topSignal: topSignal?.sector || null,
+          strongSignalCount: strongSignals.length
+        }
+      });
+    } catch (trackingError) {
+      console.error('[NarrativeAgent] Failed to complete run tracking:', getErrorMessage(trackingError));
+    }
 
     console.log(
       `[NarrativeAgent] Completed in ${duration}ms. Top signal: ${topSignal?.sector || 'None'}`
     );
 
-    return { success: true, scores: sectorScores, strongSignals };
+    return {
+      success: true,
+      degraded: unavailableSources.length > 0,
+      warnings: unavailableSources.length > 0
+        ? [`Limited market intelligence: ${unavailableSources.join(', ')} unavailable.`]
+        : [],
+      scores: sectorScores,
+      strongSignals
+    };
   } catch (error) {
-    await failAgentRun(runRecord?.id, getErrorMessage(error), {
-      duration_ms: Date.now() - startTime
-    });
+    try {
+      await failAgentRun(runRecord?.id, getErrorMessage(error), {
+        duration_ms: Date.now() - startTime
+      });
+    } catch (trackingError) {
+      console.error('[NarrativeAgent] Failed to update run tracking:', getErrorMessage(trackingError));
+    }
 
     console.error('[NarrativeAgent] Error:', getErrorMessage(error));
     return { success: false, error: getErrorMessage(error) };
