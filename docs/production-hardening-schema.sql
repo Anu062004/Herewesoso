@@ -70,6 +70,7 @@ LANGUAGE plpgsql
 SECURITY DEFINER
 SET search_path = public
 AS $$
+#variable_conflict use_column
 BEGIN
   DELETE FROM api_rate_limits AS expired_limits
     WHERE expired_limits.reset_at < now() - interval '1 day';
