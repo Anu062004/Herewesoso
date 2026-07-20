@@ -164,6 +164,8 @@ Edit `.env` locally. Never commit it. For exploratory development, external cred
 | `SODEX_SESSION_TTL_MS` | `86400000` | Session lifetime; allowed range is 5 minutes to 7 days. |
 | `CRON_SECRET` | none | Independent 32+ character bearer secret for scheduled routes. |
 | `OPERATOR_WALLET_ADDRESSES` | none | Comma-separated wallets allowed to access operational routes. |
+| `APP_COMMIT_SHA` | platform supplied | Commit identifier shown by the public delivery-evidence ledger. |
+| `EVIDENCE_DEMO_URL` | `NEXT_PUBLIC_APP_URL` | Optional public demo URL shown alongside the deployed release. |
 
 ### Persistence
 
@@ -205,6 +207,8 @@ Provide the matching credential: `GROQ_API_KEY`, `XAI_API_KEY`, `GEMINI_API_KEY`
 | `ACTION_COOLDOWN_MS` | `60000` | Equivalent-action cooldown. |
 | `SHIELD_AUTOMATION_TESTNET_CONTRACT_ADDRESS` | none | Deployed and audited testnet executor address. |
 | `SHIELD_AUTOMATION_MAINNET_CONTRACT_ADDRESS` | none | Deployed and audited mainnet executor address. |
+
+Automation evidence also accepts `AUTOMATION_EVIDENCE_NETWORK`, adapter/checker addresses, and the adapter-approval, rule-creation, and rule-execution transaction hashes listed in `.env.example`. These values do not promote a status by themselves: `/api/evidence` verifies bytecode, successful receipts, executor targets, and matching contract events before reporting `TESTNET` or `LIVE`.
 
 The four REST base URLs and the testnet chain ID are in `.env.example`. Mainnet trading uses chain ID `286623`; testnet uses `138565`. Live modes require `KEY_PROVIDER=managed`, Supabase with the production-hardening migration applied, a non-default registered key name, a signer distinct from the master account, and an explicit operator identity that is also distinct from the master account. Keep production at `dry_run` unless the selected signing path has passed the registered-key testnet smoke test.
 
@@ -276,12 +280,14 @@ The domain-bound EIP-4361 signature proves wallet identity and creates an isolat
 
 ## Wave 3 implementation evidence
 
+The public [`/docs/evidence`](frontend/app/docs/evidence/page.tsx) ledger reads deployment state from `GET /api/evidence` and labels every capability `LIVE`, `TESTNET`, or `REPOSITORY_ONLY`. Missing persistence, release identity, RPC access, or transaction proof reduces the claim; it never upgrades it.
+
 | Capability | Delivered implementation | Operational boundary |
 |---|---|---|
 | SIWE multi-user | EIP-4361 domain/URI/chain/nonce/expiry messages in `walletAuth`, one-time durable challenges, wallet user/session tables, and owner-scoped APIs | Requires the Wave 3 and production-hardening migrations for durable production sessions |
 | SoDEX Liquidation Shield | SoDEX account and position monitoring, liquidation-distance scoring, portfolio stress, rescue estimates, alert evidence, and controlled action preparation | Live protection depends on authenticated SoDEX data and explicitly enabled policy-gated execution |
-| On-chain auto execution | `ShieldAutomationExecutor.sol`, checker/adapter interfaces, calldata commitments, permissionless keeper execution, build script, backend transaction preparation, receipt verification, and dashboard rule creation | No contract address is claimed as deployed; deploy and audit adapters/checkers before configuring an address |
-| Strategy Marketplace | Owner-authenticated create/publish/install/review APIs, immutable content-hashed versions, performance-claim verification states, Supabase schema, and dashboard catalog | Performance claims remain hidden from public evidence until independently marked `VERIFIED` |
+| On-chain auto execution | `ShieldAutomationExecutor.sol`, checker/adapter interfaces, calldata commitments, permissionless keeper execution, build script, backend transaction preparation, receipt verification, and dashboard rule creation | Repository-only unless the evidence endpoint verifies bytecode and one matching approval → create → execute event path; testnet is never presented as mainnet |
+| Strategy Marketplace | Owner-authenticated create/publish/install/review APIs, immutable content-hashed versions, two claim-free SoDEX starter templates, performance-claim verification states, Supabase schema, and dashboard catalog | `LIVE` requires reachable production persistence; performance claims remain hidden until independently marked `VERIFIED` |
 
 `npm run contracts:compile` produces executor bytecode locally. `npm test` covers SIWE recovery, marketplace immutability/ownership, and automation calldata commitments. These checks prove repository delivery, not a production deployment or profitability.
 
@@ -355,6 +361,8 @@ For managed automation, the signing private key must derive the public address r
 | Route | View |
 |---|---|
 | `/` | Product landing page |
+| `/docs` | Product and operator documentation |
+| `/docs/evidence` | Runtime-qualified Wave 3 delivery ledger |
 | `/dashboard/sodex/connect` | Wallet challenge login and network selection |
 | `/dashboard` | Operator overview |
 | `/dashboard/scanner` | Narrative lifecycle and evidence |

@@ -17,6 +17,11 @@ import { usePollingResource } from '@/lib/usePollingResource';
 import { Button, EmptyState, ErrorCard, PageHeader, Panel, PanelHeader, Pill, SkeletonBlock } from '@/components/terminal/ui';
 
 const fieldClass = 'h-10 w-full rounded-md border border-[var(--border)] bg-[var(--bg-panel)] px-3 text-[13px] text-[var(--text-1)] outline-none focus:border-[var(--brand)]';
+const PRODUCT_PUBLISHER = '0x0000000000000000000000000000000000000001';
+
+function publisherLabel(address: string) {
+  return address.toLowerCase() === PRODUCT_PUBLISHER ? 'Gold & Grith' : shortWallet(address);
+}
 
 export default function StrategiesPage() {
   const catalog = usePollingResource({ fetcher: () => fetchStrategies(), intervalMs: 30_000 });
@@ -94,7 +99,7 @@ export default function StrategiesPage() {
                 <h2 className="mt-3 text-[16px] font-semibold text-[var(--text-1)]">{strategy.name}</h2>
                 <p className="mt-2 flex-1 text-[13px] leading-5 text-[var(--text-2)]">{strategy.summary}</p>
                 <div className="mt-3 text-[11px] text-[var(--text-3)]">
-                  By {shortWallet(strategy.owner_address)} · {strategy.install_count} installs · {strategy.rating ? `${strategy.rating}/5` : 'unrated'}
+                  By {publisherLabel(strategy.owner_address)} · {strategy.install_count} installs · {strategy.rating ? `${strategy.rating}/5` : 'unrated'}
                 </div>
                 <div className="mt-4 flex flex-wrap items-center justify-between gap-2">
                   <div className="flex flex-wrap gap-1">{strategy.supported_exchanges.map((exchange) => <Pill key={exchange}>{exchange}</Pill>)}</div>

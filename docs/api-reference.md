@@ -1,6 +1,6 @@
 # Gold & Grith API reference
 
-Last reviewed: **2026-07-19**
+Last reviewed: **2026-07-20**
 
 The Express backend serves JSON. It mounts most routes below `/api`; liveness is also available at `/health`. The Next.js frontend normally calls these routes through `/api/proxy/*`, which forwards cookies to the backend.
 
@@ -20,6 +20,7 @@ In production, login challenges and sessions require HTTPS, a stable `SODEX_SESS
 | Method | Route | Auth | Notes |
 |---|---|---|---|
 | `GET` | `/health` | Public | Minimal liveness payload only. |
+| `GET` | `/api/evidence` | Public | No-store delivery ledger with release identity, runtime status, and independently verified on-chain transaction links. Limited to 30/minute/IP. |
 | `GET` | `/api/health` | Operator | Persistence, AI/Telegram state, key status, and SoDEX execution readiness; live modes degrade to `503` when static readiness fails. |
 | `GET` | `/api/agent-runs` | Operator | Latest orchestrator run. |
 | `POST` | `/api/trigger` | Operator or cron | Runs one full cycle; limited to 3/minute/IP. |
