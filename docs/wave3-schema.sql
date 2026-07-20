@@ -112,37 +112,6 @@ CREATE TABLE IF NOT EXISTS wallet_sessions (
 );
 CREATE INDEX IF NOT EXISTS idx_wallet_sessions_owner ON wallet_sessions (wallet_address, expires_at DESC);
 
--- Credentials are AES-256-GCM ciphertext produced by the backend. They are never returned by the API.
-CREATE TABLE IF NOT EXISTS exchange_connections (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  wallet_address TEXT NOT NULL,
-  exchange TEXT NOT NULL CHECK (exchange IN ('binance', 'bybit', 'okx')),
-  label TEXT NOT NULL,
-  encrypted_credentials TEXT NOT NULL,
-  credential_fingerprint TEXT NOT NULL,
-  status TEXT NOT NULL DEFAULT 'ACTIVE' CHECK (status IN ('ACTIVE', 'ERROR', 'DISABLED')),
-  last_checked_at TIMESTAMPTZ,
-  last_error TEXT,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  UNIQUE (wallet_address, exchange, label)
-);
-CREATE INDEX IF NOT EXISTS idx_exchange_connections_owner ON exchange_connections (wallet_address, created_at DESC);
-
-CREATE TABLE IF NOT EXISTS cross_exchange_scans (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  wallet_address TEXT NOT NULL,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  exchange_count INTEGER NOT NULL CHECK (exchange_count >= 0),
-  position_count INTEGER NOT NULL CHECK (position_count >= 0),
-  gross_notional NUMERIC NOT NULL CHECK (gross_notional >= 0),
-  net_exposure NUMERIC NOT NULL,
-  max_risk_score INTEGER NOT NULL CHECK (max_risk_score BETWEEN 0 AND 100),
-  risk_level TEXT NOT NULL CHECK (risk_level IN ('SAFE', 'CAUTION', 'DANGER', 'CRITICAL')),
-  data JSONB NOT NULL DEFAULT '{}'
-);
-CREATE INDEX IF NOT EXISTS idx_cross_exchange_scans_owner ON cross_exchange_scans (wallet_address, created_at DESC);
-
 -- Marketplace content is immutable after publication; edits create a new version.
 CREATE TABLE IF NOT EXISTS strategies (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -153,7 +122,7 @@ CREATE TABLE IF NOT EXISTS strategies (
   description TEXT NOT NULL,
   category TEXT NOT NULL,
   risk_level TEXT NOT NULL CHECK (risk_level IN ('LOW', 'MEDIUM', 'HIGH')),
-  supported_exchanges JSONB NOT NULL DEFAULT '[]',
+  supported_exchanges JSONB NOT NULL DEFAULT '["sodex"]',
   configuration_schema JSONB NOT NULL DEFAULT '{}',
   execution_template JSONB NOT NULL DEFAULT '{}',
   status TEXT NOT NULL DEFAULT 'DRAFT' CHECK (status IN ('DRAFT', 'PUBLISHED', 'ARCHIVED')),
@@ -165,6 +134,8 @@ CREATE TABLE IF NOT EXISTS strategies (
 );
 CREATE INDEX IF NOT EXISTS idx_strategies_catalog ON strategies (status, category, published_at DESC);
 CREATE INDEX IF NOT EXISTS idx_strategies_owner ON strategies (owner_address, updated_at DESC);
+ALTER TABLE strategies ALTER COLUMN supported_exchanges SET DEFAULT '["sodex"]'::jsonb;
+UPDATE strategies SET supported_exchanges = '["sodex"]'::jsonb;
 
 CREATE TABLE IF NOT EXISTS strategy_versions (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -175,6 +146,8 @@ CREATE TABLE IF NOT EXISTS strategy_versions (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   UNIQUE (strategy_id, version)
 );
+UPDATE strategy_versions
+SET manifest = jsonb_set(manifest, '{supportedExchanges}', '["sodex"]'::jsonb, true);
 
 CREATE TABLE IF NOT EXISTS strategy_installations (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),

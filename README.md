@@ -32,7 +32,7 @@ The two scheduled agents are:
 - Position risk levels: `SAFE`, `CAUTION`, `DANGER`, and `CRITICAL`
 - SoDEX markets, order book, candles, deterministic chart analysis, account state, positions, and open orders
 - EIP-4361 Sign-In with Ethereum with one-time nonces, wallet-isolated durable identities, and an HttpOnly session cookie
-- Cross-exchange Shield aggregation for SoDEX, Binance USD-M, Bybit Linear, and OKX using encrypted read-only API credentials
+- SoDEX-exclusive Liquidation Shield monitoring with position-level risk, margin pressure, stress scenarios, and rescue estimates
 - Non-custodial on-chain automation rules with checker gates, allowlisted adapters, committed calldata, cooldowns, caps, and owner cancellation
 - Strategy Marketplace drafts, immutable published versions, wallet-scoped installations, reviews, and separately verified performance evidence
 - Dry-run action simulation for close-position, reduce-leverage, cancel-order, and queue-only actions
@@ -203,8 +203,6 @@ Provide the matching credential: `GROQ_API_KEY`, `XAI_API_KEY`, `GEMINI_API_KEY`
 | `MAX_LEVERAGE` | `25` | Policy ceiling. |
 | `MAX_NOTIONAL_USD` | `10000` | Policy notional ceiling. |
 | `ACTION_COOLDOWN_MS` | `60000` | Equivalent-action cooldown. |
-| `ENABLE_CROSS_EXCHANGE_SHIELD` | `false` | Enables storage of verified read-only CEX connections. |
-| `EXCHANGE_CREDENTIALS_KEY` | none | Independent 32+ character root secret for AES-256-GCM credential encryption. |
 | `SHIELD_AUTOMATION_TESTNET_CONTRACT_ADDRESS` | none | Deployed and audited testnet executor address. |
 | `SHIELD_AUTOMATION_MAINNET_CONTRACT_ADDRESS` | none | Deployed and audited mainnet executor address. |
 
@@ -281,11 +279,11 @@ The domain-bound EIP-4361 signature proves wallet identity and creates an isolat
 | Capability | Delivered implementation | Operational boundary |
 |---|---|---|
 | SIWE multi-user | EIP-4361 domain/URI/chain/nonce/expiry messages in `walletAuth`, one-time durable challenges, wallet user/session tables, and owner-scoped APIs | Requires the Wave 3 and production-hardening migrations for durable production sessions |
-| Cross-exchange Shield | Signed read-only connectors for Binance USD-M, Bybit Linear, and OKX; SoDEX aggregation; AES-256-GCM credential storage; unified risk scans and dashboard | Users must supply read-only keys; live venue access is verified when a connection is created |
+| SoDEX Liquidation Shield | SoDEX account and position monitoring, liquidation-distance scoring, portfolio stress, rescue estimates, alert evidence, and controlled action preparation | Live protection depends on authenticated SoDEX data and explicitly enabled policy-gated execution |
 | On-chain auto execution | `ShieldAutomationExecutor.sol`, checker/adapter interfaces, calldata commitments, permissionless keeper execution, build script, backend transaction preparation, receipt verification, and dashboard rule creation | No contract address is claimed as deployed; deploy and audit adapters/checkers before configuring an address |
 | Strategy Marketplace | Owner-authenticated create/publish/install/review APIs, immutable content-hashed versions, performance-claim verification states, Supabase schema, and dashboard catalog | Performance claims remain hidden from public evidence until independently marked `VERIFIED` |
 
-`npm run contracts:compile` produces executor bytecode locally. `npm test` covers SIWE recovery, encrypted credential tamper detection, marketplace immutability/ownership, and automation calldata commitments. These checks prove repository delivery, not a production deployment or exchange profitability.
+`npm run contracts:compile` produces executor bytecode locally. `npm test` covers SIWE recovery, marketplace immutability/ownership, and automation calldata commitments. These checks prove repository delivery, not a production deployment or profitability.
 
 ## Narrative scoring
 
@@ -361,7 +359,6 @@ For managed automation, the signing private key must derive the public address r
 | `/dashboard` | Operator overview |
 | `/dashboard/scanner` | Narrative lifecycle and evidence |
 | `/dashboard/shield` | Position risk and rescue estimates |
-| `/dashboard/shield/exchanges` | Cross-exchange connections and unified liquidation risk |
 | `/dashboard/strategies` | Strategy Marketplace catalog and publishing |
 | `/dashboard/automation` | On-chain automation deployment status and rule creation |
 | `/dashboard/positions` | Live account and stored risk history |

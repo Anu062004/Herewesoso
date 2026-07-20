@@ -2,26 +2,8 @@ import test = require('node:test');
 import assert = require('node:assert/strict');
 import { ethers } from 'ethers';
 
-import crossExchangeShield = require('../services/crossExchangeShield');
 import strategyMarketplace = require('../services/strategyMarketplace');
 import onchainAutomation = require('../services/onchainAutomation');
-
-test('cross-exchange credentials use authenticated encryption and reject tampering', () => {
-  const original = process.env.EXCHANGE_CREDENTIALS_KEY;
-  process.env.EXCHANGE_CREDENTIALS_KEY = 'wave3-test-key-that-is-deliberately-long-and-independent';
-  try {
-    const encrypted = crossExchangeShield.encryptCredentials({ apiKey: 'read-only-api-key', secret: 'secret-value' });
-    assert.doesNotMatch(encrypted, /read-only-api-key|secret-value/);
-    assert.deepEqual(crossExchangeShield.decryptCredentials(encrypted), { apiKey: 'read-only-api-key', secret: 'secret-value' });
-    const parts = encrypted.split('.');
-    parts[3] = `${parts[3][0] === 'A' ? 'B' : 'A'}${parts[3].slice(1)}`;
-    const tampered = parts.join('.');
-    assert.throws(() => crossExchangeShield.decryptCredentials(tampered));
-  } finally {
-    if (original === undefined) delete process.env.EXCHANGE_CREDENTIALS_KEY;
-    else process.env.EXCHANGE_CREDENTIALS_KEY = original;
-  }
-});
 
 test('strategy marketplace publishes immutable versions and scopes installations to a wallet', async () => {
   const owner = ethers.Wallet.createRandom().address;
@@ -34,7 +16,7 @@ test('strategy marketplace publishes immutable versions and scopes installations
     description: 'A deterministic advisory strategy with explicit liquidation distance and leverage boundaries.',
     category: 'Risk',
     riskLevel: 'LOW',
-    supportedExchanges: ['sodex', 'binance'],
+    supportedExchanges: ['sodex'],
     configurationSchema: { required: ['distance'], properties: { distance: { type: 'number' } } },
     executionTemplate: { action: 'REDUCE_LEVERAGE' }
   });

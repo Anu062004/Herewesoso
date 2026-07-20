@@ -12,7 +12,7 @@ This directory is the source of truth for Gold & Grith's operator and integratio
 | [SoDEX and EIP-712 notes](api-and-eip712-integration-notes.md) | Verified upstream SoDEX rules and the repository's compatibility status | Any upstream SoDEX API update or signing change |
 | [Base schema](base-schema.sql) | Initial Supabase tables | Any new required base persistence field |
 | [Narrative v2 schema](narrative-v2-schema.sql) | Narrative evidence, preferences, feedback, and advisor tables | Narrative model or route changes |
-| [Wave 3 schema](wave3-schema.sql) | Outcomes, multi-user sessions, cross-exchange Shield, marketplace, automation, performance, and execution tables | Any Wave 3 feature or execution-ledger change |
+| [Wave 3 schema](wave3-schema.sql) | Outcomes, multi-user sessions, SoDEX strategy marketplace, automation, performance, and execution tables | Any Wave 3 feature or execution-ledger change |
 | [Production hardening schema](production-hardening-schema.sql) | Durable auth, leases, rate limits, constraints, indexes, and RLS | Security or multi-instance behavior changes |
 | [SkillMint integration](../backend/services/SKILLMINT_INTEGRATION.md) | Optional verifiable-AI provider setup and failure behavior | SkillMint SDK or adapter changes |
 | [Technical graph skill](../backend/skills/technical-graph-analysis/SKILL.md) | Runtime analysis contract and guardrails | Technical-analysis implementation changes |

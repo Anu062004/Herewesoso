@@ -63,10 +63,9 @@ export function assertProductionEnvironment(): void {
   const operators = operatorWallets();
   const schedulerEnabled = process.env.ENABLE_BACKGROUND_SCHEDULER !== 'false';
   const telegramBotEnabled = process.env.ENABLE_TELEGRAM_BOT === 'true';
-  const crossExchangeEnabled = process.env.ENABLE_CROSS_EXCHANGE_SHIELD === 'true';
   const ai = aiConfiguration();
 
-  for (const name of ['ENABLE_BACKGROUND_SCHEDULER', 'ENABLE_TELEGRAM_BOT', 'ENABLE_CROSS_EXCHANGE_SHIELD']) {
+  for (const name of ['ENABLE_BACKGROUND_SCHEDULER', 'ENABLE_TELEGRAM_BOT']) {
     const value = process.env[name];
     if (value !== undefined && !['true', 'false'].includes(value)) errors.push(`${name} must be true or false.`);
   }
@@ -130,12 +129,6 @@ export function assertProductionEnvironment(): void {
   if (telegramBotEnabled && !(process.env.TELEGRAM_BOT_TOKEN && process.env.TELEGRAM_CHAT_ID)) {
     errors.push('ENABLE_TELEGRAM_BOT=true requires TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID.');
   }
-  if (crossExchangeEnabled) {
-    const credentialKey = String(process.env.EXCHANGE_CREDENTIALS_KEY || '');
-    if (credentialKey.length < 32) errors.push('ENABLE_CROSS_EXCHANGE_SHIELD=true requires EXCHANGE_CREDENTIALS_KEY with at least 32 characters.');
-    if (credentialKey && credentialKey === sessionSecret) errors.push('EXCHANGE_CREDENTIALS_KEY must be independent from SODEX_SESSION_SECRET.');
-  }
-
   for (const name of ['SHIELD_AUTOMATION_TESTNET_CONTRACT_ADDRESS', 'SHIELD_AUTOMATION_MAINNET_CONTRACT_ADDRESS', 'SHIELD_AUTOMATION_CONTRACT_ADDRESS']) {
     const value = String(process.env[name] || '').trim();
     if (value && (!ethers.isAddress(value) || ethers.getAddress(value) === ethers.ZeroAddress)) {

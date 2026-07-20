@@ -37,7 +37,7 @@ export default function StrategiesPage() {
         description: String(data.get('description') || ''),
         category: String(data.get('category') || ''),
         riskLevel: String(data.get('riskLevel') || 'MEDIUM') as 'LOW' | 'MEDIUM' | 'HIGH',
-        supportedExchanges: data.getAll('exchanges').map(String),
+        supportedExchanges: ['sodex'],
         configurationSchema: {},
         executionTemplate: { mode: 'advisory', action: 'QUEUE_ACTION' }
       });
@@ -116,12 +116,9 @@ export default function StrategiesPage() {
             <input className={fieldClass} name="summary" placeholder="Short marketplace summary" minLength={10} maxLength={240} required />
             <textarea className="min-h-28 w-full rounded-md border border-[var(--border)] bg-[var(--bg-panel)] p-3 text-[13px] text-[var(--text-1)] outline-none focus:border-[var(--brand)]" name="description" placeholder="Explain the logic, inputs, invalidation, and execution boundaries." minLength={20} maxLength={10000} required />
             <select className={fieldClass} name="riskLevel" defaultValue="MEDIUM"><option>LOW</option><option>MEDIUM</option><option>HIGH</option></select>
-            <fieldset className="rounded-md border border-[var(--border)] p-3">
-              <legend className="px-1 text-[11px] text-[var(--text-3)]">Supported venues</legend>
-              <div className="grid grid-cols-2 gap-2 text-[12px] text-[var(--text-2)]">
-                {['sodex', 'binance', 'bybit', 'okx', 'onchain'].map((exchange) => <label key={exchange} className="flex items-center gap-2"><input type="checkbox" name="exchanges" value={exchange} defaultChecked={exchange === 'sodex'} />{exchange}</label>)}
-              </div>
-            </fieldset>
+            <div className="rounded-md border border-[var(--border)] bg-[var(--bg-panel)] p-3 text-[12px] text-[var(--text-2)]">
+              Execution platform: <span className="font-medium text-[var(--text-1)]">SoDEX</span>
+            </div>
             <button type="submit" disabled={creating} className="h-10 w-full rounded-md border border-[rgba(255,107,0,0.62)] bg-[var(--brand)] px-4 text-[13px] font-medium text-black disabled:opacity-50">
               {creating ? 'Publishing…' : 'Create and publish v1'}
             </button>

@@ -21,7 +21,6 @@ import narrativePreferencesRoute = require('./routes/narrativePreferences');
 import narrativeFeedbackRoute = require('./routes/narrativeFeedback');
 import narrativeAskRoute = require('./routes/narrativeAsk');
 import indicesRoute = require('./routes/indices');
-import shieldRoute = require('./routes/shield');
 import strategiesRoute = require('./routes/strategies');
 import automationRoute = require('./routes/automation');
 import { allowedOrigins } from './config/env';
@@ -67,7 +66,6 @@ app.use('/api/analyze', analyzeRoute);
 app.use('/api/sodex', sodexRoute);
 app.use('/api/news', newsRoute);
 app.use('/api/indices', indicesRoute);
-app.use('/api/shield', shieldRoute);
 app.use('/api/strategies', strategiesRoute);
 app.use('/api/automation', automationRoute);
 
