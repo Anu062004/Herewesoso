@@ -76,35 +76,35 @@ export default function HomePage() {
       </header>
 
       <section className={`${styles.shell} ${styles.intro}`} id="workbench">
-        <div className={styles.introHeading}>
-          <p className={styles.kicker}>
-            <span aria-hidden="true" /> SoDEX trading intelligence
-          </p>
-          <TypewriterHeadline />
-        </div>
+        <div className={styles.introCopy}>
+          <div className={styles.introHeading}>
+            <p className={styles.kicker}>
+              <span aria-hidden="true" /> SoDEX trading intelligence
+            </p>
+            <TypewriterHeadline />
+          </div>
 
-        <div className={styles.introAside}>
-          <p>
-            Live price action, order-book liquidity, portfolio risk, and operator-approved execution—brought into one focused trading desk.
-          </p>
-          <div className={styles.introActions}>
-            <Link className={styles.primaryCta} href="/dashboard">
-              Launch terminal <ArrowIcon />
-            </Link>
-            <Link
-              className={styles.docsCta}
-              href="/docs"
-            >
-              View docs <ArrowIcon />
-            </Link>
-            <Link className={styles.textCta} href="/dashboard/sodex/connect">
-              Connect operator wallet <ArrowIcon />
-            </Link>
+          <div className={styles.introAside}>
+            <p>
+              Live price action, order-book liquidity, portfolio risk, and operator-approved execution—brought into one focused trading desk.
+            </p>
+            <div className={styles.introActions}>
+              <Link className={styles.primaryCta} href="/dashboard">
+                Launch terminal <ArrowIcon />
+              </Link>
+              <Link
+                className={styles.docsCta}
+                href="/docs"
+              >
+                View docs <ArrowIcon />
+              </Link>
+              <Link className={styles.textCta} href="/dashboard/sodex/connect">
+                Connect operator wallet <ArrowIcon />
+              </Link>
+            </div>
           </div>
         </div>
-      </section>
 
-      <section className={`${styles.shell} ${styles.productStage}`} aria-labelledby="product-caption">
         <figure className={styles.productFigure}>
           <div className={styles.screenFrame}>
             <Image
@@ -112,7 +112,7 @@ export default function HomePage() {
               alt="SoDEX BTC and USDC spot trading screen with live chart, market data, and order book"
               width={2326}
               height={1338}
-              sizes="(max-width: 760px) calc(100vw - 32px), (max-width: 1280px) calc(100vw - 48px), 1220px"
+              sizes="(max-width: 760px) calc(100vw - 32px), (max-width: 1040px) calc(100vw - 48px), (max-width: 1280px) 62vw, 760px"
               quality={92}
               priority
             />
@@ -122,7 +122,9 @@ export default function HomePage() {
             <span>SoDEX · BTC/USDC spot</span>
           </figcaption>
         </figure>
+      </section>
 
+      <section className={`${styles.shell} ${styles.productStage}`} aria-label="Workbench capabilities">
         <div className={styles.annotationRail} aria-label="Workbench capabilities">
           <div>
             <span className={styles.annotationIndex}>A</span>
