@@ -1,3 +1,5 @@
+/* Hallmark tokens · Workbench redesign · preserved Gold & Grith palette */
+
 :root {
   --color-paper: var(--bg-app);
   --color-paper-2: var(--bg-surface);
@@ -8,7 +10,7 @@
   --color-rule-strong: var(--border-hover);
   --color-ink: var(--text-1);
   --color-ink-2: var(--text-2);
-  --color-muted: var(--text-3);
+  --color-muted: #929292;
   --color-accent: var(--brand);
   --color-accent-ink: var(--bg-app);
   --color-accent-soft: var(--brand-soft);
@@ -23,6 +25,11 @@
   --color-accent-wash: rgba(255, 107, 0, 0.075);
   --color-positive-wash: rgba(22, 199, 132, 0.09);
   --color-shadow: rgba(0, 0, 0, 0.34);
+  --color-transparent: transparent;
+  --color-header-glass: rgba(5, 5, 5, 0.82);
+  --color-dock-glass: rgba(16, 16, 16, 0.9);
+  --color-screen-inset: rgba(255, 255, 255, 0.04);
+  --color-accent-rule: rgba(255, 107, 0, 0.28);
 
   --font-display: var(--font-headline);
   --font-body-copy: var(--font-body);
@@ -61,4 +68,6 @@
   --radius-pill-token: var(--radius-pill);
   --rule-thin-token: 1px;
   --rule-strong-token: 2px;
+  --shadow-workbench: 0 34px 100px rgba(0, 0, 0, 0.54);
+  --shadow-dock: 0 18px 50px rgba(0, 0, 0, 0.44);
 }

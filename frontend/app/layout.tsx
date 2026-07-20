@@ -1,10 +1,11 @@
 import type { Metadata } from 'next';
 import type { ReactNode } from 'react';
+import '@fontsource-variable/space-grotesk';
 import './globals.css';
 
 export const metadata: Metadata = {
-  title: 'Gold and Grith | Crypto Intelligence Terminal',
-  description: 'A SoSoValue-style crypto intelligence terminal for signals, liquidation risk, macro events, news, and SoDEX market data.'
+  title: 'Gold & Grith | Operator Intelligence for SoDEX',
+  description: 'Read live crypto market context, understand portfolio risk, and approve SoDEX actions from one focused operating view.'
 };
 
 export default function RootLayout({ children }: { children: ReactNode }) {

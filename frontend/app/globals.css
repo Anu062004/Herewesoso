@@ -248,3 +248,7 @@ td {
     transform: none;
   }
 }
+
+:root {
+  --font-headline: 'Space Grotesk Variable', Bahnschrift, Aptos Display, sans-serif;
+}
