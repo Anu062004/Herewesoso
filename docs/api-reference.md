@@ -87,17 +87,6 @@ In production, login challenges and sessions require HTTPS, a stable `SODEX_SESS
 
 The login signature proves wallet identity only. It does not sign a trade. Every non-dry-run action is signed by the deployment-managed registered SoDEX API key after operator authorization and policy checks.
 
-## Cross-exchange Shield
-
-| Method | Route | Auth | Notes |
-|---|---|---|---|
-| `GET` | `/api/shield/connections` | Wallet | Lists the session wallet's SoDEX and masked CEX connections; credentials are never returned. |
-| `POST` | `/api/shield/connections` | Wallet | Verifies and encrypts a Binance, Bybit, or OKX read-only key. |
-| `DELETE` | `/api/shield/connections/:id` | Wallet | Deletes only a connection owned by the session wallet. |
-| `GET` / `POST` | `/api/shield/scan` | Wallet | Fetches every owned connection and returns a normalized cross-venue risk scan. |
-
-CEX secrets use AES-256-GCM with a dedicated `EXCHANGE_CREDENTIALS_KEY`. Binance uses `/fapi/v2/positionRisk`; Bybit uses `/v5/position/list`; OKX uses `/api/v5/account/positions`. Each request uses the venue's documented HMAC authentication and a ten-second timeout. Keys should have trading and withdrawals disabled.
-
 ## Strategy Marketplace
 
 | Method | Route | Auth | Notes |

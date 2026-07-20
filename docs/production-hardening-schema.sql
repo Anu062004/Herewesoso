@@ -279,7 +279,7 @@ BEGIN
     'narrative_stage_transitions', 'narrative_feedback', 'narrative_source_performance',
     'narrative_conversations', 'narrative_recommendations', 'wallet_login_challenges', 'system_leases',
     'api_rate_limits', 'sodex_signing_nonces', 'wallet_users', 'wallet_sessions',
-    'exchange_connections', 'cross_exchange_scans', 'strategies', 'strategy_versions',
+    'strategies', 'strategy_versions',
     'strategy_installations', 'strategy_reviews', 'strategy_performance_claims', 'automation_rules'
   ] LOOP
     EXECUTE format('ALTER TABLE %I ENABLE ROW LEVEL SECURITY', table_name);

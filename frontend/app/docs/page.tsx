@@ -67,14 +67,6 @@ const featureGuide = [
   },
   {
     index: '05',
-    title: 'Cross-exchange Shield',
-    route: '/dashboard/shield/exchanges',
-    routeLabel: 'Manage exchanges',
-    copy: 'Aggregate exposure across SoDEX, Binance USD-M, Bybit Linear, and OKX through wallet-isolated encrypted read-only connections.',
-    details: ['SoDEX included automatically', 'Read-only CEX credentials', 'Unified liquidation exposure']
-  },
-  {
-    index: '06',
     title: 'Strategy Marketplace',
     route: '/dashboard/strategies',
     routeLabel: 'Browse strategies',
@@ -82,7 +74,7 @@ const featureGuide = [
     details: ['Draft and published versions', 'Wallet-scoped installations', 'Reviews and performance evidence']
   },
   {
-    index: '07',
+    index: '06',
     title: 'On-chain automation',
     route: '/dashboard/automation',
     routeLabel: 'View automation',
@@ -90,7 +82,7 @@ const featureGuide = [
     details: ['Requires a configured deployed executor', 'Permissionless keeper execution', 'Owner-controlled cancellation']
   },
   {
-    index: '08',
+    index: '07',
     title: 'Execution and performance',
     route: '/dashboard/executions',
     routeLabel: 'View executions',

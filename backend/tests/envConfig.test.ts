@@ -37,8 +37,6 @@ const productionEnv = {
   DAILY_SUMMARY_UTC_HOUR: '8',
   ENABLE_BACKGROUND_SCHEDULER: 'false',
   ENABLE_TELEGRAM_BOT: 'false',
-  ENABLE_CROSS_EXCHANGE_SHIELD: 'false',
-  EXCHANGE_CREDENTIALS_KEY: undefined,
   SHIELD_AUTOMATION_CONTRACT_ADDRESS: undefined,
   SHIELD_AUTOMATION_TESTNET_CONTRACT_ADDRESS: undefined,
   SHIELD_AUTOMATION_MAINNET_CONTRACT_ADDRESS: undefined,
@@ -155,21 +153,6 @@ test('production environment rejects invalid feature flags', () => {
   withEnv({ ...productionEnv, ENABLE_TELEGRAM_BOT: 'sometimes' }, () => {
     assert.throws(assertProductionEnvironment, /ENABLE_TELEGRAM_BOT must be true or false/);
   });
-});
-
-test('cross-exchange Shield requires an independent production encryption key', () => {
-  withEnv({
-    ...productionEnv,
-    ENABLE_CROSS_EXCHANGE_SHIELD: 'true',
-    EXCHANGE_CREDENTIALS_KEY: productionEnv.SODEX_SESSION_SECRET
-  }, () => {
-    assert.throws(assertProductionEnvironment, /EXCHANGE_CREDENTIALS_KEY must be independent/);
-  });
-  withEnv({
-    ...productionEnv,
-    ENABLE_CROSS_EXCHANGE_SHIELD: 'true',
-    EXCHANGE_CREDENTIALS_KEY: 'independent-cross-exchange-key-that-is-over-32-characters'
-  }, () => assert.doesNotThrow(assertProductionEnvironment));
 });
 
 test('SkillMint production configuration validates its key, network, and skill ids', () => {

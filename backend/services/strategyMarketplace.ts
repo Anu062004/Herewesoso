@@ -95,11 +95,12 @@ function slug(value: unknown): string {
 }
 
 function exchanges(value: unknown): string[] {
-  if (!Array.isArray(value)) throw new Error('At least one supported exchange is required.');
-  const allowed = new Set(['sodex', 'binance', 'bybit', 'okx', 'onchain']);
-  const result = [...new Set(value.map((entry) => String(entry).toLowerCase()).filter((entry) => allowed.has(entry)))];
-  if (result.length === 0) throw new Error('At least one supported exchange is required.');
-  return result;
+  if (!Array.isArray(value) || value.length === 0) throw new Error('SoDEX support is required.');
+  const platforms = [...new Set(value.map((entry) => String(entry).toLowerCase()))];
+  if (platforms.length !== 1 || platforms[0] !== 'sodex') {
+    throw new Error('Marketplace strategies are exclusive to SoDEX.');
+  }
+  return ['sodex'];
 }
 
 function riskLevel(value: unknown): StrategyRiskLevel {
@@ -115,7 +116,7 @@ function manifest(row: StrategyRow) {
     description: row.description,
     category: row.category,
     riskLevel: row.risk_level,
-    supportedExchanges: row.supported_exchanges,
+    supportedExchanges: ['sodex'],
     configurationSchema: row.configuration_schema,
     executionTemplate: row.execution_template
   };
@@ -187,6 +188,7 @@ async function decorate(row: StrategyRow, viewer?: string | null) {
   }
   return {
     ...row,
+    supported_exchanges: ['sodex'],
     installed,
     rating: reviewRows.length ? Number((reviewRows.reduce((sum, review) => sum + review.rating, 0) / reviewRows.length).toFixed(1)) : null,
     reviewCount: reviewRows.length,
@@ -218,7 +220,11 @@ export async function getStrategy(idOrSlug: string, viewer?: string | null) {
   const versionRows = isSupabaseConfigured
     ? await strictSelect<StrategyVersionRow>('strategy_versions', (query: any) => query.eq('strategy_id', row.id).order('version', { ascending: false }))
     : versions.filter((entry) => entry.strategy_id === row.id).sort((a, b) => b.version - a.version);
-  return { ...(await decorate(row, viewer)), versions: versionRows };
+  const sodexVersions = versionRows.map((version) => ({
+    ...version,
+    manifest: { ...version.manifest, supportedExchanges: ['sodex'] }
+  }));
+  return { ...(await decorate(row, viewer)), versions: sodexVersions };
 }
 
 export async function createStrategy(ownerAddress: string, input: Record<string, unknown>): Promise<StrategyRow> {
@@ -250,7 +256,7 @@ export async function updateDraft(ownerAddress: string, id: string, input: Recor
     description: input.description === undefined ? existing.description : text(input.description, 'Description', 20, 10_000),
     category: input.category === undefined ? existing.category : text(input.category, 'Category', 3, 40),
     risk_level: input.riskLevel === undefined ? existing.risk_level : riskLevel(input.riskLevel),
-    supported_exchanges: input.supportedExchanges === undefined ? existing.supported_exchanges : exchanges(input.supportedExchanges),
+    supported_exchanges: input.supportedExchanges === undefined ? ['sodex'] : exchanges(input.supportedExchanges),
     configuration_schema: input.configurationSchema === undefined ? existing.configuration_schema : object(input.configurationSchema),
     execution_template: input.executionTemplate === undefined ? existing.execution_template : object(input.executionTemplate),
     updated_at: now()
@@ -268,7 +274,9 @@ export async function publishStrategy(ownerAddress: string, id: string) {
   };
   if (isSupabaseConfigured) await strictInsert('strategy_versions', versionRow);
   else versions.unshift(versionRow);
-  const published = await updateStrategy(id, { status: 'PUBLISHED', current_version: version, published_at: now(), updated_at: now() });
+  const published = await updateStrategy(id, {
+    status: 'PUBLISHED', supported_exchanges: ['sodex'], current_version: version, published_at: now(), updated_at: now()
+  });
   return { strategy: published, version: versionRow };
 }
 
