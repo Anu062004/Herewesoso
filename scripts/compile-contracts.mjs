@@ -21,6 +21,7 @@ const input = {
   language: 'Solidity',
   sources: collect(sourceRoot),
   settings: {
+    evmVersion: 'prague',
     viaIR: true,
     optimizer: { enabled: true, runs: 500 },
     outputSelection: { '*': { '*': ['abi', 'evm.bytecode.object', 'evm.deployedBytecode.object'] } }
@@ -38,6 +39,7 @@ const executor = output.contracts['ShieldAutomationExecutor.sol'].ShieldAutomati
 if (!executor?.evm?.bytecode?.object) throw new Error('ShieldAutomationExecutor bytecode was not generated.');
 console.log(JSON.stringify({
   compiler: solc.version(),
+  evmVersion: 'prague',
   contract: 'ShieldAutomationExecutor',
   abiEntries: executor.abi.length,
   bytecodeBytes: executor.evm.bytecode.object.length / 2
