@@ -135,6 +135,22 @@ export function assertProductionEnvironment(): void {
       errors.push(`${name} must be a valid non-zero EVM contract address.`);
     }
   }
+  for (const name of ['AUTOMATION_ADAPTER_ADDRESS', 'AUTOMATION_CHECKER_ADDRESS']) {
+    const value = String(process.env[name] || '').trim();
+    if (value && (!ethers.isAddress(value) || ethers.getAddress(value) === ethers.ZeroAddress)) {
+      errors.push(`${name} must be a valid non-zero EVM contract address.`);
+    }
+  }
+  for (const name of ['AUTOMATION_ADAPTER_APPROVAL_TX_HASH', 'AUTOMATION_RULE_CREATION_TX_HASH', 'AUTOMATION_RULE_EXECUTION_TX_HASH']) {
+    const value = String(process.env[name] || '').trim();
+    if (value && !/^0x[0-9a-fA-F]{64}$/.test(value)) errors.push(`${name} must be a 32-byte EVM transaction hash.`);
+  }
+  const evidenceNetwork = String(process.env.AUTOMATION_EVIDENCE_NETWORK || '').trim();
+  if (evidenceNetwork && !['testnet', 'mainnet'].includes(evidenceNetwork)) {
+    errors.push('AUTOMATION_EVIDENCE_NETWORK must be testnet or mainnet.');
+  }
+  const appCommit = String(process.env.APP_COMMIT_SHA || '').trim();
+  if (appCommit && !/^[0-9a-fA-F]{7,40}$/.test(appCommit)) errors.push('APP_COMMIT_SHA must be a 7- to 40-character Git commit SHA.');
   if (!['groq', 'grok', 'xai', 'gemini', 'claude', 'skillmint'].includes(ai.provider)) {
     errors.push('AI_SERVICE must be groq, grok, xai, gemini, claude, or skillmint.');
   } else if (!ai.configured) {
@@ -155,7 +171,7 @@ export function assertProductionEnvironment(): void {
     }
   }
 
-  for (const name of ['SOSOVALUE_BASE_URL', 'SODEX_TESTNET_PERPS', 'SODEX_MAINNET_PERPS', 'SODEX_TESTNET_SPOT', 'SODEX_MAINNET_SPOT', 'SODEX_TESTNET_RPC_URL', 'SODEX_MAINNET_RPC_URL', 'SKILLMINT_X402_URL']) {
+  for (const name of ['SOSOVALUE_BASE_URL', 'SODEX_TESTNET_PERPS', 'SODEX_MAINNET_PERPS', 'SODEX_TESTNET_SPOT', 'SODEX_MAINNET_SPOT', 'SODEX_TESTNET_RPC_URL', 'SODEX_MAINNET_RPC_URL', 'SODEX_TESTNET_EXPLORER_URL', 'SODEX_MAINNET_EXPLORER_URL', 'EVIDENCE_DEMO_URL', 'SKILLMINT_X402_URL']) {
     const value = process.env[name];
     if (value) {
       try {

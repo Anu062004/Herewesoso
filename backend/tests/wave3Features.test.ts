@@ -24,10 +24,12 @@ test('strategy marketplace publishes immutable versions and scopes installations
   assert.equal(published.strategy.current_version, 1);
   assert.match(published.version.content_hash, /^sha256:[0-9a-f]{64}$/);
   await assert.rejects(() => strategyMarketplace.updateDraft(owner, draft.id, { name: 'Changed after publication' }), /immutable/);
+  await assert.rejects(() => strategyMarketplace.updateDraft(installer, draft.id, { name: 'Wrong owner' }), /not found/);
   await assert.rejects(() => strategyMarketplace.installStrategy(installer, draft.id, {}), /missing required field/);
   await strategyMarketplace.installStrategy(installer, draft.id, { distance: 12 });
   const installed = await strategyMarketplace.listInstallations(installer);
   assert.equal(installed[0]?.strategy?.id, draft.id);
+  assert.equal((await strategyMarketplace.listInstallations(owner)).some((entry) => entry.strategy?.id === draft.id), false);
   const review = await strategyMarketplace.reviewStrategy(installer, draft.id, 5, 'Clear boundaries.');
   assert.equal(review.rating, 5);
 });

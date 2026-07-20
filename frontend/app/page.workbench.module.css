@@ -70,12 +70,14 @@
 
 .nav a,
 .footer > a,
+.footerLinks a,
 .textCta {
   transition: color var(--dur-short-token) var(--ease-out-token);
 }
 
 .nav a:hover,
 .footer > a:hover,
+.footerLinks a:hover,
 .textCta:hover {
   color: var(--color-ink);
 }
@@ -94,6 +96,28 @@
   gap: var(--space-xs-token);
   line-height: 1;
   white-space: nowrap;
+}
+
+.footerLinks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-lg-token);
+}
+
+.footerLinks a {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-xs-token);
+}
+
+.footerLinks svg {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.6;
 }
 
 .headerCta svg,
@@ -246,6 +270,7 @@
 .securityCta:active,
 .actionDock > a:active,
 .footer > a:active,
+.footerLinks a:active,
 .nav a:active {
   filter: brightness(0.82);
 }
@@ -258,6 +283,7 @@
 .securityCta[aria-disabled='true'],
 .actionDock > a[aria-disabled='true'],
 .footer > a[aria-disabled='true'],
+.footerLinks a[aria-disabled='true'],
 .nav a[aria-disabled='true'] {
   cursor: not-allowed;
   opacity: 0.55;

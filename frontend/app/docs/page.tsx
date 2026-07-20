@@ -120,6 +120,7 @@ export default function DocsPage() {
           </Link>
           <nav className={styles.headerNav} aria-label="Documentation actions">
             <Link href="/">Landing</Link>
+            <Link href="/docs/evidence">Delivery evidence</Link>
             <Link className={styles.headerCta} href="/dashboard">Open terminal <ArrowIcon /></Link>
           </nav>
         </div>
@@ -149,6 +150,7 @@ export default function DocsPage() {
             <div className={styles.heroActions}>
               <Link className={styles.primaryCta} href="/dashboard/sodex/connect">Connect wallet <ArrowIcon /></Link>
               <Link className={styles.secondaryCta} href="/dashboard">Open dashboard <ArrowIcon /></Link>
+              <Link className={styles.secondaryCta} href="/docs/evidence">Verify delivery <ArrowIcon /></Link>
             </div>
             <div className={styles.scopeNote}>
               <strong>Use testnet first.</strong>
@@ -334,8 +336,11 @@ export default function DocsPage() {
           </section>
 
           <footer className={styles.footer}>
-            <div><strong>Gold &amp; Grith documentation</strong><span>Observe · Reason · Act</span></div>
-            <Link href="/dashboard">Open terminal <ArrowIcon /></Link>
+            <div className={styles.footerIdentity}><strong>Gold &amp; Grith documentation</strong><span>Observe · Reason · Act</span></div>
+            <div className={styles.footerLinks}>
+              <Link href="/docs/evidence">Delivery evidence <ArrowIcon /></Link>
+              <Link href="/dashboard">Open terminal <ArrowIcon /></Link>
+            </div>
           </footer>
         </article>
       </div>

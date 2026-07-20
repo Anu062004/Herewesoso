@@ -42,6 +42,12 @@
   align-items: center;
 }
 
+.footerLinks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-lg-token);
+}
+
 .brand {
   gap: var(--space-sm-token);
   font-size: var(--text-md-token);
@@ -671,7 +677,7 @@
   border-top: 1px solid var(--color-rule-strong);
 }
 
-.footer > div {
+.footerIdentity {
   display: flex;
   flex-direction: column;
   gap: var(--space-xs-token);

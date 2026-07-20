@@ -23,6 +23,7 @@ import narrativeAskRoute = require('./routes/narrativeAsk');
 import indicesRoute = require('./routes/indices');
 import strategiesRoute = require('./routes/strategies');
 import automationRoute = require('./routes/automation');
+import evidenceRoute = require('./routes/evidence');
 import { allowedOrigins } from './config/env';
 import { rateLimit, requestContext, requireWallet, securityHeaders } from './middleware/security';
 
@@ -68,6 +69,7 @@ app.use('/api/news', newsRoute);
 app.use('/api/indices', indicesRoute);
 app.use('/api/strategies', strategiesRoute);
 app.use('/api/automation', automationRoute);
+app.use('/api/evidence', evidenceRoute);
 
 app.use((_req, res) => {
   res.status(404).json({ error: 'Route not found.', code: 'NOT_FOUND' });

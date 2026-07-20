@@ -1,6 +1,8 @@
 -- Gold & Grith Wave 3 evidence and execution schema
 -- Apply after docs/narrative-v2-schema.sql.
 
+CREATE EXTENSION IF NOT EXISTS pgcrypto;
+
 CREATE TABLE IF NOT EXISTS signal_outcomes (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   created_at TIMESTAMPTZ DEFAULT now(),
@@ -148,6 +150,74 @@ CREATE TABLE IF NOT EXISTS strategy_versions (
 );
 UPDATE strategy_versions
 SET manifest = jsonb_set(manifest, '{supportedExchanges}', '["sodex"]'::jsonb, true);
+
+-- Honest starter catalog: installable SoDEX templates with no performance claims.
+-- ON CONFLICT keeps this block safe to re-run and never overwrites user content.
+WITH starter_strategies (
+  id, owner_address, slug, name, summary, description, category, risk_level,
+  configuration_schema, execution_template
+) AS (
+  VALUES
+    (
+      '11111111-1111-4111-8111-111111111111'::uuid,
+      '0x0000000000000000000000000000000000000001',
+      'sodex-liquidation-buffer',
+      'SoDEX Liquidation Buffer',
+      'Flags shrinking liquidation distance and prepares a bounded reduce-leverage response.',
+      'A SoDEX-only risk template that records a reduce-leverage recommendation when position pressure crosses the configured Shield boundary.',
+      'Risk',
+      'LOW',
+      '{}'::jsonb,
+      '{"mode":"advisory","action":"REDUCE_LEVERAGE","venue":"sodex"}'::jsonb
+    ),
+    (
+      '22222222-2222-4222-8222-222222222222'::uuid,
+      '0x0000000000000000000000000000000000000001',
+      'sodex-volatility-cooldown',
+      'SoDEX Volatility Cooldown',
+      'Pauses new exposure when SoDEX volatility and liquidity pressure exceed the risk limit.',
+      'A SoDEX-only advisory template that records a no-new-exposure decision during unstable volatility and liquidity conditions.',
+      'Risk',
+      'MEDIUM',
+      '{}'::jsonb,
+      '{"mode":"advisory","action":"PAUSE_NEW_EXPOSURE","venue":"sodex"}'::jsonb
+    )
+)
+INSERT INTO strategies (
+  id, owner_address, slug, name, summary, description, category, risk_level,
+  supported_exchanges, configuration_schema, execution_template, status,
+  current_version, install_count, published_at
+)
+SELECT
+  id, owner_address, slug, name, summary, description, category, risk_level,
+  '["sodex"]'::jsonb, configuration_schema, execution_template, 'PUBLISHED',
+  1, 0, now()
+FROM starter_strategies
+ON CONFLICT DO NOTHING;
+
+WITH manifests AS (
+  SELECT
+    id AS strategy_id,
+    jsonb_build_object(
+      'name', name,
+      'summary', summary,
+      'description', description,
+      'category', category,
+      'riskLevel', risk_level,
+      'supportedExchanges', '["sodex"]'::jsonb,
+      'configurationSchema', configuration_schema,
+      'executionTemplate', execution_template
+    ) AS manifest
+  FROM strategies
+  WHERE id IN (
+    '11111111-1111-4111-8111-111111111111'::uuid,
+    '22222222-2222-4222-8222-222222222222'::uuid
+  )
+)
+INSERT INTO strategy_versions (strategy_id, version, content_hash, manifest)
+SELECT strategy_id, 1, 'sha256:' || encode(digest(manifest::text, 'sha256'), 'hex'), manifest
+FROM manifests
+ON CONFLICT (strategy_id, version) DO NOTHING;
 
 CREATE TABLE IF NOT EXISTS strategy_installations (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),

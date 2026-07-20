@@ -8,3 +8,4 @@ import './orchestratorOutcome.test';
 import './securityRoutes.test';
 import './envConfig.test';
 import './wave3Features.test';
+import './deliveryEvidence.test';

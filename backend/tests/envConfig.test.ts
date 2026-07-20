@@ -40,6 +40,16 @@ const productionEnv = {
   SHIELD_AUTOMATION_CONTRACT_ADDRESS: undefined,
   SHIELD_AUTOMATION_TESTNET_CONTRACT_ADDRESS: undefined,
   SHIELD_AUTOMATION_MAINNET_CONTRACT_ADDRESS: undefined,
+  AUTOMATION_EVIDENCE_NETWORK: undefined,
+  AUTOMATION_ADAPTER_ADDRESS: undefined,
+  AUTOMATION_CHECKER_ADDRESS: undefined,
+  AUTOMATION_ADAPTER_APPROVAL_TX_HASH: undefined,
+  AUTOMATION_RULE_CREATION_TX_HASH: undefined,
+  AUTOMATION_RULE_EXECUTION_TX_HASH: undefined,
+  APP_COMMIT_SHA: undefined,
+  EVIDENCE_DEMO_URL: undefined,
+  SODEX_TESTNET_EXPLORER_URL: undefined,
+  SODEX_MAINNET_EXPLORER_URL: undefined,
   SODEX_MANAGED_PRIVATE_KEY: undefined,
   SODEX_API_PRIVATE_KEY: undefined,
   SODEX_NETWORK: 'testnet',
@@ -152,6 +162,18 @@ test('live execution rejects the master wallet private key as its managed signer
 test('production environment rejects invalid feature flags', () => {
   withEnv({ ...productionEnv, ENABLE_TELEGRAM_BOT: 'sometimes' }, () => {
     assert.throws(assertProductionEnvironment, /ENABLE_TELEGRAM_BOT must be true or false/);
+  });
+});
+
+test('production environment rejects malformed public automation evidence', () => {
+  withEnv({
+    ...productionEnv,
+    AUTOMATION_EVIDENCE_NETWORK: 'staging',
+    AUTOMATION_ADAPTER_ADDRESS: 'not-an-address',
+    AUTOMATION_RULE_EXECUTION_TX_HASH: '0x1234',
+    APP_COMMIT_SHA: 'release-latest'
+  }, () => {
+    assert.throws(assertProductionEnvironment, /AUTOMATION_EVIDENCE_NETWORK|AUTOMATION_ADAPTER_ADDRESS|AUTOMATION_RULE_EXECUTION_TX_HASH|APP_COMMIT_SHA/);
   });
 });
 

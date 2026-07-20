@@ -26,6 +26,17 @@ test('public health exposes liveness only and protected operational routes requi
   assert.equal(publicHealth.headers.get('x-content-type-options'), 'nosniff');
   assert.ok(publicHealth.headers.get('x-request-id'));
 
+  const publicEvidence = await fetch(`${base}/api/evidence`);
+  assert.equal(publicEvidence.status, 200);
+  assert.match(String(publicEvidence.headers.get('cache-control')), /no-store/);
+  const evidence = await publicEvidence.json() as {
+    summary?: { total?: number };
+    features?: Array<{ status?: string }>;
+  };
+  assert.equal(evidence.summary?.total, 4);
+  assert.equal(evidence.features?.length, 4);
+  assert.ok(evidence.features?.every((feature) => ['LIVE', 'TESTNET', 'REPOSITORY_ONLY'].includes(String(feature.status))));
+
   for (const path of ['/api/health', '/api/executions', '/api/agent-runs', '/api/performance', '/api/alerts', '/api/memos', '/api/sodex/smoke', '/api/sodex/account', '/api/automation/config']) {
     const response = await fetch(`${base}${path}`);
     assert.equal(response.status, 401, `${path} should require operator authentication`);

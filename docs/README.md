@@ -1,6 +1,6 @@
 # Documentation index
 
-Documentation status: **maintained**. Last full repository and upstream-protocol review: **2026-07-20**. Code baseline reviewed: `6c03b4e` plus the managed-key mainnet hardening worktree.
+Documentation status: **maintained**. Last full repository and upstream-protocol review: **2026-07-20**. Code baseline reviewed: current `main` plus the delivery-evidence implementation in this worktree.
 
 This directory is the source of truth for Gold & Grith's operator and integration documentation. The root [README](../README.md) is the product overview and quick start; implementation details live here.
 
@@ -17,6 +17,8 @@ This directory is the source of truth for Gold & Grith's operator and integratio
 | [SkillMint integration](../backend/services/SKILLMINT_INTEGRATION.md) | Optional verifiable-AI provider setup and failure behavior | SkillMint SDK or adapter changes |
 | [Technical graph skill](../backend/skills/technical-graph-analysis/SKILL.md) | Runtime analysis contract and guardrails | Technical-analysis implementation changes |
 | [Technical indicator rules](../backend/skills/technical-graph-analysis/references/indicator-rules.md) | Exact indicator, confidence, and output rules used by the technical graph skill | Indicator threshold or output-contract changes |
+
+The public `/docs/evidence` page is the reviewer-facing delivery ledger. It reads `/api/evidence` at request time and treats unavailable runtime or chain proof as `REPOSITORY_ONLY` rather than inferring a deployment.
 
 ## Database migration order
 

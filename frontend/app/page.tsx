@@ -186,7 +186,10 @@ export default function HomePage() {
 
       <footer className={`${styles.shell} ${styles.footer}`}>
         <p><strong>Gold &amp; Grith</strong> · Observe · Reason · Act</p>
-        <Link href="/dashboard">Enter terminal <ArrowIcon /></Link>
+        <div className={styles.footerLinks}>
+          <Link href="/docs/evidence">Delivery evidence <ArrowIcon /></Link>
+          <Link href="/dashboard">Enter terminal <ArrowIcon /></Link>
+        </div>
       </footer>
     </main>
   );
