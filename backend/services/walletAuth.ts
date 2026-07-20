@@ -1,5 +1,6 @@
 import crypto from 'crypto';
 import type { Request } from 'express';
+import { getAddress } from 'ethers';
 import { isProduction } from '../config/env';
 import supabaseService = require('./supabase');
 
@@ -83,9 +84,13 @@ function defaultSiweContext() {
 }
 
 export function buildLoginMessage(challenge: Pick<WalletChallenge, 'id' | 'address' | 'network' | 'issuedAt' | 'expiresAt' | 'nonce' | 'domain' | 'uri' | 'chainId' | 'statement'>): string {
+  // Durable identity columns are normalized to lowercase, while EIP-4361 uses
+  // the EIP-55 representation. Reconstruct it deterministically before both
+  // presenting and verifying the message.
+  const checksumAddress = getAddress(challenge.address);
   return [
     `${challenge.domain} wants you to sign in with your Ethereum account:`,
-    challenge.address,
+    checksumAddress,
     '',
     challenge.statement,
     '',
