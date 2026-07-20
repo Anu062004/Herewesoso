@@ -1,28 +1,31 @@
 import Image from 'next/image';
 import Link from 'next/link';
-import styles from './page.module.css';
+import styles from './page.workbench.module.css';
 
-const capabilities = [
+const workflow = [
   {
     number: '01',
-    title: 'Read the market',
-    copy: 'ETF flow, sector momentum, news, and macro events distilled into one clear signal.',
+    label: 'Observe',
+    title: 'Read the market in context.',
+    copy: 'Bring SoDEX price action together with macro events, news, sector momentum, and ETF flow.',
     href: '/dashboard/scanner',
-    link: 'Explore signals'
+    link: 'Open the scanner'
   },
   {
     number: '02',
-    title: 'Understand the risk',
-    copy: 'See leverage, liquidation distance, and portfolio pressure before they become urgent.',
+    label: 'Reason',
+    title: 'See pressure before it becomes urgency.',
+    copy: 'Review open-position exposure and liquidation risk through one portfolio-aware Shield workflow.',
     href: '/dashboard/shield',
-    link: 'View risk tools'
+    link: 'Inspect Shield'
   },
   {
     number: '03',
-    title: 'Approve the action',
-    copy: 'Review the exact action, authorize it as an operator, and let the registered SoDEX API key submit it.',
+    label: 'Act',
+    title: 'Approve the exact action.',
+    copy: 'Authenticate with your operator wallet, review policy, and send through the registered SoDEX execution key.',
     href: '/dashboard/executions',
-    link: 'See executions'
+    link: 'Review executions'
   }
 ];
 
@@ -43,69 +46,6 @@ function ShieldIcon() {
   );
 }
 
-function ProductPreview() {
-  return (
-    <div className={styles.previewWrap} aria-label="Gold and Grith portfolio risk preview">
-      <div className={styles.previewGlow} aria-hidden="true" />
-      <div className={styles.preview}>
-        <div className={styles.previewHeader}>
-          <div>
-            <span className={styles.previewLabel}>Portfolio overview</span>
-            <span className={styles.previewAccount}>0x71F4…A90C</span>
-          </div>
-          <span className={styles.liveStatus}>
-            <i aria-hidden="true" /> SoDEX testnet
-          </span>
-        </div>
-
-        <div className={styles.riskSummary}>
-          <div>
-            <span className={styles.summaryLabel}>Account protection</span>
-            <strong>All clear</strong>
-            <p>No position is inside the critical liquidation range.</p>
-          </div>
-          <div className={styles.riskScore}>
-            <span>Risk score</span>
-            <div>
-              <strong>24</strong>
-              <small>/100</small>
-            </div>
-          </div>
-        </div>
-
-        <div className={styles.positions}>
-          <div className={styles.positionHead}>
-            <span>Position</span>
-            <span>Leverage</span>
-            <span>Liquidation distance</span>
-          </div>
-          <div className={styles.positionRow}>
-            <div className={styles.asset}>
-              <span className={styles.assetMark}>B</span>
-              <span><strong>BTC</strong><small>Long</small></span>
-            </div>
-            <span>4.0×</span>
-            <span className={styles.safeValue}>38.2%</span>
-          </div>
-          <div className={styles.positionRow}>
-            <div className={styles.asset}>
-              <span className={`${styles.assetMark} ${styles.assetMarkMuted}`}>E</span>
-              <span><strong>ETH</strong><small>Long</small></span>
-            </div>
-            <span>2.5×</span>
-            <span className={styles.safeValue}>46.8%</span>
-          </div>
-        </div>
-
-        <div className={styles.previewFooter}>
-          <span>Next risk scan in 18 min</span>
-          <span className={styles.walletNote}>Wallet approval required for every action</span>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 export default function HomePage() {
   return (
     <main className={styles.page}>
@@ -123,7 +63,8 @@ export default function HomePage() {
           </Link>
 
           <nav className={styles.nav} aria-label="Primary navigation">
-            <a href="#product">Product</a>
+            <a href="#workbench">Workbench</a>
+            <a href="#workflow">Workflow</a>
             <a href="#security">Security</a>
           </nav>
 
@@ -133,45 +74,76 @@ export default function HomePage() {
         </div>
       </header>
 
-      <section className={`${styles.shell} ${styles.hero}`}>
-        <div className={styles.heroCopy}>
-          <p className={styles.eyebrow}><span aria-hidden="true" /> Crypto intelligence, made actionable</p>
-          <h1>See risk clearly.<br /><span>Act with confidence.</span></h1>
-          <p className={styles.lead}>
-            Gold &amp; Grith turns live market context and open-position risk into one calm operating view for crypto desks.
+      <section className={`${styles.shell} ${styles.intro}`} id="workbench">
+        <div className={styles.introHeading}>
+          <p className={styles.kicker}>
+            <span aria-hidden="true" /> Operator intelligence for SoDEX
           </p>
-          <div className={styles.heroActions}>
+          <h1>Market context in. Clear decisions out.</h1>
+        </div>
+
+        <div className={styles.introAside}>
+          <p>
+            A focused operating layer for reading crypto markets, understanding portfolio risk, and approving action without losing the trading context.
+          </p>
+          <div className={styles.introActions}>
             <Link className={styles.primaryCta} href="/dashboard">
               Launch terminal <ArrowIcon />
             </Link>
-            <Link className={styles.secondaryCta} href="/dashboard/sodex/connect">
-              Connect a wallet <ArrowIcon />
+            <Link className={styles.textCta} href="/dashboard/sodex/connect">
+              Connect operator wallet <ArrowIcon />
             </Link>
           </div>
-          <div className={styles.trustLine} aria-label="Product highlights">
-            <span>Live SoDEX context</span>
-            <span>Wallet-native signing</span>
-            <span>No custody</span>
-          </div>
         </div>
-
-        <ProductPreview />
       </section>
 
-      <section className={`${styles.shell} ${styles.product}`} id="product">
-        <div className={styles.sectionIntro}>
-          <p className={styles.sectionKicker}>One focused workflow</p>
-          <h2>From signal to signed action, without the noise.</h2>
+      <section className={`${styles.shell} ${styles.productStage}`} aria-labelledby="product-caption">
+        <figure className={styles.productFigure}>
+          <div className={styles.screenFrame}>
+            <Image
+              src="/product/sodex-trading-screen.png"
+              alt="SoDEX BTC and USDC spot trading screen with live chart, market data, and order book"
+              width={2326}
+              height={1338}
+              sizes="(max-width: 760px) calc(100vw - 32px), (max-width: 1280px) calc(100vw - 48px), 1220px"
+              priority
+            />
+          </div>
+          <figcaption className={styles.screenCaption} id="product-caption">
+            <span>Live market workspace</span>
+            <span>SoDEX · BTC/USDC spot</span>
+          </figcaption>
+        </figure>
+
+        <div className={styles.annotationRail} aria-label="Workbench capabilities">
+          <div>
+            <span className={styles.annotationIndex}>A</span>
+            <p><strong>Stay oriented.</strong> Keep price action, volume, and liquidity visible while you assess risk.</p>
+          </div>
+          <div>
+            <span className={styles.annotationIndex}>B</span>
+            <p><strong>Keep control.</strong> Move from market evidence to an operator-approved action with a traceable boundary.</p>
+          </div>
+        </div>
+      </section>
+
+      <section className={`${styles.shell} ${styles.workflow}`} id="workflow">
+        <div className={styles.workflowLead}>
+          <p className={styles.sectionLabel}>The operating loop</p>
+          <h2>Three deliberate moves. One connected desk.</h2>
         </div>
 
-        <div className={styles.capabilityGrid}>
-          {capabilities.map((capability) => (
-            <article className={styles.capability} key={capability.number}>
-              <span className={styles.capabilityNumber}>{capability.number}</span>
-              <h3>{capability.title}</h3>
-              <p>{capability.copy}</p>
-              <Link href={capability.href}>
-                {capability.link} <ArrowIcon />
+        <div className={styles.workflowList}>
+          {workflow.map((step) => (
+            <article className={styles.workflowRow} key={step.number}>
+              <span className={styles.workflowNumber}>{step.number}</span>
+              <p className={styles.workflowLabel}>{step.label}</p>
+              <div className={styles.workflowCopy}>
+                <h3>{step.title}</h3>
+                <p>{step.copy}</p>
+              </div>
+              <Link href={step.href} aria-label={`${step.link}: ${step.title}`}>
+                {step.link} <ArrowIcon />
               </Link>
             </article>
           ))}
@@ -179,12 +151,12 @@ export default function HomePage() {
       </section>
 
       <section className={`${styles.shell} ${styles.security}`} id="security">
-        <div className={styles.securityIcon}><ShieldIcon /></div>
+        <div className={styles.securityMark}><ShieldIcon /></div>
         <div className={styles.securityCopy}>
-          <p className={styles.securityKicker}>Separated signing boundary</p>
-          <h2>Your operator wallet never signs the trade.</h2>
+          <p className={styles.sectionLabel}>Separated signing boundary</p>
+          <h2>Your wallet proves identity. It does not sign the trade.</h2>
           <p>
-            Your wallet signs the login challenge only. Gold &amp; Grith applies policy and audit controls, then a dedicated registered key signs the exact SoDEX action from the deployment secret manager.
+            Gold &amp; Grith applies policy and audit controls, then a dedicated registered key signs the exact SoDEX action from deployment-managed secrets.
           </p>
         </div>
         <Link className={styles.securityCta} href="/dashboard/sodex/connect">
@@ -192,12 +164,18 @@ export default function HomePage() {
         </Link>
       </section>
 
-      <footer className={`${styles.shell} ${styles.footer}`}>
-        <Link className={styles.footerBrand} href="/">
-          <Image src="/brand/gold-and-grith-mark.svg" alt="" width={28} height={28} />
-          <span>Gold &amp; Grith</span>
+      <aside className={`${styles.shell} ${styles.actionDock}`} aria-label="Launch Gold and Grith">
+        <div>
+          <span className={styles.dockStatus} aria-hidden="true" />
+          <p><strong>Ready for the desk?</strong> Enter the live operating view.</p>
+        </div>
+        <Link href="/dashboard">
+          Open Gold &amp; Grith <ArrowIcon />
         </Link>
-        <p>Market context in. Risk decisions out.</p>
+      </aside>
+
+      <footer className={`${styles.shell} ${styles.footer}`}>
+        <p><strong>Gold &amp; Grith</strong> · Observe · Reason · Act</p>
         <Link href="/dashboard">Enter terminal <ArrowIcon /></Link>
       </footer>
     </main>
