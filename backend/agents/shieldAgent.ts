@@ -93,14 +93,23 @@ function parseNumber(value: unknown): number {
   return Number.parseFloat(String(value ?? '0')) || 0;
 }
 
-async function runShieldAgent(): Promise<ShieldAgentResult> {
+async function runShieldAgent(
+  walletOverride?: string,
+  networkOverride?: 'testnet' | 'mainnet'
+): Promise<ShieldAgentResult> {
   console.log('[ShieldAgent] Starting cycle...');
   const startTime = Date.now();
-  const runRecord = await createAgentRun('shield');
+  let runRecord: Awaited<ReturnType<typeof createAgentRun>> = null;
 
   try {
-    const wallet = process.env.USER_WALLET_ADDRESS || process.env.SODEX_ACCOUNT_ADDRESS;
-    const network = process.env.SODEX_NETWORK === 'mainnet' ? 'mainnet' : 'testnet';
+    try {
+      runRecord = await createAgentRun('shield');
+    } catch (error) {
+      console.error('[ShieldAgent] Run tracking unavailable:', getErrorMessage(error));
+    }
+
+    const wallet = walletOverride || process.env.USER_WALLET_ADDRESS || process.env.SODEX_ACCOUNT_ADDRESS;
+    const network = networkOverride || (process.env.SODEX_NETWORK === 'mainnet' ? 'mainnet' : 'testnet');
     if (!wallet) {
       throw new Error('USER_WALLET_ADDRESS is not configured.');
     }
@@ -118,10 +127,14 @@ async function runShieldAgent(): Promise<ShieldAgentResult> {
 
     if (positions.length === 0) {
       const duration = Date.now() - startTime;
-      await completeAgentRun(runRecord?.id, {
-        duration_ms: duration,
-        summary: { positionsMonitored: 0 }
-      });
+      try {
+        await completeAgentRun(runRecord?.id, {
+          duration_ms: duration,
+          summary: { positionsMonitored: 0 }
+        });
+      } catch (trackingError) {
+        console.error('[ShieldAgent] Failed to complete run tracking:', getErrorMessage(trackingError));
+      }
       console.log('[ShieldAgent] No open positions. Nothing to shield.');
       return { success: true, positionsMonitored: 0, snapshots: [] };
     }
@@ -380,13 +393,17 @@ async function runShieldAgent(): Promise<ShieldAgentResult> {
     }
 
     const duration = Date.now() - startTime;
-    await completeAgentRun(runRecord?.id, {
-      duration_ms: duration,
-      summary: {
-        positionsMonitored: positions.length,
-        highestRisk: Math.max(...riskSnapshots.map((snapshot) => snapshot.risk_score))
-      }
-    });
+    try {
+      await completeAgentRun(runRecord?.id, {
+        duration_ms: duration,
+        summary: {
+          positionsMonitored: positions.length,
+          highestRisk: Math.max(...riskSnapshots.map((snapshot) => snapshot.risk_score))
+        }
+      });
+    } catch (trackingError) {
+      console.error('[ShieldAgent] Failed to complete run tracking:', getErrorMessage(trackingError));
+    }
 
     console.log(`[ShieldAgent] Completed in ${duration}ms. ${positions.length} positions monitored.`);
 
@@ -396,9 +413,13 @@ async function runShieldAgent(): Promise<ShieldAgentResult> {
       snapshots: riskSnapshots
     };
   } catch (error) {
-    await failAgentRun(runRecord?.id, getErrorMessage(error), {
-      duration_ms: Date.now() - startTime
-    });
+    try {
+      await failAgentRun(runRecord?.id, getErrorMessage(error), {
+        duration_ms: Date.now() - startTime
+      });
+    } catch (trackingError) {
+      console.error('[ShieldAgent] Failed to update run tracking:', getErrorMessage(trackingError));
+    }
 
     console.error('[ShieldAgent] Error:', getErrorMessage(error));
     return { success: false, error: getErrorMessage(error) };

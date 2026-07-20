@@ -4,6 +4,7 @@ import './sodexSigner.test';
 import './executionPolicy.test';
 import './outcomeResolver.test';
 import './technicalGraphAnalysis.test';
+import './orchestratorOutcome.test';
 import './securityRoutes.test';
 import './envConfig.test';
 import './wave3Features.test';

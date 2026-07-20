@@ -25,10 +25,63 @@ let lastDailySummaryKey: string | null = null;
 let cycleTimer: ReturnType<typeof setInterval> | null = null;
 let dailyTimer: ReturnType<typeof setInterval> | null = null;
 
-async function runFullCycle() {
+interface AgentOutcome {
+  success: boolean;
+  degraded?: boolean;
+  warnings?: string[];
+  error?: string;
+}
+
+interface CycleOptions {
+  walletAddress?: string;
+  network?: 'testnet' | 'mainnet';
+}
+
+function describeCycleOutcome(narrativeResult: AgentOutcome, shieldResult: AgentOutcome) {
+  const modules = [
+    { name: 'Narrative Scanner', result: narrativeResult },
+    { name: 'Liquidation Shield', result: shieldResult }
+  ];
+  const completed = modules.filter((module) => module.result.success);
+  const failed = modules.filter((module) => !module.result.success);
+  const warnings = completed.flatMap((module) => module.result.warnings || []);
+  const degraded = completed.some((module) => module.result.degraded) || warnings.length > 0;
+  const failureText = failed
+    .map((module) => `${module.name}: ${module.result.error || 'No error detail was returned.'}`)
+    .join(' ');
+
+  if (failed.length === 0) {
+    return {
+      success: true,
+      partial: false,
+      degraded,
+      message: degraded
+        ? `Narrative Scanner and Liquidation Shield completed with limited data. ${warnings.join(' ')}`
+        : 'Narrative Scanner and Liquidation Shield completed.'
+    };
+  }
+
+  if (completed.length > 0) {
+    return {
+      success: true,
+      partial: true,
+      degraded,
+      message: `${completed.map((module) => module.name).join(' and ')} completed. ${warnings.join(' ')} ${failureText}`.replace(/\s+/g, ' ').trim()
+    };
+  }
+
+  return {
+    success: false,
+    partial: false,
+    degraded: false,
+    error: `The manual run could not complete. ${failureText}`
+  };
+}
+
+async function runFullCycle(options: CycleOptions = {}) {
   if (cycleInFlight) {
     console.log('[Orchestrator] Cycle skipped because a previous cycle is still running.');
-    return { success: false, skipped: true };
+    return { success: false, skipped: true, message: 'A cycle is already running. Refresh the run status shortly.' };
   }
 
   let leaseOwner: string | null = null;
@@ -45,7 +98,11 @@ async function runFullCycle() {
   let runRecord: Awaited<ReturnType<typeof createAgentRun>> = null;
 
   try {
-    runRecord = await createAgentRun('orchestrator');
+    try {
+      runRecord = await createAgentRun('orchestrator');
+    } catch (error) {
+      console.error('[Orchestrator] Run tracking unavailable:', getErrorMessage(error));
+    }
     recordAgentRun({
       id: runRecord?.id,
       agent: 'orchestrator',
@@ -53,60 +110,95 @@ async function runFullCycle() {
       created_at: new Date(cycleStart).toISOString()
     });
     console.log(`\n[Orchestrator] ===== CYCLE START ${new Date().toISOString()} =====`);
-    const [narrativeResult, shieldResult] = await Promise.all([runNarrativeAgent(), runShieldAgent()]);
-    if (!narrativeResult.success || !shieldResult.success) {
-      throw new Error(`Agent cycle failed: narrative=${narrativeResult.error || narrativeResult.success}, shield=${shieldResult.error || shieldResult.success}`);
-    }
-    const outcomeResult = await outcomeResolver.resolvePendingSignalOutcomes();
-    await performanceService.recordPerformanceSnapshot();
-    const duration = Date.now() - cycleStart;
+    const [narrativeSettlement, shieldSettlement] = await Promise.allSettled([
+      runNarrativeAgent(options.walletAddress),
+      runShieldAgent(options.walletAddress, options.network)
+    ]);
+    const narrativeResult = narrativeSettlement.status === 'fulfilled'
+      ? narrativeSettlement.value
+      : { success: false, error: getErrorMessage(narrativeSettlement.reason) };
+    const shieldResult = shieldSettlement.status === 'fulfilled'
+      ? shieldSettlement.value
+      : { success: false, error: getErrorMessage(shieldSettlement.reason) };
+    const cycleOutcome = describeCycleOutcome(narrativeResult, shieldResult);
+    const moduleDuration = Date.now() - cycleStart;
 
-    await completeAgentRun(runRecord?.id, {
-      duration_ms: duration,
-      summary: {
-        narrativeSuccess: narrativeResult.success,
-        shieldSuccess: shieldResult.success,
-        outcomesReady: outcomeResult.ready,
-        outcomesUpdated: outcomeResult.updated,
-        topSignal: narrativeResult.strongSignals?.[0]?.sector || null,
-        positionsMonitored: shieldResult.positionsMonitored || 0
+    if (!cycleOutcome.success) {
+      try {
+        await failAgentRun(runRecord?.id, cycleOutcome.error || 'Both agent modules failed.', {
+          duration_ms: moduleDuration,
+          summary: {
+            narrativeSuccess: false,
+            shieldSuccess: false,
+            narrativeError: narrativeResult.error || null,
+            shieldError: shieldResult.error || null
+          }
+        });
+      } catch (trackingError) {
+        console.error('[Orchestrator] Failed to update run tracking:', getErrorMessage(trackingError));
       }
-    });
+      updateAgentRun({
+        id: runRecord?.id,
+        status: 'failed',
+        duration_ms: moduleDuration,
+        error: cycleOutcome.error
+      });
+      console.error('[Orchestrator] Cycle failed:', cycleOutcome.error);
+      return { ...cycleOutcome, narrativeResult, shieldResult };
+    }
+
+    const outcomeResult = await outcomeResolver.resolvePendingSignalOutcomes();
+    await performanceService.recordPerformanceSnapshot(options.walletAddress);
+    const duration = Date.now() - cycleStart;
+    const summary = {
+      narrativeSuccess: narrativeResult.success,
+      shieldSuccess: shieldResult.success,
+      narrativeError: narrativeResult.error || null,
+      shieldError: shieldResult.error || null,
+      dataDegraded: cycleOutcome.degraded,
+      outcomesReady: outcomeResult.ready,
+      outcomesUpdated: outcomeResult.updated,
+      topSignal: narrativeResult.strongSignals?.[0]?.sector || null,
+      positionsMonitored: shieldResult.positionsMonitored || 0
+    };
+    try {
+      await completeAgentRun(runRecord?.id, { duration_ms: duration, summary });
+    } catch (trackingError) {
+      console.error('[Orchestrator] Failed to complete run tracking:', getErrorMessage(trackingError));
+    }
     updateAgentRun({
       id: runRecord?.id,
       status: 'completed',
       duration_ms: duration,
-      summary: {
-        narrativeSuccess: narrativeResult.success,
-        shieldSuccess: shieldResult.success,
-        outcomesReady: outcomeResult.ready,
-        outcomesUpdated: outcomeResult.updated,
-        topSignal: narrativeResult.strongSignals?.[0]?.sector || null,
-        positionsMonitored: shieldResult.positionsMonitored || 0
-      }
+      summary
     });
 
     console.log(`[Orchestrator] ===== CYCLE DONE in ${duration}ms =====\n`);
 
     return {
-      success: true,
+      ...cycleOutcome,
       narrativeResult,
       shieldResult,
       outcomeResult
     };
   } catch (error) {
-    await failAgentRun(runRecord?.id, getErrorMessage(error), {
-      duration_ms: Date.now() - cycleStart
-    });
+    const errorMessage = `The orchestrator could not complete: ${getErrorMessage(error)}`;
+    try {
+      await failAgentRun(runRecord?.id, errorMessage, {
+        duration_ms: Date.now() - cycleStart
+      });
+    } catch (trackingError) {
+      console.error('[Orchestrator] Failed to update run tracking:', getErrorMessage(trackingError));
+    }
     updateAgentRun({
       id: runRecord?.id,
       status: 'failed',
       duration_ms: Date.now() - cycleStart,
-      error: getErrorMessage(error)
+      error: errorMessage
     });
 
     console.error('[Orchestrator] Fatal cycle error:', getErrorMessage(error));
-    return { success: false, error: 'The agent cycle failed. Check the server logs for the request details.' };
+    return { success: false, error: errorMessage };
   } finally {
     cycleInFlight = false;
     if (leaseOwner) {
@@ -195,4 +287,4 @@ function stopScheduler() {
   dailyTimer = null;
 }
 
-export = { startScheduler, stopScheduler, runFullCycle, runDailySummary };
+export = { startScheduler, stopScheduler, runFullCycle, runDailySummary, describeCycleOutcome };

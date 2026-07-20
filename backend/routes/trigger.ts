@@ -12,11 +12,24 @@ const router = express.Router();
 
 router.post('/', rateLimit({ name: 'trigger', windowMs: 60_000, max: 3, distributed: true }), requireOperatorOrCron, async (_req: Request, res: Response) => {
   try {
-    const result = await runFullCycle();
-    return res.status(result.success === false && !result.skipped ? 500 : 200).json(result);
+    const walletAddress = typeof res.locals.walletSession?.address === 'string'
+      ? res.locals.walletSession.address
+      : undefined;
+    const network = res.locals.walletSession?.network === 'mainnet' ? 'mainnet'
+      : res.locals.walletSession?.network === 'testnet' ? 'testnet'
+      : undefined;
+    const result = await runFullCycle({ walletAddress, network });
+    return res.status(result.success === false && !result.skipped ? 500 : 200).json({
+      ...result,
+      requestId: res.locals.requestId
+    });
   } catch (error) {
     console.error('[Trigger Route]', getErrorMessage(error));
-    return res.status(500).json({ success: false, error: 'The agent cycle could not be completed.' });
+    return res.status(500).json({
+      success: false,
+      error: `The agent cycle could not be completed: ${getErrorMessage(error)}`,
+      requestId: res.locals.requestId
+    });
   }
 });
 

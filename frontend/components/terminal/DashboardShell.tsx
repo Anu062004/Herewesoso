@@ -384,8 +384,13 @@ export default function DashboardShell({ children }: DashboardShellProps) {
                     onConfirm: async () => {
                       const result = await triggerCycle();
                       await runs.refresh();
+                      let title = 'Manual run response';
+                      if (result.partial) title = 'Manual run partially completed';
+                      else if (result.degraded) title = 'Manual run completed with warnings';
+                      else if (result.success) title = 'Manual run completed';
+                      else if (result.skipped) title = 'Manual run already active';
                       return {
-                        title: result.success ? 'Manual run started' : 'Manual run response',
+                        title,
                         message: result.error || result.message || (result.success ? 'The orchestrator cycle completed and the page has refreshed.' : 'The run request returned without a success flag.')
                       };
                     }
