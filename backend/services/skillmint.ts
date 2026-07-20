@@ -1,8 +1,8 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // backend/services/skillmint.ts
 //
-// 4th AI provider adapter for Sentinel Finance, alongside groq.ts / gemini.ts /
-// claude.ts. Routes every memo through SkillMint — a verified-execution layer
+// Optional SkillMint AI provider for Gold & Grith, alongside groq.ts, grok.ts,
+// gemini.ts, and claude.ts. Routes generated memos through a verified-execution layer
 // on the 0G network — instead of a raw LLM API.
 //
 // WHY THIS EXISTS
@@ -35,7 +35,7 @@
 //             → builds the same prompt groq.ts would have built
 //             → calls SkillMintClient.executeX402(skillId, prompt)
 //             → SkillMint server processes the call inside a 0G Compute TEE
-//             → x402 facilitator settles payment in USDC.E on 0G mainnet
+//             → x402 facilitator settles the endpoint-advertised W0G/USDC.E payment
 //             → returns { output, receiptRootHash, settlement }
 //          → adapter caches the receipt under a key (e.g. "narrative:DeFi")
 //          → returns just `output` (string) to caller
@@ -51,35 +51,34 @@
 // CONFIG (read from .env)
 // ──────────────────────
 //   AI_SERVICE=skillmint                  ← flips the global router to use us
-//   SKILLMINT_AGENT_KEY=0x...             ← server wallet that holds 0G/USDC.E
+//   SKILLMINT_AGENT_KEY=0x...             ← dedicated x402 payer wallet
 //   SKILLMINT_NETWORK=mainnet|testnet     ← default "mainnet"
 //   SKILLMINT_NARRATIVE_SKILL_ID=2        ← which on-chain skill runs narrative
-//   SKILLMINT_RISK_SKILL_ID=3             ← which on-chain skill runs risk
-//   SKILLMINT_SUMMARY_SKILL_ID=4          ← daily summary (optional, falls back
+//   SKILLMINT_RISK_SKILL_ID=2             ← which on-chain skill runs risk
+//   SKILLMINT_SUMMARY_SKILL_ID=2          ← daily summary (optional, falls back
 //                                          to NARRATIVE_SKILL_ID if unset)
 //   SKILLMINT_X402_URL=...                ← override the x402 endpoint base
-//                                          (default = SDK's mainnet alias)
+//                                          (default = SDK network configuration)
 //
 // SETUP CHECKLIST (one-time)
 // ─────────────────────────
 //   1. `npm install @skillmint/sdk ethers`
 //   2. Set `AI_SERVICE=skillmint` in .env
-//   3. Provision SKILLMINT_AGENT_KEY (any wallet — bridge USDC.E to it via
-//      XSwap. ~$1-5 of USDC.E lasts ~weeks at current cycle frequency.)
-//   4. Pick a SkillMint skill ID to route narrative memos to. Skill #2
-//      ("0G Expert" on mainnet) is a sensible default — it's a general-purpose
-//      analyst skill. For better signal quality, publish your own skill on
-//      SkillMint with the Sentinel prompt template encrypted on 0G Storage —
+//   3. Provision SKILLMINT_AGENT_KEY with a dedicated wallet and fund the asset
+//      advertised by the selected x402 endpoint. Do not assume a fixed token or price.
+//   4. Validate the configured SkillMint skill ID, model, prompt, price, and
+//      payment asset against current upstream metadata. For domain-specific
+//      reasoning, publish a dedicated SkillMint skill with the Gold & Grith
+//      prompt template encrypted on 0G Storage —
 //      then the proprietary prompt never leaves the TEE.
 //   5. Restart the backend. Watch logs — the AI service banner should now
 //      print "Using Skillmint".
 //
 // LATENCY + COST NOTE
 // ──────────────────
-//   - SkillMint adds ~5-10s per call (vs groq's ~2-3s). Fine for the 30-min
-//     orchestrator cycle, not fine for sub-second hot paths.
-//   - ~$0.01 USDC.E per call. With 3 narrative memos × 48 cycles/day +
-//     occasional risk memos, expect ~$1-2/day in stablecoin spend.
+//   - Treat this as a networked, paid path and keep it out of latency-critical code.
+//   - Discover the current skill price/payment token and measure deployment latency;
+//     both are upstream state and should not be hard-coded in operator guidance.
 //   - Local development can fall back to deterministic memos. Production
 //     fails the cycle so missing receipt provenance can never be hidden.
 // ─────────────────────────────────────────────────────────────────────────────
@@ -90,9 +89,8 @@ import { isProduction } from '../config/env';
 
 const { getErrorMessage } = errorUtils;
 
-// ── Method input contracts — IDENTICAL to groq.ts / gemini.ts / claude.ts ────
-// Keeping these in lockstep with the other adapters is mandatory. If the
-// agents change their input shape, copy that change into all four adapters.
+// ── Method input contracts — aligned with the shared AI service interface ───
+// Keeping these in lockstep with the other adapters is mandatory.
 
 interface NarrativeMemoInput {
   sector: string;
@@ -125,7 +123,7 @@ interface DailySummaryInput {
 interface SkillMintReceiptMeta {
   /** Permanent rootHash anchored on 0G Storage. The audit primary key. */
   receiptRootHash: string;
-  /** 0G mainnet tx hash from the x402 settlement (the payment proof). */
+  /** Settlement transaction hash returned by the selected x402 network. */
   settlementTx?: string;
   /** 0G skill NFT id that produced this memo (deploy-time config). */
   skillId: number;
@@ -267,7 +265,7 @@ async function runSkill(
 // integration zero-config beyond the env vars.
 
 function buildNarrativePrompt({ sector, headlines, etfFlow, macroEvents, scores }: NarrativeMemoInput): string {
-  return `You are Sentinel Finance's AI analyst. Write a 2-sentence trading memo.
+  return `You are Gold & Grith's AI analyst. Write a 2-sentence trading memo.
 
 Sector: ${sector}
 Signal: ${scores.signal} (Score: ${scores.combined}/100)
@@ -285,7 +283,7 @@ Be direct. Sound like a hedge fund analyst. No fluff.`;
 }
 
 function buildRiskPrompt({ symbol, leverage, distancePct, macroEvents, riskScore, riskLevel }: RiskMemoInput): string {
-  return `You are Sentinel Finance's risk officer. Write a 2-sentence risk warning.
+  return `You are Gold & Grith's risk officer. Write a 2-sentence risk warning.
 
 Position: ${symbol} at ${leverage}x leverage
 Distance to Liquidation: ${distancePct.toFixed(2)}%
@@ -300,7 +298,7 @@ Be blunt. This person could lose real money. No hedging.`;
 }
 
 function buildSummaryPrompt({ narrativeScores, alerts, positions }: DailySummaryInput): string {
-  return `You are Sentinel Finance's AI. Write a 3-sentence daily market brief.
+  return `You are Gold & Grith's AI. Write a 3-sentence daily market brief.
 
 Top Signals Today: ${narrativeScores.slice(0, 3).map(s => `${s.sector}: ${s.combined_score ?? s.combined}/100 (${s.signal})`).join(', ') || 'No strong signals'}
 Alerts Fired: ${alerts.length}

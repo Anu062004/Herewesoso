@@ -80,7 +80,7 @@ async function findRecentExecution(input: {
   const activeStatuses = ['PENDING', 'CONFIRMED', 'SUBMITTED', 'SUCCEEDED'];
   if (!isSupabaseConfigured) {
     return memoryExecutions.find((entry) =>
-      entry.requested_by === input.requestedBy &&
+      (input.requestedBy === null || entry.requested_by === input.requestedBy) &&
       entry.action_type === input.actionType &&
       entry.symbol === input.symbol &&
       entry.network === input.network &&

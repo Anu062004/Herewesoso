@@ -1,6 +1,8 @@
 import axios from 'axios';
 import sodexSigner = require('./sodexSigner');
 import keyProvider = require('./keyProvider');
+import supabaseService = require('./supabase');
+import { operatorWallets } from '../config/env';
 
 export type SodexTradingNetwork = 'testnet' | 'mainnet';
 
@@ -114,31 +116,6 @@ type CancelOrderRequest = {
 
 type SignedRequestBody = NewOrderRequest | UpdateLeverageRequest | CancelOrderRequest;
 
-export interface WalletPreparedAction {
-  actionType: SignedActionType;
-  endpoint: '/trade/orders' | '/trade/leverage';
-  method: 'POST' | 'DELETE';
-  body: SignedRequestBody;
-  nonce: string;
-  payloadHash: string;
-  domain: {
-    name: 'spot' | 'futures';
-    version: '1';
-    chainId: number;
-    verifyingContract: string;
-  };
-  typedData: {
-    types: {
-      ExchangeAction: Array<{ name: 'payloadHash' | 'nonce'; type: 'bytes32' | 'uint64' }>;
-    };
-    primaryType: 'ExchangeAction';
-    message: {
-      payloadHash: string;
-      nonce: string;
-    };
-  };
-}
-
 function normalizeAddress(value: string): string {
   return value.trim().toLowerCase();
 }
@@ -160,6 +137,74 @@ function trimToNull(value: string | undefined | null): string | null {
   if (!value) return null;
   const trimmed = value.trim();
   return trimmed ? trimmed : null;
+}
+
+export interface ExecutionReadiness {
+  ready: boolean;
+  message: string;
+  network: SodexTradingNetwork;
+  chainId: number;
+  accountAddress: string | null;
+  apiKeyName: string | null;
+}
+
+export function configuredTradingNetwork(): SodexTradingNetwork {
+  return process.env.SODEX_NETWORK === 'mainnet' ? 'mainnet' : 'testnet';
+}
+
+export function getExecutionReadiness(network: SodexTradingNetwork): ExecutionReadiness {
+  const failures: string[] = [];
+  const executionMode = String(process.env.EXECUTION_MODE || 'dry_run').toLowerCase();
+  const expectedMode = network === 'mainnet' ? 'mainnet_canary' : 'testnet';
+  const expectedChainId = network === 'mainnet' ? 286623 : 138565;
+  const configuredChainId = Number(process.env.SODEX_CHAIN_ID);
+  const accountAddress = trimToNull(process.env.SODEX_ACCOUNT_ADDRESS);
+  const apiKeyName = configuredApiKeyName();
+  const operators = operatorWallets();
+  const keyStatus = keyProvider.getKeyStatus();
+  const privateKey = keyProvider.loadPrivateKey();
+
+  if (executionMode !== expectedMode) failures.push(`${network} writes require EXECUTION_MODE=${expectedMode}.`);
+  if (String(process.env.SODEX_NETWORK || 'testnet').toLowerCase() !== network) {
+    failures.push(`SODEX_NETWORK must be ${network}.`);
+  }
+  if (configuredChainId !== expectedChainId) failures.push(`SODEX_CHAIN_ID must be ${expectedChainId} for ${network}.`);
+  if (keyStatus.provider !== 'managed' || !keyStatus.configured) {
+    failures.push('Live SoDEX writes require a deployment-managed API signing key.');
+  }
+  if (!supabaseService.isSupabaseConfigured) {
+    failures.push('Live SoDEX writes require Supabase for durable audit and nonce allocation.');
+  }
+  if (!accountAddress || !/^0x[0-9a-fA-F]{40}$/.test(accountAddress) || /^0x0{40}$/i.test(accountAddress)) {
+    failures.push('A valid non-zero SODEX_ACCOUNT_ADDRESS is required.');
+  }
+  if (operators.length === 0) failures.push('At least one explicit OPERATOR_WALLET_ADDRESSES identity is required.');
+  if (accountAddress && operators.includes(normalizeAddress(accountAddress))) {
+    failures.push('The operator identity must be distinct from the SoDEX master account wallet.');
+  }
+  if (!apiKeyName || apiKeyName.toLowerCase() === 'default' || apiKeyName.length > 36) {
+    failures.push('A non-default registered SODEX_API_KEY_NAME of at most 36 characters is required.');
+  }
+
+  if (privateKey && accountAddress) {
+    try {
+      const signerAddress = sodexSigner.createWallet(privateKey).address;
+      if (normalizeAddress(signerAddress) === normalizeAddress(accountAddress)) {
+        failures.push('The managed signer must be a registered API key, not the SoDEX master account wallet.');
+      }
+    } catch {
+      failures.push('The managed SoDEX API signing key is invalid.');
+    }
+  }
+
+  return {
+    ready: failures.length === 0,
+    message: failures.length === 0 ? 'Managed registered-key execution is configured.' : failures.join(' '),
+    network,
+    chainId: expectedChainId,
+    accountAddress,
+    apiKeyName
+  };
 }
 
 function countFractionDigits(value: string): number {
@@ -269,69 +314,31 @@ function resolveApiKeyNameFromList(
   apiKeys: PerpsApiKey[],
   signerAddress: string,
   configuredName: string | null
-): string | undefined {
+): string {
   const normalizedSigner = normalizeAddress(signerAddress);
-  const matchingSignerKey = apiKeys.find((entry) =>
-    normalizeAddress(entry?.publicKey || '') === normalizedSigner
-  );
-
-  if (configuredName) {
-    const configuredKey = apiKeys.find((entry) => entry?.name === configuredName);
-
-    if (configuredKey && !configuredKey.publicKey) {
-      return configuredName;
-    }
-
-    if (configuredKey && normalizeAddress(configuredKey.publicKey || '') === normalizedSigner) {
-      if (configuredKey.name === 'default') {
-        return undefined;
-      }
-
-      return configuredName;
-    }
-
-    if (matchingSignerKey?.name) {
-      if (matchingSignerKey.name === 'default') {
-        if (isDefaultApiKeyName(configuredName)) {
-          return undefined;
-        }
-
-        throw new Error(
-          `Configured API key "${configuredName}" does not match signer ${signerAddress}. ` +
-            'The signer is the master/default wallet, so omit SODEX_API_KEY_NAME or set it to "default".'
-        );
-      }
-
-      console.warn(
-        `[SoDEX Trader] Configured API key "${configuredName}" was not registered for signer ${signerAddress}. ` +
-          `Using registered key "${matchingSignerKey.name}" instead.`
-      );
-      return matchingSignerKey.name;
-    }
-
-    const configuredKeyText = configuredKey
-      ? `Configured API key "${configuredName}" belongs to ${configuredKey.publicKey}, but the configured private key derives ${signerAddress}.`
-      : `Configured API key "${configuredName}" is not registered on this SoDEX account.`;
-
-    throw new Error(`${configuredKeyText} ${describeAvailableApiKeys(apiKeys)}`);
+  if (!configuredName || isDefaultApiKeyName(configuredName)) {
+    throw new Error('A non-default SODEX_API_KEY_NAME is required for trading actions.');
   }
 
-  if (matchingSignerKey?.name) {
-    if (matchingSignerKey.name === 'default') {
-      return undefined;
-    }
-
-    return matchingSignerKey.name;
+  const configuredKey = apiKeys.find((entry) => entry?.name === configuredName);
+  if (!configuredKey) {
+    throw new Error(`Configured API key "${configuredName}" is not registered on this SoDEX account. ${describeAvailableApiKeys(apiKeys)}`);
+  }
+  if (!configuredKey.publicKey) {
+    throw new Error(`SoDEX did not return a public key for registered API key "${configuredName}"; refusing to sign without verification.`);
+  }
+  if (normalizeAddress(configuredKey.publicKey) !== normalizedSigner) {
+    throw new Error(
+      `Configured API key "${configuredName}" belongs to ${configuredKey.publicKey}, but the managed private key derives ${signerAddress}.`
+    );
   }
 
-  throw new Error(
-    `No registered SoDEX API key matches the configured signer ${signerAddress}. ` +
-      `${describeAvailableApiKeys(apiKeys)}`
-  );
+  return configuredName;
 }
 
 async function resolveTradingContext(wallet: SodexWallet, symbol: string, baseUrl: string): Promise<TradingContext> {
-  const accountAddress = configuredAccountAddress(wallet.address);
+  const accountAddress = trimToNull(process.env.SODEX_ACCOUNT_ADDRESS);
+  if (!accountAddress) throw new Error('SODEX_ACCOUNT_ADDRESS is required for registered-key trading.');
   const envAccountID = trimToNull(process.env.SODEX_ACCOUNT_ID);
   const envApiKeyName = configuredApiKeyName();
 
@@ -346,43 +353,22 @@ async function resolveTradingContext(wallet: SodexWallet, symbol: string, baseUr
   const symbols = symbolResponse.data?.data || [];
   const signerMatchesAccount = normalizeAddress(wallet.address) === normalizeAddress(accountAddress);
 
-  const accountID = parseRequiredNumber(envAccountID || state?.aid, 'account ID');
+  const discoveredAccountID = parseRequiredNumber(state?.aid, 'account ID');
+  const accountID = envAccountID ? parseRequiredNumber(envAccountID, 'configured account ID') : discoveredAccountID;
+  if (envAccountID && accountID !== discoveredAccountID) {
+    throw new Error(`SODEX_ACCOUNT_ID=${accountID} does not match account ${accountAddress} (aid ${discoveredAccountID}).`);
+  }
   const symbolRecord = symbols.find((entry) => entry?.name === symbol);
 
   if (!symbolRecord?.id) {
     throw new Error(`Could not resolve SoDEX symbol ID for ${symbol}.`);
   }
 
-  let apiKeyName: string | undefined;
-
-  if (signerMatchesAccount && isDefaultApiKeyName(envApiKeyName)) {
-    apiKeyName = undefined;
-  } else {
-    try {
-      const apiKeys = await fetchAccountApiKeys(accountAddress, baseUrl);
-      apiKeyName = resolveApiKeyNameFromList(apiKeys, wallet.address, envApiKeyName);
-    } catch (error: any) {
-      if (envApiKeyName && !signerMatchesAccount && error?.response) {
-        console.warn(
-          `[SoDEX Trader] Could not verify configured API key "${envApiKeyName}"; using it anyway: ${extractErrorMessage(error)}`
-        );
-        apiKeyName = envApiKeyName;
-      } else {
-        throw error;
-      }
-    }
+  if (signerMatchesAccount) {
+    throw new Error('The managed signer is the SoDEX master wallet. Trading actions require a separate registered API key.');
   }
-
-  if (signerMatchesAccount && apiKeyName) {
-    if (isDefaultApiKeyName(apiKeyName)) {
-      apiKeyName = undefined;
-    } else {
-      throw new Error(
-        `Configured API key "${apiKeyName}" cannot be used with the master wallet signer. ` +
-          'Set SODEX_API_PRIVATE_KEY to the matching registered API key private key, or omit SODEX_API_KEY_NAME to sign as the master wallet.'
-      );
-    }
-  }
+  const apiKeys = await fetchAccountApiKeys(accountAddress, baseUrl);
+  const apiKeyName = resolveApiKeyNameFromList(apiKeys, wallet.address, envApiKeyName);
 
   const symbolConfig =
     state?.S?.find((entry) => entry?.s === symbol) || state?.P?.find((entry) => entry?.s === symbol);
@@ -391,35 +377,6 @@ async function resolveTradingContext(wallet: SodexWallet, symbol: string, baseUr
     accountID,
     symbolID: parseRequiredNumber(symbolRecord.id, 'symbol ID'),
     apiKeyName,
-    marginMode: typeof symbolConfig?.m === 'number' ? symbolConfig.m : 2,
-    accountAddress
-  };
-}
-
-async function resolveConnectedWalletContext(
-  accountAddress: string,
-  symbol: string,
-  baseUrl: string
-): Promise<TradingContext> {
-  const [stateResponse, symbolResponse] = await Promise.all([
-    client.get<PerpsRestResponse<PerpsStateResponse['data']>>(`${baseUrl}/accounts/${accountAddress}/state`),
-    client.get<PerpsRestResponse<PerpsSymbolResponse['data']>>(`${baseUrl}/markets/symbols`, {
-      params: { symbol }
-    })
-  ]);
-  const state = stateResponse.data?.data;
-  const symbolRecord = (symbolResponse.data?.data || []).find((entry) => entry?.name === symbol);
-
-  if (!symbolRecord?.id) {
-    throw new Error(`Could not resolve SoDEX symbol ID for ${symbol}.`);
-  }
-
-  const symbolConfig =
-    state?.S?.find((entry) => entry?.s === symbol) || state?.P?.find((entry) => entry?.s === symbol);
-
-  return {
-    accountID: parseRequiredNumber(state?.aid, 'account ID'),
-    symbolID: parseRequiredNumber(symbolRecord.id, 'symbol ID'),
     marginMode: typeof symbolConfig?.m === 'number' ? symbolConfig.m : 2,
     accountAddress
   };
@@ -495,6 +452,9 @@ async function postSigned<T>(
   baseUrl: string,
   method: 'POST' | 'DELETE' = 'POST'
 ): Promise<PerpsRestResponse<T>> {
+  if (!context.apiKeyName || isDefaultApiKeyName(context.apiKeyName)) {
+    throw new Error('Refusing to submit a SoDEX trading action without a registered X-API-Key name.');
+  }
   const signed = await sodexSigner.signSodexAction({
     privateKey: wallet.privateKey,
     marketType: 'perps',
@@ -510,9 +470,7 @@ async function postSigned<T>(
     'X-API-Chain': String(signed.domain.chainId)
   };
 
-  if (context.apiKeyName) {
-    signedHeaders['X-API-Key'] = context.apiKeyName;
-  }
+  signedHeaders['X-API-Key'] = context.apiKeyName;
 
   const requestBody = JSON.stringify(body);
   const response = await fetch(`${baseUrl}${endpoint}`, {
@@ -537,75 +495,6 @@ async function postSigned<T>(
       status: response.status,
       data: responseData
     };
-    throw error;
-  }
-
-  return responseData;
-}
-
-function prepareWalletRequest(
-  accountAddress: string,
-  actionType: SignedActionType,
-  endpoint: WalletPreparedAction['endpoint'],
-  body: SignedRequestBody,
-  baseUrl: string,
-  method: WalletPreparedAction['method'] = 'POST'
-): WalletPreparedAction {
-  const prepared = sodexSigner.prepareSodexAction({
-    signerAddress: accountAddress,
-    marketType: 'perps',
-    actionType,
-    params: body,
-    baseUrl
-  });
-
-  return {
-    actionType,
-    endpoint,
-    method,
-    body,
-    ...prepared
-  };
-}
-
-export async function submitWalletPreparedAction(
-  prepared: WalletPreparedAction,
-  rawSignature: string,
-  signerAddress: string
-): Promise<PerpsRestResponse<unknown>> {
-  const signedHeaders: Record<string, string> = {
-    'Content-Type': 'application/json',
-    Accept: 'application/json',
-    'X-API-Sign': sodexSigner.toSodexHeaderSignature(rawSignature),
-    'X-API-Nonce': prepared.nonce,
-    'X-API-Chain': String(prepared.domain.chainId)
-  };
-  const network: SodexTradingNetwork = prepared.domain.chainId === 286623 ? 'mainnet' : 'testnet';
-  const response = await fetch(`${perpsBase(network)}${prepared.endpoint}`, {
-    method: prepared.method,
-    headers: signedHeaders,
-    body: JSON.stringify(prepared.body)
-  });
-  const text = await response.text();
-  let responseData: PerpsRestResponse<unknown>;
-
-  try {
-    responseData = (text ? JSON.parse(text) : {}) as PerpsRestResponse<unknown>;
-  } catch {
-    responseData = { error: response.statusText || 'SoDEX returned an invalid response.' };
-  }
-
-  (responseData as PerpsRestResponse<unknown> & { signed?: Record<string, unknown> }).signed = {
-    payloadHash: prepared.payloadHash,
-    nonce: prepared.nonce,
-    chainId: prepared.domain.chainId,
-    signerAddress,
-    actionType: prepared.actionType
-  };
-
-  if (!response.ok) {
-    const error: any = new Error(responseData.error || response.statusText || 'SoDEX signed request failed.');
-    error.response = { status: response.status, data: responseData };
     throw error;
   }
 
@@ -704,6 +593,29 @@ export function getAccountAddress(): string | null {
   return configuredAccountAddress(signerAddress);
 }
 
+export async function verifyRegisteredTradingKey(
+  symbol: string,
+  network: SodexTradingNetwork = configuredTradingNetwork()
+): Promise<Record<string, unknown>> {
+  const readiness = getExecutionReadiness(network);
+  if (!readiness.ready) throw new Error(readiness.message);
+  const key = loadKey();
+  if (!key) throw new Error('The deployment-managed SoDEX API signing key is unavailable.');
+  const wallet = sodexSigner.createWallet(key);
+  const context = await resolveTradingContext(wallet, symbol, perpsBase(network));
+  return {
+    ready: true,
+    network,
+    chainId: readiness.chainId,
+    accountAddress: context.accountAddress,
+    accountID: context.accountID,
+    apiKeyName: context.apiKeyName,
+    signerAddress: wallet.address,
+    symbol,
+    symbolID: context.symbolID
+  };
+}
+
 export interface PlaceOrderParams {
   symbol: string;
   side: 'BUY' | 'SELL';
@@ -738,103 +650,30 @@ export interface OrderResult {
   raw?: unknown;
 }
 
-export async function prepareWalletClosePosition(
-  accountAddress: string,
-  symbol: string,
-  network: SodexTradingNetwork = 'testnet'
-): Promise<WalletPreparedAction> {
-  const baseUrl = perpsBase(network);
-  const [context, enriched] = await Promise.all([
-    resolveConnectedWalletContext(accountAddress, symbol, baseUrl),
-    require('./sodex').getEnrichedPositions(accountAddress, network)
-  ]);
-  const position = (enriched.positions || []).find((entry: any) =>
-    String(entry.symbol || '').toUpperCase() === symbol.toUpperCase() && Number(entry.positionSize || 0) !== 0
-  );
-
-  if (!position) {
-    throw new Error(`No open position found for ${symbol} on SoDEX.`);
-  }
-
-  const numericSize = Number(position.positionSize);
-  const quantity = String(Math.abs(numericSize));
-  const side: 'BUY' | 'SELL' = position.side === 'SHORT' || numericSize < 0 ? 'BUY' : 'SELL';
-  const price = await buildCloseLimitPrice(symbol, side, baseUrl);
-  const body: NewOrderRequest = {
-    accountID: context.accountID,
-    symbolID: context.symbolID,
-    orders: [buildOrderPayload({
-      symbol,
-      side,
-      type: 'LIMIT',
-      price,
-      timeInForce: 'IOC',
-      quantity,
-      reduceOnly: true
-    })]
-  };
-
-  return prepareWalletRequest(accountAddress, 'newOrder', '/trade/orders', body, baseUrl);
-}
-
-export async function prepareWalletLeverageUpdate(
-  accountAddress: string,
-  symbol: string,
-  leverage: number,
-  network: SodexTradingNetwork = 'testnet'
-): Promise<WalletPreparedAction> {
-  const baseUrl = perpsBase(network);
-  const context = await resolveConnectedWalletContext(accountAddress, symbol, baseUrl);
-  const body: UpdateLeverageRequest = {
-    accountID: context.accountID,
-    symbolID: context.symbolID,
-    leverage,
-    marginMode: context.marginMode
-  };
-
-  return prepareWalletRequest(accountAddress, 'updateLeverage', '/trade/leverage', body, baseUrl);
-}
-
-export async function prepareWalletCancelOrders(
-  accountAddress: string,
-  params: CancelOrdersParams,
-  network: SodexTradingNetwork = 'testnet'
-): Promise<WalletPreparedAction> {
-  if (!Array.isArray(params.cancels) || params.cancels.length === 0) {
-    throw new Error('At least one order must be provided to cancel.');
-  }
-  if (params.cancels.length > 100) {
-    throw new Error('SoDEX supports at most 100 cancels per request.');
-  }
-
-  const baseUrl = perpsBase(network);
-  const context = await resolveConnectedWalletContext(accountAddress, params.symbol, baseUrl);
-  const body: CancelOrderRequest = {
-    accountID: context.accountID,
-    cancels: params.cancels.map((item) => buildCancelItem(context.symbolID, item))
-  };
-
-  return prepareWalletRequest(accountAddress, 'cancelOrder', '/trade/orders', body, baseUrl, 'DELETE');
-}
-
-export async function closePosition(symbol: string, sizeHint = '', network: SodexTradingNetwork = 'testnet'): Promise<OrderResult> {
+export async function closePosition(symbol: string, _sizeHint = '', network: SodexTradingNetwork = configuredTradingNetwork()): Promise<OrderResult> {
+  const readiness = getExecutionReadiness(network);
+  if (!readiness.ready) return { success: false, message: readiness.message };
   const key = loadKey();
   if (!key) return { success: false, message: 'No SoDEX API signing key is provisioned by the server operator.' };
 
   const wallet = sodexSigner.createWallet(key);
   let side: 'BUY' | 'SELL' = 'SELL';
-  let quantity = trimToNull(sizeHint);
+  let quantity: string | null = null;
 
   try {
     const sodex = require('./sodex');
     const enriched = await sodex.getEnrichedPositions(configuredAccountAddress(wallet.address), network);
-    const position = (enriched.positions || []).find((entry: any) => entry.symbol === symbol);
+    const position = (enriched.positions || []).find((entry: any) =>
+      String(entry.symbol || '').toUpperCase() === symbol.toUpperCase()
+    );
 
     if (position && Number(position.positionSize) !== 0) {
       quantity = String(Math.abs(Number(position.positionSize)));
       side = position.side === 'SHORT' || Number(position.positionSize) < 0 ? 'BUY' : 'SELL';
     }
-  } catch {}
+  } catch (error: any) {
+    return { success: false, message: error?.message || `Could not verify the live ${symbol} position.` };
+  }
 
   if (!quantity || Number(quantity) === 0) {
     return {
@@ -865,9 +704,14 @@ export async function closePosition(symbol: string, sizeHint = '', network: Sode
   }, network);
 }
 
-export async function placeOrder(params: PlaceOrderParams, network: SodexTradingNetwork = 'testnet'): Promise<OrderResult> {
+export async function placeOrder(params: PlaceOrderParams, network: SodexTradingNetwork = configuredTradingNetwork()): Promise<OrderResult> {
+  const readiness = getExecutionReadiness(network);
+  if (!readiness.ready) return { success: false, message: readiness.message };
   const key = loadKey();
   if (!key) return { success: false, message: 'No SoDEX API signing key is provisioned by the server operator.' };
+  if (!params.reduceOnly) {
+    return { success: false, message: 'Automated opening orders are disabled; only reduce-only position closes are supported.' };
+  }
 
   const wallet = sodexSigner.createWallet(key);
 
@@ -958,7 +802,9 @@ function buildCancelItem(symbolID: number, item: CancelOrderItem): CancelItemPay
   };
 }
 
-export async function cancelOrders(params: CancelOrdersParams, network: SodexTradingNetwork = 'testnet'): Promise<OrderResult> {
+export async function cancelOrders(params: CancelOrdersParams, network: SodexTradingNetwork = configuredTradingNetwork()): Promise<OrderResult> {
+  const readiness = getExecutionReadiness(network);
+  if (!readiness.ready) return { success: false, message: readiness.message };
   const key = loadKey();
   if (!key) {
     return { success: false, message: 'No SoDEX API signing key is provisioned by the server operator.' };
@@ -1028,14 +874,16 @@ export async function cancelOrders(params: CancelOrdersParams, network: SodexTra
   }
 }
 
-export async function cancelOrder(params: CancelOrderParams, network: SodexTradingNetwork = 'testnet'): Promise<OrderResult> {
+export async function cancelOrder(params: CancelOrderParams, network: SodexTradingNetwork = configuredTradingNetwork()): Promise<OrderResult> {
   return cancelOrders({
     symbol: params.symbol,
     cancels: [{ orderId: params.orderId, clOrdId: params.clOrdId }]
   }, network);
 }
 
-export async function reduceLeverage(symbol: string, newLeverage: number, network: SodexTradingNetwork = 'testnet'): Promise<OrderResult> {
+export async function reduceLeverage(symbol: string, newLeverage: number, network: SodexTradingNetwork = configuredTradingNetwork()): Promise<OrderResult> {
+  const readiness = getExecutionReadiness(network);
+  if (!readiness.ready) return { success: false, message: readiness.message };
   const key = loadKey();
   if (!key) return { success: false, message: 'No SoDEX API signing key is provisioned by the server operator.' };
 
@@ -1043,6 +891,18 @@ export async function reduceLeverage(symbol: string, newLeverage: number, networ
 
   try {
     const baseUrl = perpsBase(network);
+    const sodex = require('./sodex');
+    const enriched = await sodex.getEnrichedPositions(configuredAccountAddress(wallet.address), network);
+    const position = (enriched.positions || []).find((entry: any) =>
+      String(entry.symbol || '').toUpperCase() === symbol.toUpperCase() && Number(entry.positionSize || 0) !== 0
+    );
+    const currentLeverage = Number(position?.leverage || 0);
+    if (!position || !Number.isFinite(currentLeverage) || currentLeverage <= 0) {
+      return { success: false, message: `Could not verify an open ${symbol} position and its current leverage.` };
+    }
+    if (!Number.isFinite(newLeverage) || newLeverage < 1 || newLeverage >= currentLeverage) {
+      return { success: false, message: `New leverage must be at least 1x and below the current ${currentLeverage}x leverage.` };
+    }
     const context = await resolveTradingContext(wallet, symbol, baseUrl);
     return submitLeverageUpdate(wallet, context, symbol, newLeverage, baseUrl);
   } catch (error: any) {
@@ -1066,11 +926,10 @@ export const sodexTrader = {
   getWalletAddress,
   getAccountAddress,
   getKeyStatus,
+  configuredTradingNetwork,
+  getExecutionReadiness,
+  verifyRegisteredTradingKey,
   buildOrderPayload,
-  prepareWalletCancelOrders,
-  prepareWalletClosePosition,
-  prepareWalletLeverageUpdate,
-  submitWalletPreparedAction,
   placeOrder,
   cancelOrder,
   cancelOrders,

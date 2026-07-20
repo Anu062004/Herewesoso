@@ -6,6 +6,7 @@ import supabaseService = require('./supabase');
 export type WalletNetwork = 'testnet' | 'mainnet';
 
 export interface WalletSession {
+  id: string;
   address: string;
   network: WalletNetwork;
   issuedAt: number;
@@ -13,19 +14,22 @@ export interface WalletSession {
 }
 
 interface WalletChallenge extends WalletSession {
-  id: string;
   nonce: string;
   used: boolean;
+  domain: string;
+  uri: string;
+  chainId: number;
+  statement: string;
 }
 
 const CHALLENGE_TTL_MS = 5 * 60 * 1000;
-const ACTION_INTENT_TTL_MS = 2 * 60 * 1000;
 const configuredSessionTtlMs = Number(process.env.SODEX_SESSION_TTL_MS || 24 * 60 * 60 * 1000);
 const SESSION_TTL_MS = Number.isFinite(configuredSessionTtlMs)
   ? Math.max(5 * 60 * 1000, Math.min(7 * 24 * 60 * 60 * 1000, configuredSessionTtlMs))
   : 24 * 60 * 60 * 1000;
 const COOKIE_NAME = 'gold_grith_wallet_session';
 const challenges = new Map<string, WalletChallenge>();
+const revokedSessions = new Map<string, number>();
 const { supabase, isSupabaseConfigured } = supabaseService;
 
 const configuredSecret = process.env.SODEX_SESSION_SECRET || process.env.SESSION_SECRET;
@@ -68,29 +72,56 @@ function cleanupChallenges(now = Date.now()) {
   }
 }
 
-export function buildLoginMessage(challenge: Pick<WalletChallenge, 'address' | 'network' | 'issuedAt' | 'nonce'>): string {
+function chainIdForNetwork(network: WalletNetwork): number {
+  return network === 'mainnet' ? 286623 : 138565;
+}
+
+function defaultSiweContext() {
+  const configured = String(process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000');
+  const url = new URL(configured);
+  return { domain: url.host, uri: url.origin };
+}
+
+export function buildLoginMessage(challenge: Pick<WalletChallenge, 'id' | 'address' | 'network' | 'issuedAt' | 'expiresAt' | 'nonce' | 'domain' | 'uri' | 'chainId' | 'statement'>): string {
   return [
-    'Gold & Grith SoDEX login',
-    `Wallet: ${challenge.address.toLowerCase()}`,
-    `Environment: ${challenge.network}`,
-    `Issued at: ${challenge.issuedAt}`,
-    `Nonce: ${challenge.nonce}`,
+    `${challenge.domain} wants you to sign in with your Ethereum account:`,
+    challenge.address,
     '',
-    'This signature proves wallet ownership. It does not authorize a trade or transfer.'
+    challenge.statement,
+    '',
+    `URI: ${challenge.uri}`,
+    'Version: 1',
+    `Chain ID: ${challenge.chainId}`,
+    `Nonce: ${challenge.nonce}`,
+    `Issued At: ${new Date(challenge.issuedAt).toISOString()}`,
+    `Expiration Time: ${new Date(challenge.expiresAt).toISOString()}`,
+    `Request ID: ${challenge.id}`,
+    'Resources:',
+    `- urn:gold-and-grith:network:${challenge.network}`
   ].join('\n');
 }
 
-export async function createChallenge(address: string, network: WalletNetwork): Promise<WalletChallenge & { message: string }> {
+export async function createChallenge(
+  address: string,
+  network: WalletNetwork,
+  context: { domain?: string; uri?: string } = {}
+): Promise<WalletChallenge & { message: string }> {
   cleanupChallenges();
   const issuedAt = Date.now();
+  const defaults = defaultSiweContext();
   const challenge: WalletChallenge = {
     id: crypto.randomUUID(),
+    // EIP-4361 requires an alphanumeric nonce containing at least eight characters.
     nonce: crypto.randomBytes(16).toString('hex'),
     address,
     network,
     issuedAt,
     expiresAt: issuedAt + CHALLENGE_TTL_MS,
-    used: false
+    used: false,
+    domain: context.domain || defaults.domain,
+    uri: context.uri || defaults.uri,
+    chainId: chainIdForNetwork(network),
+    statement: 'Sign in to Gold & Grith. This proves wallet ownership and does not authorize a trade or transfer.'
   };
   if (isProduction()) {
     if (!isSupabaseConfigured) throw new Error('Durable wallet challenges require Supabase.');
@@ -104,6 +135,10 @@ export async function createChallenge(address: string, network: WalletNetwork): 
       address: challenge.address.toLowerCase(),
       network: challenge.network,
       nonce: challenge.nonce,
+      domain: challenge.domain,
+      uri: challenge.uri,
+      chain_id: challenge.chainId,
+      statement: challenge.statement,
       issued_at: new Date(challenge.issuedAt).toISOString(),
       expires_at: new Date(challenge.expiresAt).toISOString()
     });
@@ -134,6 +169,10 @@ export async function consumeChallenge(id: string, address: string, network: Wal
       address: String(data.address),
       network: data.network === 'mainnet' ? 'mainnet' : 'testnet',
       nonce: String(data.nonce),
+      domain: String(data.domain || defaultSiweContext().domain),
+      uri: String(data.uri || defaultSiweContext().uri),
+      chainId: Number(data.chain_id || chainIdForNetwork(data.network === 'mainnet' ? 'mainnet' : 'testnet')),
+      statement: String(data.statement || 'Sign in to Gold & Grith. This proves wallet ownership and does not authorize a trade or transfer.'),
       issuedAt: new Date(String(data.issued_at)).getTime(),
       expiresAt: new Date(String(data.expires_at)).getTime(),
       used: true
@@ -151,9 +190,68 @@ export async function consumeChallenge(id: string, address: string, network: Wal
 
 export function createSession(address: string, network: WalletNetwork): { token: string; session: WalletSession } {
   const issuedAt = Date.now();
-  const session: WalletSession = { address, network, issuedAt, expiresAt: issuedAt + SESSION_TTL_MS };
+  const session: WalletSession = {
+    id: crypto.randomUUID(),
+    address,
+    network,
+    issuedAt,
+    expiresAt: issuedAt + SESSION_TTL_MS
+  };
   const payload = encode(JSON.stringify(session));
   return { token: `${payload}.${sign(payload)}`, session };
+}
+
+export async function persistSession(session: WalletSession): Promise<void> {
+  if (!isSupabaseConfigured) return;
+  const { error: userError } = await supabase.from('wallet_users').upsert({
+    wallet_address: session.address.toLowerCase(),
+    last_sign_in_at: new Date(session.issuedAt).toISOString()
+  }, { onConflict: 'wallet_address' });
+  if (userError) throw userError;
+  const { error } = await supabase.from('wallet_sessions').insert({
+    id: session.id,
+    wallet_address: session.address.toLowerCase(),
+    network: session.network,
+    issued_at: new Date(session.issuedAt).toISOString(),
+    expires_at: new Date(session.expiresAt).toISOString()
+  });
+  if (error) throw error;
+}
+
+export async function revokeSession(session: WalletSession | null): Promise<void> {
+  if (!session) return;
+  revokedSessions.set(session.id, session.expiresAt);
+  if (!isSupabaseConfigured) return;
+  const { error } = await supabase
+    .from('wallet_sessions')
+    .update({ revoked_at: new Date().toISOString() })
+    .eq('id', session.id)
+    .eq('wallet_address', session.address.toLowerCase());
+  if (error) throw error;
+}
+
+export async function validateSession(req: Request): Promise<WalletSession | null> {
+  const session = getWalletSession(req);
+  if (!session) return null;
+  const revokedUntil = revokedSessions.get(session.id);
+  if (revokedUntil && revokedUntil > Date.now()) return null;
+  if (revokedUntil) revokedSessions.delete(session.id);
+  if (revokedSessions.size > 10_000) {
+    const currentTime = Date.now();
+    for (const [id, expiresAt] of revokedSessions) if (expiresAt <= currentTime) revokedSessions.delete(id);
+  }
+  if (!isProduction()) return session;
+  if (!isSupabaseConfigured) throw new Error('Durable wallet sessions require Supabase.');
+  const { data, error } = await supabase
+    .from('wallet_sessions')
+    .select('id, wallet_address, expires_at, revoked_at')
+    .eq('id', session.id)
+    .eq('wallet_address', session.address.toLowerCase())
+    .is('revoked_at', null)
+    .gt('expires_at', new Date().toISOString())
+    .maybeSingle();
+  if (error) throw error;
+  return data ? session : null;
 }
 
 export function verifySessionToken(token: string | undefined): WalletSession | null {
@@ -168,45 +266,14 @@ export function verifySessionToken(token: string | undefined): WalletSession | n
     const session = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8')) as WalletSession;
     const now = Date.now();
     const validAddress = typeof session.address === 'string' && /^0x[0-9a-fA-F]{40}$/.test(session.address);
+    const validId = typeof session.id === 'string' && /^[0-9a-f-]{36}$/i.test(session.id);
     const validTimes = Number.isFinite(session.issuedAt)
       && Number.isFinite(session.expiresAt)
       && session.issuedAt <= now + 60_000
       && session.expiresAt > now
       && session.expiresAt - session.issuedAt <= SESSION_TTL_MS;
-    if (!validAddress || !['testnet', 'mainnet'].includes(session.network) || !validTimes) return null;
+    if (!validId || !validAddress || !['testnet', 'mainnet'].includes(session.network) || !validTimes) return null;
     return session;
-  } catch {
-    return null;
-  }
-}
-
-export function createActionIntentToken(intent: Record<string, unknown>): string {
-  const issuedAt = Date.now();
-  const payload = encode(JSON.stringify({
-    ...intent,
-    issuedAt,
-    expiresAt: issuedAt + ACTION_INTENT_TTL_MS
-  }));
-  return `${payload}.${sign(`action-intent.${payload}`)}`;
-}
-
-export function verifyActionIntentToken(token: string | undefined): Record<string, unknown> | null {
-  if (!token) return null;
-  const [payload, signature, extra] = token.split('.');
-  if (!payload || !signature || extra) return null;
-  if (!signatureMatches(signature, sign(`action-intent.${payload}`))) return null;
-
-  try {
-    const intent = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8')) as Record<string, unknown>;
-    const issuedAt = Number(intent.issuedAt);
-    const expiresAt = Number(intent.expiresAt);
-    const now = Date.now();
-    const validTimes = Number.isFinite(issuedAt)
-      && Number.isFinite(expiresAt)
-      && issuedAt <= now + 30_000
-      && expiresAt > now
-      && expiresAt - issuedAt === ACTION_INTENT_TTL_MS;
-    return validTimes ? intent : null;
   } catch {
     return null;
   }
@@ -235,12 +302,13 @@ export const walletAuth = {
   buildLoginMessage,
   clearSessionCookie,
   consumeChallenge,
-  createActionIntentToken,
   createChallenge,
   createSession,
   getWalletSession,
+  persistSession,
+  revokeSession,
   sessionCookie,
-  verifyActionIntentToken,
+  validateSession,
   verifySessionToken
 };
 

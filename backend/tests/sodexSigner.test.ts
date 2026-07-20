@@ -9,6 +9,26 @@ import walletAuth = require('../services/walletAuth');
 
 const PRIVATE_KEY = '0x2222222222222222222222222222222222222222222222222222222222222222';
 
+async function withEnv(
+  values: Record<string, string | undefined>,
+  fn: () => void | Promise<void>
+): Promise<void> {
+  const previous: Record<string, string | undefined> = {};
+  for (const [key, value] of Object.entries(values)) {
+    previous[key] = process.env[key];
+    if (value === undefined) delete process.env[key];
+    else process.env[key] = value;
+  }
+  try {
+    await fn();
+  } finally {
+    for (const [key, value] of Object.entries(previous)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  }
+}
+
 function sampleOrderRequest() {
   return {
     accountID: 12345,
@@ -134,7 +154,41 @@ test('signSodexAction uses the SoDEX mainnet domain for mainnet requests', async
   assert.equal(sodexSigner.recoverSodexSigner(signed), wallet.address);
 });
 
-test('prepareSodexAction creates browser-signable typed data for an arbitrary wallet', async () => {
+test('signSodexAction rejects a configured chain ID that mismatches the endpoint', async () => {
+  await withEnv({ SODEX_CHAIN_ID: '138565' }, async () => {
+    await assert.rejects(
+      sodexSigner.signSodexAction({
+        privateKey: PRIVATE_KEY,
+        marketType: 'perps',
+        actionType: 'newOrder',
+        params: sampleOrderRequest(),
+        baseUrl: 'https://mainnet-gw.sodex.dev/api/v1/perps',
+        nonce: 1760373925003n
+      }),
+      /does not match the selected SoDEX mainnet endpoint/
+    );
+  });
+});
+
+test('execution readiness rejects using the master account key for trading', async () => {
+  const masterAddress = sodexSigner.createWallet(PRIVATE_KEY).address;
+  await withEnv({
+    EXECUTION_MODE: 'mainnet_canary',
+    SODEX_NETWORK: 'mainnet',
+    SODEX_CHAIN_ID: '286623',
+    KEY_PROVIDER: 'managed',
+    SODEX_MANAGED_PRIVATE_KEY: PRIVATE_KEY,
+    SODEX_API_PRIVATE_KEY: undefined,
+    SODEX_ACCOUNT_ADDRESS: masterAddress,
+    SODEX_API_KEY_NAME: 'mainnet-trader'
+  }, () => {
+    const readiness = sodexTrader.getExecutionReadiness('mainnet');
+    assert.equal(readiness.ready, false);
+    assert.match(readiness.message, /registered API key, not the SoDEX master account wallet/);
+  });
+});
+
+test('prepareSodexAction creates a verifiable EIP-712 envelope for the selected signer', async () => {
   const wallet = ethers.Wallet.createRandom();
   const prepared = sodexSigner.prepareSodexAction({
     signerAddress: wallet.address,
@@ -172,15 +226,41 @@ test('nonce manager increases monotonically per signer', () => {
   assert.equal(otherSigner, 1000n);
 });
 
+test('dry-run nonce allocation remains monotonic without durable persistence', async () => {
+  await withEnv({ EXECUTION_MODE: 'dry_run' }, async () => {
+    nonceManager.resetNonceState();
+    const first = await nonceManager.allocateNonce('0x1111111111111111111111111111111111111111', 2000n);
+    const second = await nonceManager.allocateNonce('0x1111111111111111111111111111111111111111', 2000n);
+    assert.equal(first, 2000n);
+    assert.equal(second, 2001n);
+  });
+});
+
 test('wallet login challenges are one-time and bound to wallet and network', async () => {
   const wallet = sodexSigner.createWallet(PRIVATE_KEY);
   const challenge = await walletAuth.createChallenge(wallet.address, 'mainnet');
 
-  assert.match(challenge.message, /Environment: mainnet/);
+  assert.match(challenge.message, /wants you to sign in with your Ethereum account:/);
+  assert.match(challenge.message, /Version: 1/);
+  assert.match(challenge.message, /Chain ID: 286623/);
+  assert.match(challenge.message, /Resources:\n- urn:gold-and-grith:network:mainnet/);
   assert.match(challenge.message, /Nonce: [0-9a-f]+/);
   assert.equal(await walletAuth.consumeChallenge(challenge.id, wallet.address, 'testnet'), null);
   assert.ok(await walletAuth.consumeChallenge(challenge.id, wallet.address, 'mainnet'));
   assert.equal(await walletAuth.consumeChallenge(challenge.id, wallet.address, 'mainnet'), null);
+});
+
+test('SIWE challenge is domain-bound and produces a recoverable EIP-4361 signature', async () => {
+  const wallet = sodexSigner.createWallet(PRIVATE_KEY);
+  const challenge = await walletAuth.createChallenge(wallet.address, 'testnet', {
+    domain: 'app.goldandgrith.example',
+    uri: 'https://app.goldandgrith.example'
+  });
+  const signature = await wallet.signMessage(challenge.message);
+  assert.equal(ethers.verifyMessage(walletAuth.buildLoginMessage(challenge), signature), wallet.address);
+  assert.match(challenge.message, /^app\.goldandgrith\.example wants you to sign in/);
+  assert.match(challenge.message, /Expiration Time:/);
+  assert.match(challenge.message, /Request ID:/);
 });
 
 test('wallet sessions reject tampering and preserve authenticated identity', () => {
@@ -193,20 +273,18 @@ test('wallet sessions reject tampering and preserve authenticated identity', () 
   assert.equal(walletAuth.verifySessionToken(`${token}tampered`), null);
 });
 
-test('wallet action intents are short-lived and reject payload tampering', () => {
-  const token = walletAuth.createActionIntentToken({
-    version: 1,
-    wallet: '0x2222222222222222222222222222222222222222',
-    network: 'testnet',
-    prepared: { payloadHash: `0x${'ab'.repeat(32)}` }
-  });
-  const intent = walletAuth.verifyActionIntentToken(token);
-  const [payload, signature] = token.split('.');
+test('wallet sessions are independently scoped and revoked on logout', async () => {
+  const first = sodexSigner.createWallet(PRIVATE_KEY);
+  const second = ethers.Wallet.createRandom();
+  const firstSession = walletAuth.createSession(first.address, 'testnet');
+  const secondSession = walletAuth.createSession(second.address, 'mainnet');
+  const request = (token: string) => ({ headers: { cookie: `gold_grith_wallet_session=${token}` } }) as any;
 
-  assert.equal(intent?.wallet, '0x2222222222222222222222222222222222222222');
-  assert.equal(intent?.network, 'testnet');
-  assert.equal(walletAuth.verifyActionIntentToken(`${payload}a.${signature}`), null);
-  assert.equal(walletAuth.verifyActionIntentToken(`${token}tampered`), null);
+  assert.equal((await walletAuth.validateSession(request(firstSession.token)))?.address, first.address);
+  assert.equal((await walletAuth.validateSession(request(secondSession.token)))?.address, second.address);
+  await walletAuth.revokeSession(firstSession.session);
+  assert.equal(await walletAuth.validateSession(request(firstSession.token)), null);
+  assert.equal((await walletAuth.validateSession(request(secondSession.token)))?.network, 'mainnet');
 });
 
 export {};

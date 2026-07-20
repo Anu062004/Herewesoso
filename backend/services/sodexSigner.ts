@@ -46,12 +46,27 @@ interface SodexSigningResult extends SodexSigningPreparation {
 }
 
 function resolveChainId(baseUrl = ''): number {
+  const normalizedBaseUrl = baseUrl.replace(/\/+$/, '').toLowerCase();
+  const mainnetBases = [process.env.SODEX_MAINNET_PERPS, process.env.SODEX_MAINNET_SPOT]
+    .filter((value): value is string => Boolean(value))
+    .map((value) => value.replace(/\/+$/, '').toLowerCase());
+  const testnetBases = [process.env.SODEX_TESTNET_PERPS, process.env.SODEX_TESTNET_SPOT]
+    .filter((value): value is string => Boolean(value))
+    .map((value) => value.replace(/\/+$/, '').toLowerCase());
+  const inferred = mainnetBases.includes(normalizedBaseUrl) || normalizedBaseUrl.includes('mainnet')
+    ? MAINNET_CHAIN_ID
+    : testnetBases.includes(normalizedBaseUrl) || normalizedBaseUrl.includes('testnet')
+      ? TESTNET_CHAIN_ID
+      : null;
   const configured = Number(process.env.SODEX_CHAIN_ID);
   if (Number.isInteger(configured) && configured > 0) {
+    if (inferred !== null && configured !== inferred) {
+      throw new Error(`SODEX_CHAIN_ID=${configured} does not match the selected SoDEX ${inferred === MAINNET_CHAIN_ID ? 'mainnet' : 'testnet'} endpoint.`);
+    }
     return configured;
   }
 
-  return baseUrl.includes('mainnet') ? MAINNET_CHAIN_ID : TESTNET_CHAIN_ID;
+  return inferred ?? TESTNET_CHAIN_ID;
 }
 
 function domainName(marketType: SodexMarketType): 'spot' | 'futures' {
@@ -158,13 +173,14 @@ async function signSodexAction({
   nonce?: bigint;
 }): Promise<SodexSigningResult> {
   const wallet = createWallet(privateKey);
+  const allocatedNonce = nonce ?? await nonceManager.allocateNonce(wallet.address);
   const prepared = prepareSodexAction({
     signerAddress: wallet.address,
     marketType,
     actionType,
     params,
     baseUrl,
-    nonce
+    nonce: allocatedNonce
   });
   const rawSignature = await wallet.signTypedData(
     prepared.domain,

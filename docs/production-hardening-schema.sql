@@ -1,5 +1,5 @@
 -- Gold & Grith production hardening migration.
--- Apply after the base README schema, narrative-v2-schema.sql, and wave3-schema.sql.
+-- Apply after docs/base-schema.sql, narrative-v2-schema.sql, and wave3-schema.sql.
 
 CREATE TABLE IF NOT EXISTS wallet_login_challenges (
   id UUID PRIMARY KEY,
@@ -10,6 +10,10 @@ CREATE TABLE IF NOT EXISTS wallet_login_challenges (
   expires_at TIMESTAMPTZ NOT NULL,
   used_at TIMESTAMPTZ
 );
+ALTER TABLE wallet_login_challenges ADD COLUMN IF NOT EXISTS domain TEXT;
+ALTER TABLE wallet_login_challenges ADD COLUMN IF NOT EXISTS uri TEXT;
+ALTER TABLE wallet_login_challenges ADD COLUMN IF NOT EXISTS chain_id BIGINT;
+ALTER TABLE wallet_login_challenges ADD COLUMN IF NOT EXISTS statement TEXT;
 CREATE INDEX IF NOT EXISTS idx_wallet_challenges_expiry ON wallet_login_challenges (expires_at);
 
 CREATE TABLE IF NOT EXISTS system_leases (
@@ -25,6 +29,40 @@ CREATE TABLE IF NOT EXISTS api_rate_limits (
   reset_at TIMESTAMPTZ NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_api_rate_limits_reset ON api_rate_limits (reset_at);
+
+CREATE TABLE IF NOT EXISTS sodex_signing_nonces (
+  signer_address TEXT PRIMARY KEY CHECK (signer_address ~ '^0x[0-9a-f]{40}$'),
+  last_nonce BIGINT NOT NULL CHECK (last_nonce > 0),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE OR REPLACE FUNCTION allocate_sodex_nonce(p_signer_address TEXT, p_minimum_nonce BIGINT)
+RETURNS BIGINT
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE allocated_nonce BIGINT;
+BEGIN
+  IF lower(p_signer_address) !~ '^0x[0-9a-f]{40}$' THEN
+    RAISE EXCEPTION 'Invalid SoDEX signer address';
+  END IF;
+  IF p_minimum_nonce <= 0 THEN
+    RAISE EXCEPTION 'Invalid SoDEX minimum nonce';
+  END IF;
+
+  INSERT INTO sodex_signing_nonces AS nonces (signer_address, last_nonce, updated_at)
+  VALUES (lower(p_signer_address), p_minimum_nonce, now())
+  ON CONFLICT (signer_address) DO UPDATE SET
+    last_nonce = GREATEST(nonces.last_nonce + 1, EXCLUDED.last_nonce),
+    updated_at = now()
+  RETURNING nonces.last_nonce INTO allocated_nonce;
+
+  RETURN allocated_nonce;
+END;
+$$;
+REVOKE ALL ON FUNCTION allocate_sodex_nonce(TEXT, BIGINT) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION allocate_sodex_nonce(TEXT, BIGINT) TO service_role;
 
 CREATE OR REPLACE FUNCTION consume_api_rate_limit(p_rate_key TEXT, p_window_seconds INTEGER)
 RETURNS TABLE(request_count INTEGER, reset_at TIMESTAMPTZ)
@@ -239,7 +277,9 @@ BEGIN
     'model_versions', 'narrative_preferences', 'narrative_events',
     'narrative_stage_transitions', 'narrative_feedback', 'narrative_source_performance',
     'narrative_conversations', 'narrative_recommendations', 'wallet_login_challenges', 'system_leases',
-    'api_rate_limits'
+    'api_rate_limits', 'sodex_signing_nonces', 'wallet_users', 'wallet_sessions',
+    'exchange_connections', 'cross_exchange_scans', 'strategies', 'strategy_versions',
+    'strategy_installations', 'strategy_reviews', 'strategy_performance_claims', 'automation_rules'
   ] LOOP
     EXECUTE format('ALTER TABLE %I ENABLE ROW LEVEL SECURITY', table_name);
     EXECUTE format('REVOKE ALL ON TABLE %I FROM anon, authenticated', table_name);

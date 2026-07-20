@@ -20,7 +20,7 @@ const capabilities = [
   {
     number: '03',
     title: 'Approve the action',
-    copy: 'Review the exact order, sign with your connected wallet, and send it to SoDEX.',
+    copy: 'Review the exact action, authorize it as an operator, and let the registered SoDEX API key submit it.',
     href: '/dashboard/executions',
     link: 'See executions'
   }
@@ -181,14 +181,14 @@ export default function HomePage() {
       <section className={`${styles.shell} ${styles.security}`} id="security">
         <div className={styles.securityIcon}><ShieldIcon /></div>
         <div className={styles.securityCopy}>
-          <p className={styles.securityKicker}>Wallet-native security</p>
-          <h2>Your wallet stays yours.</h2>
+          <p className={styles.securityKicker}>Separated signing boundary</p>
+          <h2>Your operator wallet never signs the trade.</h2>
           <p>
-            Gold &amp; Grith prepares the action. You inspect and approve it with your connected wallet using typed EIP-712 signing. Private keys never enter our backend.
+            Your wallet signs the login challenge only. Gold &amp; Grith applies policy and audit controls, then a dedicated registered key signs the exact SoDEX action from the deployment secret manager.
           </p>
         </div>
         <Link className={styles.securityCta} href="/dashboard/sodex/connect">
-          Connect securely <ArrowIcon />
+          Authenticate securely <ArrowIcon />
         </Link>
       </section>
 

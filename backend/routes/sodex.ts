@@ -4,10 +4,11 @@ import type { AccountState } from '../types/domain';
 import express from 'express';
 import { ethers } from 'ethers';
 import sodex = require('../services/sodex');
+import sodexTrader = require('../services/sodexTrader');
 import errorUtils = require('../utils/error');
 import walletAuth = require('../services/walletAuth');
 import technicalGraphAnalysis = require('../services/technicalGraphAnalysis');
-import { rateLimit, requireOperator } from '../middleware/security';
+import { rateLimit, requireOperator, requireWallet } from '../middleware/security';
 import { asyncHandler } from '../utils/asyncHandler';
 
 const { getErrorMessage } = errorUtils;
@@ -116,7 +117,7 @@ function summarizeEnvelope(value: unknown): Pick<SmokeCheck, 'count' | 'sample'>
   };
 }
 
-router.get('/account', async (req: Request, res: Response) => {
+router.get('/account', requireWallet, async (req: Request, res: Response) => {
   const identity = authenticatedWallet(req, res);
   if (!identity) return;
   const { address: wallet, network } = identity;
@@ -172,6 +173,21 @@ router.get('/smoke', requireOperator, asyncHandler(async (req: Request, res: Res
     }
   }
 
+  const executionReadiness = sodexTrader.getExecutionReadiness(network);
+  if (executionReadiness.ready) {
+    checks.push(await runSmokeCheck(
+      'trading.registeredApiKey',
+      () => sodexTrader.verifyRegisteredTradingKey(symbol, network),
+      (value) => ({ count: 1, sample: value })
+    ));
+  } else {
+    checks.push({
+      name: 'trading.registeredApiKey',
+      status: 'skipped',
+      error: executionReadiness.message
+    });
+  }
+
   const required = checks.filter((check) => check.status !== 'skipped');
   const ok = required.length > 0 && required.every((check) => check.status === 'ok');
 
@@ -180,6 +196,7 @@ router.get('/smoke', requireOperator, asyncHandler(async (req: Request, res: Res
     network,
     symbol,
     wallet: wallet || null,
+    executionReadiness,
     endpoints: {
       perps: network === 'mainnet'
         ? process.env.SODEX_MAINNET_PERPS || 'https://mainnet-gw.sodex.dev/api/v1/perps'
@@ -224,7 +241,7 @@ router.get('/orderbook/:symbol', async (req: Request, res: Response) => {
   }
 });
 
-router.get('/orders', async (req: Request, res: Response) => {
+router.get('/orders', requireWallet, async (req: Request, res: Response) => {
   const identity = authenticatedWallet(req, res);
   if (!identity) return;
   const { address: wallet, network } = identity;
@@ -291,9 +308,13 @@ router.get('/login-challenge', rateLimit({ name: 'wallet-challenge', windowMs: 6
 
   return res.json({
     challengeId: challenge.id,
+    standard: 'EIP-4361',
     network,
-    chainId: network === 'mainnet' ? 286623 : 138565,
+    chainId: challenge.chainId,
     address: checksumAddress,
+    domain: challenge.domain,
+    uri: challenge.uri,
+    nonce: challenge.nonce,
     issuedAt: challenge.issuedAt,
     expiresAt: challenge.expiresAt,
     message: challenge.message
@@ -332,6 +353,7 @@ router.post('/connect', rateLimit({ name: 'wallet-connect', windowMs: 60_000, ma
   }
 
   const { token, session } = walletAuth.createSession(checksumAddress, network);
+  await walletAuth.persistSession(session);
   res.setHeader('Set-Cookie', walletAuth.sessionCookie(req, token));
 
   let accountState: AccountState | null = null;
@@ -359,7 +381,7 @@ router.post('/connect', rateLimit({ name: 'wallet-connect', windowMs: 60_000, ma
   });
 }));
 
-router.get('/session', async (req: Request, res: Response) => {
+router.get('/session', requireWallet, async (req: Request, res: Response) => {
   const session = walletAuth.getWalletSession(req);
   if (!session) return res.status(401).json({ error: 'No active SoDEX wallet session.' });
 
@@ -387,7 +409,7 @@ router.get('/session', async (req: Request, res: Response) => {
   });
 });
 
-router.get('/session/verify', (req: Request, res: Response) => {
+router.get('/session/verify', requireWallet, (req: Request, res: Response) => {
   const session = walletAuth.getWalletSession(req);
   if (!session) return res.status(401).json({ error: 'No active SoDEX wallet session.' });
   return res.json({
@@ -398,9 +420,10 @@ router.get('/session/verify', (req: Request, res: Response) => {
   });
 });
 
-router.post('/disconnect', (req: Request, res: Response) => {
+router.post('/disconnect', asyncHandler(async (req: Request, res: Response) => {
+  await walletAuth.revokeSession(walletAuth.getWalletSession(req));
   res.setHeader('Set-Cookie', walletAuth.clearSessionCookie(req));
   return res.json({ disconnected: true });
-});
+}));
 
 export = router;

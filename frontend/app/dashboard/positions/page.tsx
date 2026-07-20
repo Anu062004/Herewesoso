@@ -207,7 +207,7 @@ export default function PositionsPage() {
             : `This will submit a reduce-only market close for ${pendingAction?.symbol} on SoDEX ${networkLabel.toLowerCase()}.`
         }
         confirmLabel={pendingAction?.action === 'REDUCE_LEVERAGE' ? 'Reduce' : 'Close'}
-        disclaimer={`${isMainnet ? 'Mainnet' : 'Testnet'} action — your connected wallet will ask for approval`}
+        disclaimer={`${isMainnet ? 'Mainnet canary' : 'Testnet'} action — the managed registered API key will sign after confirmation`}
         onClose={() => setPendingAction(null)}
         onConfirm={async () => {
           if (!pendingAction) {

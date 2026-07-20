@@ -147,20 +147,27 @@ export function securityHeaders(_req: Request, res: Response, next: NextFunction
   next();
 }
 
-export function requireWallet(req: Request, res: Response, next: NextFunction) {
-  const session = walletAuth.getWalletSession(req);
-  if (!session) {
-    return res.status(401).json({ error: 'Connect and sign in with your SoDEX wallet.', code: 'AUTH_REQUIRED' });
+export async function requireWallet(req: Request, res: Response, next: NextFunction) {
+  try {
+    const session = await walletAuth.validateSession(req);
+    if (!session) {
+      return res.status(401).json({ error: 'Connect and sign in with your SoDEX wallet.', code: 'AUTH_REQUIRED' });
+    }
+    res.locals.walletSession = session;
+    return next();
+  } catch {
+    return res.status(503).json({ error: 'Wallet session validation is temporarily unavailable.', code: 'AUTH_UNAVAILABLE' });
   }
-  res.locals.walletSession = session;
-  return next();
 }
 
-export function requireOperator(req: Request, res: Response, next: NextFunction) {
-  const session = walletAuth.getWalletSession(req);
-  if (!session) {
-    return res.status(401).json({ error: 'Operator wallet authentication is required.', code: 'AUTH_REQUIRED' });
+export async function requireOperator(req: Request, res: Response, next: NextFunction) {
+  let session;
+  try {
+    session = await walletAuth.validateSession(req);
+  } catch {
+    return res.status(503).json({ error: 'Wallet session validation is temporarily unavailable.', code: 'AUTH_UNAVAILABLE' });
   }
+  if (!session) return res.status(401).json({ error: 'Operator wallet authentication is required.', code: 'AUTH_REQUIRED' });
 
   const allowed = operatorWallets();
   if ((isProduction() || allowed.length > 0) && !allowed.includes(session.address.toLowerCase())) {

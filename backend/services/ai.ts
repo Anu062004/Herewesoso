@@ -41,7 +41,7 @@ interface AiService {
 const service = (process.env.AI_SERVICE || 'groq').trim().toLowerCase();
 
 // Pick the adapter for the current AI_SERVICE setting.
-// 'grok' and 'xai' both map to the xAI Grok service (recommended).
+// 'grok' and 'xai' both map to the xAI Grok service.
 // Set AI_SERVICE=skillmint to flip onto verifiable TEE execution on 0G.
 const ai: AiService = (
   service === 'gemini' ? gemini :

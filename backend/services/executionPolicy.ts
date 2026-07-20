@@ -60,9 +60,7 @@ function buildIdempotencyKey(input: ExecutionPolicyInput) {
     action: input.action,
     symbol: input.symbol,
     network: input.network,
-    currentLeverage: input.currentLeverage ?? null,
     targetLeverage: input.targetLeverage ?? null,
-    notionalUsd: input.notionalUsd ?? null,
     idempotencyScope: input.idempotencyScope ?? null,
     requestedBy: input.requestedBy?.toLowerCase() || null,
     bucket
@@ -85,12 +83,15 @@ function evaluateExecutionPolicy(input: ExecutionPolicyInput): ExecutionPolicyRe
     {
       name: 'network_mode',
       passed:
-        input.network === 'testnet' ||
+        (input.network === 'testnet' && (executionMode === 'dry_run' || executionMode === 'testnet')) ||
         (input.network === 'mainnet' && executionMode === 'mainnet_canary'),
       message:
-        input.network === 'mainnet' && executionMode !== 'mainnet_canary'
-          ? 'Mainnet writes require EXECUTION_MODE=mainnet_canary.'
-          : 'Network is allowed for the selected execution mode.'
+        (input.network === 'testnet' && (executionMode === 'dry_run' || executionMode === 'testnet')) ||
+        (input.network === 'mainnet' && executionMode === 'mainnet_canary')
+          ? 'Network is allowed for the selected execution mode.'
+          : input.network === 'mainnet'
+            ? 'Mainnet writes require EXECUTION_MODE=mainnet_canary.'
+            : 'Testnet writes require EXECUTION_MODE=testnet (or dry_run for simulation).'
     },
     {
       name: 'symbol_allowlist',

@@ -47,6 +47,19 @@ test('execution policy allows mainnet only in mainnet_canary mode', () => {
   });
 });
 
+test('mainnet canary mode does not permit testnet submissions', () => {
+  withEnv({ EXECUTION_MODE: 'mainnet_canary' }, () => {
+    const result = executionPolicy.evaluateExecutionPolicy({
+      action: 'CLOSE_POSITION',
+      symbol: 'BTC-USD',
+      network: 'testnet'
+    });
+
+    assert.equal(result.allowed, false);
+    assert.equal(result.checks.find((check) => check.name === 'network_mode')?.passed, false);
+  });
+});
+
 test('execution policy enforces leverage and symbol caps', () => {
   withEnv({ EXECUTION_MODE: 'testnet', MAX_LEVERAGE: '10', ALLOWED_SYMBOLS: 'BTC-USD' }, () => {
     const leverageResult = executionPolicy.evaluateExecutionPolicy({
@@ -96,6 +109,18 @@ test('execution idempotency is scoped to the authenticated wallet and target res
   const otherWallet = executionPolicy.evaluateExecutionPolicy({ ...base, requestedBy: '0xdef' });
   assert.equal(first.idempotencyKey, same.idempotencyKey);
   assert.notEqual(first.idempotencyKey, otherWallet.idempotencyKey);
+});
+
+test('execution idempotency is stable when live leverage and price context changes', () => {
+  const base = {
+    action: 'CLOSE_POSITION' as const,
+    symbol: 'BTC-USD',
+    network: 'testnet' as const,
+    requestedBy: '0x1111111111111111111111111111111111111111'
+  };
+  const first = executionPolicy.evaluateExecutionPolicy({ ...base, currentLeverage: 10, notionalUsd: 1000 });
+  const refreshed = executionPolicy.evaluateExecutionPolicy({ ...base, currentLeverage: 9, notionalUsd: 1001 });
+  assert.equal(first.idempotencyKey, refreshed.idempotencyKey);
 });
 
 test('stale pending executions are marked unknown before a retry is allowed', async () => {

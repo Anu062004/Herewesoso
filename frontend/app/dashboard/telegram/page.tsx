@@ -75,24 +75,24 @@ const SODEX_STEPS = [
   {
     index: '2',
     title: 'Set the account address',
-    body: 'Copy the SoDEX account or wallet address into SODEX_ACCOUNT_ADDRESS. If the signer and the account are the same wallet, the same address can be used for both.',
+    body: 'Copy the master account address into SODEX_ACCOUNT_ADDRESS. This address identifies the account; it must not be the registered API-key signer.',
     code: 'SODEX_ACCOUNT_ADDRESS=0xYourWalletAddress\nSODEX_TESTNET_PERPS=https://testnet-gw.sodex.dev/api/v1/perps\nSODEX_CHAIN_ID=138565',
     label: 'Account config',
     note: 'Testnet chain ID is 138565.'
   },
   {
     index: '3',
-    title: 'Choose a signing mode',
-    body: 'Use either a registered API key or the master wallet. For API-key signing, set the key name and the matching private key. For master-wallet signing, leave SODEX_API_KEY_NAME unset and sign with the wallet private key.',
-    code: '# Registered API key\nSODEX_API_KEY_NAME=webkey\nSODEX_API_PRIVATE_KEY=0x...\n\n# Master wallet signing\n# leave SODEX_API_KEY_NAME unset\nSODEX_API_PRIVATE_KEY=0x...',
-    label: 'Signing modes',
-    note: 'Do not set SODEX_API_KEY_NAME to default. Omit it entirely for the master wallet.'
+    title: 'Register a trading API key',
+    body: 'Create a dedicated, revocable SoDEX API key. Configure its exact non-default name and matching private key; normal trading actions must not use the master-wallet key.',
+    code: 'SODEX_API_KEY_NAME=gold-grith-testnet\nSODEX_MANAGED_PRIVATE_KEY=0xRegisteredApiKeySecret\nKEY_PROVIDER=managed',
+    label: 'Registered-key signing',
+    note: 'The signing key must derive the public address registered under this exact key name.'
   },
   {
     index: '4',
     title: 'Load the key securely',
     body: 'Inject the signing key from your deployment secret manager. Telegram can report configuration status with /keyinfo, but it never accepts private keys.',
-    code: 'KEY_PROVIDER=managed\nSODEX_API_PRIVATE_KEY=<injected-secret>\n\n# Telegram status only\n/keyinfo',
+    code: 'KEY_PROVIDER=managed\nSODEX_MANAGED_PRIVATE_KEY=<injected-secret>\n\n# Telegram status only\n/keyinfo',
     label: 'Managed secret flow',
     note: 'Never paste a private key into Telegram, a browser, source control, or a local project file.'
   }
@@ -102,8 +102,10 @@ const ENV_ROWS = [
   ['TELEGRAM_BOT_TOKEN', 'BotFather token for the alert bot'],
   ['TELEGRAM_CHAT_ID', 'The one Telegram chat allowed to use the bot'],
   ['SODEX_ACCOUNT_ADDRESS', 'Wallet address that owns the SoDEX account'],
-  ['SODEX_API_KEY_NAME', 'Registered SoDEX API key name, or omit for master wallet'],
-  ['SODEX_API_PRIVATE_KEY', 'Private key that matches the selected signing mode'],
+  ['SODEX_API_KEY_NAME', 'Exact non-default registered SoDEX API key name'],
+  ['SODEX_MANAGED_PRIVATE_KEY', 'Secret for the matching registered API-key signer'],
+  ['KEY_PROVIDER', 'Must be managed for live execution'],
+  ['EXECUTION_MODE', 'dry_run, testnet, or guarded mainnet_canary'],
   ['SODEX_TESTNET_PERPS', 'Perps REST base URL'],
   ['SODEX_CHAIN_ID', '138565 for SoDEX testnet']
 ] as const;
@@ -251,8 +253,8 @@ export default function TelegramSetupPage() {
               />
               <ChecklistItem
                 icon={<CheckIcon className="h-4 w-4" />}
-                title="Pick a SoDEX signing mode"
-                body="Use the master wallet or a registered API key, but keep the private key server-side."
+                title="Register a dedicated SoDEX API key"
+                body="Keep the master wallet offline and inject only the registered API-key secret."
               />
             </div>
             <div className="mt-4 rounded-[14px] border border-[rgba(245,158,11,0.24)] bg-[rgba(245,158,11,0.08)] px-3 py-3 text-[13px] leading-6 text-[var(--text-2)]">
@@ -345,7 +347,7 @@ export default function TelegramSetupPage() {
               <div className="rounded-[14px] border border-[var(--border)] bg-[var(--bg-panel)] p-4">
                 <div className="text-[13px] font-medium text-[var(--text-1)]">SoDEX API key not found</div>
                 <p className="mt-2 text-[12px] leading-6 text-[var(--text-3)]">
-                  Make sure the private key matches the registered key name. For master-wallet signing, leave SODEX_API_KEY_NAME unset.
+                  Confirm the exact registered key name, its public signer address, and the managed secret. Master-wallet signing is intentionally rejected.
                 </p>
               </div>
               <div className="rounded-[14px] border border-[var(--border)] bg-[var(--bg-panel)] p-4">
@@ -394,8 +396,8 @@ export default function TelegramSetupPage() {
               />
               <CopyBlock
                 label="SoDEX"
-                code={'SODEX_ACCOUNT_ADDRESS=0xYourWalletAddress\nSODEX_API_KEY_NAME=webkey\nSODEX_API_PRIVATE_KEY=0x...\nSODEX_TESTNET_PERPS=https://testnet-gw.sodex.dev/api/v1/perps\nSODEX_CHAIN_ID=138565'}
-                note="If you use the master wallet, omit SODEX_API_KEY_NAME."
+                code={'SODEX_ACCOUNT_ADDRESS=0xMasterAccountAddress\nSODEX_API_KEY_NAME=gold-grith-testnet\nSODEX_MANAGED_PRIVATE_KEY=0xRegisteredApiKeySecret\nSODEX_NETWORK=testnet\nSODEX_CHAIN_ID=138565\nKEY_PROVIDER=managed\nEXECUTION_MODE=testnet'}
+                note="Use a dedicated registered API key. Never configure the master-wallet private key."
               />
             </div>
           </Panel>

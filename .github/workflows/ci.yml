@@ -25,6 +25,10 @@ jobs:
         run: npm ci
       - name: Install frontend dependencies
         run: npm --prefix frontend ci
+      - name: Check documentation
+        run: npm run docs:check
+      - name: Compile automation contracts
+        run: npm run contracts:compile
       - name: Type-check backend
         run: npm run typecheck
       - name: Lint frontend

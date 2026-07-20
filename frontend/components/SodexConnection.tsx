@@ -50,7 +50,7 @@ const NETWORKS: Array<{
     label: 'Mainnet',
     eyebrow: 'Live environment',
     chainId: SODEX_NETWORK_CONFIG.mainnet.chainId,
-    description: 'Read your live account and approve supported actions directly in your connected wallet.'
+    description: 'Authenticate as an operator and review the configured live execution account.'
   }
 ];
 
@@ -199,7 +199,7 @@ export default function SodexConnection() {
       setMessage(`Switching wallet to ${SODEX_NETWORK_CONFIG[network].label}...`);
       await ensureWalletNetwork(provider, network);
 
-      setMessage('Preparing secure SoDEX login challenge...');
+      setMessage('Preparing an EIP-4361 Sign-In with Ethereum challenge...');
       const loginChallenge = await fetchSodexLoginChallenge(network, address);
 
       setState('signature');
@@ -319,7 +319,7 @@ export default function SodexConnection() {
                       : `Connect to SoDEX ${selected.label}`}
                   </div>
                   <p className="mt-1 max-w-xl text-[12px] leading-5 text-[var(--text-2)]">
-                    Your wallet signs a readable login message. This signature cannot move funds, place an order, or approve a token.
+                    Your wallet signs a domain-bound EIP-4361 message. This signature cannot move funds, place an order, or approve a token.
                   </p>
                 </div>
                 <div className="flex shrink-0 flex-wrap gap-2">
@@ -432,7 +432,7 @@ export default function SodexConnection() {
               <div>
                 <div className="text-[13px] font-semibold text-[var(--text-1)]">Security boundary</div>
                 <p className="mt-2 text-[12px] leading-5 text-[var(--text-2)]">
-                  Trade actions require an explicit EIP-712 approval from the connected wallet. Private keys are never entered here or sent to the backend.
+                  This wallet signs only an expiring, one-time SIWE challenge. Each wallet receives an isolated session; supported trades use a separate registered SoDEX API key held in the deployment secret manager.
                 </p>
               </div>
             </div>
