@@ -82,6 +82,7 @@
 
 .headerCta,
 .primaryCta,
+.docsCta,
 .textCta,
 .workflowRow > a,
 .securityCta,
@@ -97,6 +98,7 @@
 
 .headerCta svg,
 .primaryCta svg,
+.docsCta svg,
 .textCta svg,
 .workflowRow > a svg,
 .securityCta svg,
@@ -134,7 +136,7 @@
   grid-template-columns: minmax(0, 1.45fr) minmax(300px, 0.55fr);
   gap: clamp(3rem, 8vw, 8rem);
   align-items: end;
-  padding-block: clamp(4rem, 7vw, 6rem) clamp(5.5rem, 9vw, 8rem);
+  padding-block: clamp(3rem, 5vw, 4rem) clamp(3rem, 5vw, 4.5rem);
 }
 
 .introHeading,
@@ -185,13 +187,13 @@
 }
 
 .intro h1 {
-  max-width: 850px;
+  max-width: 820px;
   margin: var(--space-lg-token) 0 0;
   font-family: var(--font-display);
-  font-size: clamp(3.2rem, 7vw, 6.7rem);
+  font-size: clamp(3rem, 6vw, 5.6rem);
   font-weight: 620;
   letter-spacing: -0.07em;
-  line-height: 0.9;
+  line-height: 0.94;
   min-width: 0;
   overflow-wrap: anywhere;
   text-wrap: balance;
@@ -209,7 +211,7 @@
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: var(--space-lg-token);
+  gap: var(--space-sm-token);
   margin-top: var(--space-xl-token);
 }
 
@@ -231,6 +233,7 @@
 
 .headerCta:active,
 .primaryCta:active,
+.docsCta:active,
 .textCta:active,
 .workflowRow > a:active,
 .securityCta:active,
@@ -242,6 +245,7 @@
 
 .headerCta[aria-disabled='true'],
 .primaryCta[aria-disabled='true'],
+.docsCta[aria-disabled='true'],
 .textCta[aria-disabled='true'],
 .workflowRow > a[aria-disabled='true'],
 .securityCta[aria-disabled='true'],
@@ -253,7 +257,25 @@
   pointer-events: none;
 }
 
+.docsCta {
+  min-height: 48px;
+  padding-inline: var(--space-lg-token);
+  border: var(--rule-thin-token) solid var(--color-rule-strong);
+  border-radius: var(--radius-md-token);
+  background: var(--color-surface-wash);
+  color: var(--color-ink);
+  font-size: var(--text-sm-token);
+  font-weight: 650;
+  transition: border-color var(--dur-short-token) var(--ease-out-token);
+}
+
+.docsCta:hover {
+  border-color: var(--color-muted);
+}
+
 .textCta {
+  flex-basis: 100%;
+  justify-content: flex-start;
   min-height: 48px;
   color: var(--color-ink-2);
   font-size: var(--text-sm-token);
@@ -633,11 +655,11 @@
   }
 
   .intro {
-    padding-block: var(--space-3xl-token) calc(var(--space-3xl-token) + var(--space-xl-token));
+    padding-block: var(--space-2xl-token);
   }
 
   .intro h1 {
-    font-size: clamp(3rem, 14vw, 5.5rem);
+    font-size: clamp(2.85rem, 11vw, 5rem);
   }
 
   .screenFrame {
@@ -728,16 +750,21 @@
   }
 
   .intro h1 {
-    font-size: clamp(2.75rem, 14vw, 4rem);
+    font-size: clamp(2.65rem, 13vw, 3.65rem);
   }
 
   .introActions {
-    align-items: stretch;
-    flex-direction: column;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
   }
 
-  .primaryCta,
+  .primaryCta {
+    width: auto;
+  }
+
   .textCta {
+    grid-column: 1 / -1;
+    justify-self: start;
     width: 100%;
   }
 

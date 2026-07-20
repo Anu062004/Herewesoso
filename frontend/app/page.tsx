@@ -77,18 +77,27 @@ export default function HomePage() {
       <section className={`${styles.shell} ${styles.intro}`} id="workbench">
         <div className={styles.introHeading}>
           <p className={styles.kicker}>
-            <span aria-hidden="true" /> Operator intelligence for SoDEX
+            <span aria-hidden="true" /> SoDEX trading intelligence
           </p>
-          <h1>Market context in. Clear decisions out.</h1>
+          <h1>Trade with the whole market in view.</h1>
         </div>
 
         <div className={styles.introAside}>
           <p>
-            A focused operating layer for reading crypto markets, understanding portfolio risk, and approving action without losing the trading context.
+            Live price action, order-book liquidity, portfolio risk, and operator-approved execution—brought into one focused trading desk.
           </p>
           <div className={styles.introActions}>
             <Link className={styles.primaryCta} href="/dashboard">
               Launch terminal <ArrowIcon />
+            </Link>
+            <Link
+              className={styles.docsCta}
+              href="https://github.com/Anu062004/Herewesoso/tree/main/docs"
+              target="_blank"
+              rel="noreferrer"
+              aria-label="View project documentation (opens in a new tab)"
+            >
+              View docs <ArrowIcon />
             </Link>
             <Link className={styles.textCta} href="/dashboard/sodex/connect">
               Connect operator wallet <ArrowIcon />
@@ -110,7 +119,7 @@ export default function HomePage() {
             />
           </div>
           <figcaption className={styles.screenCaption} id="product-caption">
-            <span>Live market workspace</span>
+            <span>Trading workspace</span>
             <span>SoDEX · BTC/USDC spot</span>
           </figcaption>
         </figure>
